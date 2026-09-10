@@ -2,7 +2,7 @@
 
 ## Overview
 - [Documentation and notes](docs/)
-- [Sensor code](sensors/)
+- [MCU code](firmware/)
 
 ## TODO
 - [ ] Verify sensors work

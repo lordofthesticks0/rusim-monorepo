@@ -12,13 +12,36 @@ current issues: time constraint; monitoring takes 2 hours to do, calibration cha
 
 ## 3. Pressure sensor
 - [x] tested
-- [ ] calibrated
+- [x] calibrated
 
 Last test proved sensor to be responsive and accurate but needs further calibration to translate readings into actual kpa values between 918pa and 1836pa (10cm and 20cm stable).
 current issues: leakage in manometer makes it difficult for presusre to stay constant in the section where the pressure sensor is installed, tool to create pressure is a comedically useless baloon pump that doesn't hold air nor suck air upon retraction.
 
 ### UPDATE 09/09/2026
 All sensors checked. Uncalibrated, but verified that the code works.
+
+### UPDATE 10/09/2026
+Recalibration requires a recalculation of `CALIBRATION_FACTOR`. For example, if a sensor currently reports 50,000 Pa at a known 981 Pa reference:
+
+```
+newFactor = oldFactor × measuredPressure / targetPressure
+newFactor = 2280 × 50000 / 981
+newFactor ≈ 116208
+```
+
+All `CALIBRATION_FACTOR`s are stored in a hard-coded array.
+
+```cpp
+const int SENSORID = 3; // Select the sensor calibration: 0, 1, 2, or 3.
+const float CALIBRATION_FACTORS[4] = {
+  581040.0f, // Sensor 0
+  70802.7743f, // Sensor 1
+  82656.645503906f, // Sensor 2
+  60223.70030581f  // Sensor 3
+};
+```
+
+Something something frugal science. Did it by blowing the pipe directly. Used a manometer for calibration.
 
 ## 4. pH sensor
 - [x] tested
