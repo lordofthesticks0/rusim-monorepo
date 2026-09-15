@@ -1,5 +1,6 @@
 // TGS2611 4-Sensor Rumen Logger (ATmega2560)
 // Uses Two-Point Logarithmic Calibration per sensor
+#include <Arduino.h>
 
 const int NUM_SENSORS = 4;
 const int SENSOR_PINS[NUM_SENSORS] = {A0, A1, A2, A3};

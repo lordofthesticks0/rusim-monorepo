@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <HX711.h>
 
 const byte HX711_DOUT = 2;

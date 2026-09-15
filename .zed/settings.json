@@ -1,0 +1,12 @@
+{
+  "terminal": {
+    "working_directory": "current_file_directory"
+  },
+  "lsp": {
+    "arduino-language-server": {
+      "binary": {
+        "arguments": ["-fqbn", "arduino:avr:mega"]
+      }
+    }
+  }
+}

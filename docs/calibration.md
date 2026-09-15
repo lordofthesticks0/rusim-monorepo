@@ -3,12 +3,17 @@
 ## 1. Temperature sensor
 > no calibrations needed; uses a [library](https://github.com/adafruit/DHT-sensor-library) with consistent outputs
 
-## 2. CO2 sensor
+## 2. CO2 sensor - READ UPDATE
 - [ ] tested (1/4)
 - [ ] calibrated
 
 There's a noticable lag that needs adressing to based on the comparative reading session with a sndway single gas sensor alongside a limited maximum reading of 4647
 current issues: time constraint; monitoring takes 2 hours to do, calibration chamber lacks seal and stability; calibration requires a used wireless earphone box to hold up the sndway device.
+
+### UPDATE 14/09/2026
+Critical: Sensor is insufficient. Rumen CO2 concentrations scale upwards to 80% of the headroom gas, hence around 800,000 PPM. Sensor maxes out at 5000 PPM. Architecture reconsiderations required. Calibration is not required; sensor has a self-calibrating capability.
+
+Switching to UART is advised if continuing with the same sensor using with distillation.
 
 ## 3. Pressure sensor
 - [x] tested

@@ -1,0 +1,6 @@
+.pio/
+.pioenvs/
+.piolicdeps/
+.piolibdeps/
+.vscode/
+.env
