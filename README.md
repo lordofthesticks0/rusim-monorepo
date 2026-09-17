@@ -7,7 +7,7 @@
 ## TODO
 - [x] Verify sensors work -- See [calibration documentation](docs/calibration.md)
 - [ ] Calibrate sensors -- See [calibration documentation](docs/calibration.md)
-- [ ] PCB redesign -- See [PCB documentation](docs/PCB.md)
+- [ ] PCB redesign -- See [PCB documentation](docs/hardware.md)
 - [ ] Integrate to data collection system
 
 ## Stack
