@@ -24,6 +24,7 @@ pio pkg install
 ```
 
 ### 4. Hardware
+
 Hardware (PCB) development uses EasyEDA. Documentation is available [here](docs/hardware.md).
 ---
 

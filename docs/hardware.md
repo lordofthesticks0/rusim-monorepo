@@ -37,10 +37,10 @@ This module is used for the main interface to upload to the network. Wi-Fi does 
 | Datasheet V1.4 (EN) | [WT32‑ETH01_datasheet_V1.4-en.pdf](https://en.wireless-tag.com/product-item-2.html) |
 | Getting Started Guide | [Getting+Started+Guide+for+WT32‑ETH01.pdf](https://en.wireless-tag.com/product-item-2.html) |
 | Unofficial Community Guide | [github.com/egnor/wt32-eth01](https://github.com/egnor/wt32-eth01) |
-| LLM Generated Summary | [wt32-eth01-LLM.md](docs/llm-summary/wt32-eth01-LLM.md) |
+| LLM Generated Summary | [wt32-eth01-LLM.md](llm-summary/wt32-eth01-LLM.md) |
 
 ## 3. ESP32-8048S050
-This module is a ESP32 display module made by Sunton. Documentation is scarce and difficult to find. See the LLM generated summary [here](docs/llm-summary/sunton-LLM.md).
+This module is a ESP32 display module made by Sunton. Documentation is scarce and difficult to find. See the LLM generated summary [here](llm-summary/sunton-LLM.md).
 
 ## 4. Sensors
 At this moment, 4 sensors are used:
