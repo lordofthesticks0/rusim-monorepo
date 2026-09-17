@@ -7,7 +7,7 @@
 ## TODO
 - [x] Verify sensors work -- See [calibration documentation](docs/calibration.md)
 - [ ] Calibrate sensors -- See [calibration documentation](docs/calibration.md)
-- [ ] PCB redesign
+- [ ] PCB redesign -- See [PCB documentation](docs/PCB.md)
 - [ ] Integrate to data collection system
 
 ## Stack
@@ -23,7 +23,8 @@ Install dependencies with:
 pio pkg install
 ```
 
-
+### 4. Hardware
+Hardware (PCB) development uses EasyEDA. Documentation is available [here](docs/hardware.md).
 ---
 
-**Last Updated: 09/09/2025**
+**Last Updated: 17/09/2025**
