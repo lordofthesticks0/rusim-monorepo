@@ -55,8 +55,8 @@ This is a piezoelectric differential sensor. Uses a similar protocol to I2C for 
 
 #### Pinout
 
-| Module | Pin | Typical Label | Description |
-| --- | --- | --- | --- |
+| Module | Pin | Description |
+| --- | --- | --- | 
 | 1 | VCC / VIN | Power supply input. Accepts 3.3V to 5V DC. |
 | 2 | GND | Ground connection. |
 | 3 | OUT / DOUT / DATA | Digital data output from the HX710B ADC. Connect this to a digital input on your microcontroller. |
@@ -126,7 +126,7 @@ Sensor is a one-wire digital temperature sensor. Uses its own [library](https://
 
 
 #### Pinout
-| Pin (TO-92) | Symbol | Description |
+| Pin | Symbol | Description |
 | --- | --- | --- |
 | 1 | GND | Ground |
 | 2 | DQ | Data Input/Output. Open-drain 1-Wire interface pin. |
@@ -149,7 +149,7 @@ Sensor is a one-wire digital temperature sensor. Uses its own [library](https://
 The sensor is a pH probe that allows you to connect a BNC glass electrode to something accurately measured. Calibration is a pain. If issues were to be encountered in the future, try replacing this with something.
 
 #### Pinout
-| Pin | Name | Function | Description |
+| Pin | Name | Description |
 | --- | --- | --- | --- |
 | VCC | Power Supply | Connect to a 5V DC power source. |
 | GND | Board Ground | Ground connection for the module's power supply. |
