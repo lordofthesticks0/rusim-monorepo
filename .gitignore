@@ -1,7 +1,9 @@
 .pio/
+compile_commands.json
 .pioenvs/
 .piolicdeps/
 .piolibdeps/
 .vscode/
 .env
 .zed/
+.backup/

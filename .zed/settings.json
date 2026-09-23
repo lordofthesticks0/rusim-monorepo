@@ -3,9 +3,11 @@
     "working_directory": "current_file_directory"
   },
   "lsp": {
-    "arduino-language-server": {
+    "clangd": {
       "binary": {
-        "arguments": ["-fqbn", "arduino:avr:mega"]
+        "arguments": [
+          "--query-driver=/home/lordofthesticks/.platformio/packages/toolchain-atmelavr/bin/avr-*"
+        ]
       }
     }
   }

@@ -1,5 +1,5 @@
 # PCB Documentation
-The PCB uses a couple modules. The documentation are available below. Access the gerber files [here](https://example.com) (link not ready yet)
+The PCB uses a couple modules. The documentation are available below. Access the gerber files [here](https://drive.google.com/drive/folders/1VZM8af3p2Q1-N58rCPVywv5uHUcG0zeH?usp=drive_link).
 
 ## 1. Motor Driver Module
 
@@ -144,7 +144,7 @@ Sensor is a one-wire digital temperature sensor. Uses its own [library](https://
 - Alarm Function: User-definable nonvolatile upper and lower temperature trigger points with alarm search command.
 
 
-### 5. PH-402C (pH)
+### 4.5. PH-402C (pH)
 
 The sensor is a pH probe that allows you to connect a BNC glass electrode to something accurately measured. Calibration is a pain. If issues were to be encountered in the future, try replacing this with something.
 
@@ -171,6 +171,32 @@ The sensor is a pH probe that allows you to connect a BNC glass electrode to som
 - Probe Connector: BNC
 - Board Dimensions: Approximately 43mm × 32mm
 
----
+## 5. MAX485
+A serial-to-parallel converter that allows you to use RS-485 communication with your microcontroller. Used for Modbus RTU communication. The one we're using is NOT bi-directional. Manual direction control is strictly required. Library can be found [here](https://github.com/CIRCUITSTATE/CSE_ArduinoRS485)
 
-Last updated: 17/09/2026
+#### Pinout
+
+| Pin | Name | Description
+|--- | --- | ---
+| 1 | RO | Receiver Output – TTL/CMOS level data received from the RS‑485 bus. Connect to the RX pin of your microcontroller.
+| 2 | RE | Receiver Enable – Active LOW. When pulled LOW, the receiver is enabled and the RO pin outputs data. When HIGH, RO is in a high‑impedance state.
+| 3 | DE | Driver Enable – Active HIGH. When pulled HIGH, the driver is enabled, and data on the DI pin is transmitted onto the RS‑485 bus. When LOW, the driver outputs are disabled.
+| 4 | DI | Driver Input – TTL/CMOS level data to be transmitted. Connect to the TX pin of your microcontroller.
+| 5 | GND | Ground – Common ground for the module and the logic supply.
+| 6 | A | Non‑inverting RS‑485 bus line – Connect to the A line of the RS‑485 network.
+| 7 | B | Inverting RS‑485 bus line – Connect to the B line of the RS‑485 network.
+| 8 | VCC | Power Supply – Typically +5V (see specs below).
+
+#### Specifications
+
+- Main chip: MAX485 (low‑power, slew‑rate‑limited RS‑485/RS‑422 transceiver).
+- Supply voltage: +5V nominal (operating range typically 4.75V – 5.25V).
+- Quiescent current: ~300µA (typical static current).
+- Communication mode: Half‑duplex (cannot transmit and receive simultaneously).
+- Data rate: Up to 2.5Mbps (with the standard MAX485).
+- Bus loading: Supports up to 32 transceivers on the same bus.
+- Logic levels: TTL/CMOS compatible on RO, DI, RE, and DE pins.
+- RS‑485 bus interface: Differential pair A (non‑inverting) and B (inverting). A 120Ω termination resistor is often recommended across A and B at the ends of the bus.
+- Protection: Driver outputs include current limiting and thermal shutdown for overload protection.
+- Form factor: Breadboard‑friendly 0.1 inch (2.54mm) pin spacing. Many boards also include an on‑board 2‑pin screw terminal for the A/B bus lines.
+- Typical dimensions: ~45mm × 15mm (varies by manufacturer).
