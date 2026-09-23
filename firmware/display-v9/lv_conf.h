@@ -585,15 +585,15 @@
  * https://fonts.google.com/specimen/Montserrat */
 #define LV_FONT_MONTSERRAT_8  0
 #define LV_FONT_MONTSERRAT_10 0
-#define LV_FONT_MONTSERRAT_12 0
+#define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_16 0
 #define LV_FONT_MONTSERRAT_18 0
-#define LV_FONT_MONTSERRAT_20 0
+#define LV_FONT_MONTSERRAT_20 1
 #define LV_FONT_MONTSERRAT_22 0
 #define LV_FONT_MONTSERRAT_24 0
 #define LV_FONT_MONTSERRAT_26 0
-#define LV_FONT_MONTSERRAT_28 0
+#define LV_FONT_MONTSERRAT_28 1
 #define LV_FONT_MONTSERRAT_30 0
 #define LV_FONT_MONTSERRAT_32 0
 #define LV_FONT_MONTSERRAT_34 0
@@ -708,7 +708,7 @@
 
 #define LV_USE_BAR        1
 
-#define LV_USE_BUTTON        0
+#define LV_USE_BUTTON        1
 
 #define LV_USE_BUTTONMATRIX  0
 
@@ -729,7 +729,7 @@
 
 #define LV_USE_CANVAS     0
 
-#define LV_USE_CHART      0
+#define LV_USE_CHART      1
 
 #define LV_USE_CHECKBOX   0
 
@@ -772,17 +772,17 @@
     #define LV_SPAN_SNIPPET_STACK_SIZE 64
 #endif
 
-#define LV_USE_SPINBOX    0
+#define LV_USE_SPINBOX    1
 
 #define LV_USE_SPINNER    0
 
-#define LV_USE_SWITCH     0
+#define LV_USE_SWITCH     1
 
 #define LV_USE_TABLE      0
 
 #define LV_USE_TABVIEW    0
 
-#define LV_USE_TEXTAREA   0   /**< Requires: lv_label */
+#define LV_USE_TEXTAREA   1   /**< Requires: lv_label */
 #if LV_USE_TEXTAREA != 0
     #define LV_TEXTAREA_DEF_PWD_SHOW_TIME 1500    /**< [ms] */
 #endif
