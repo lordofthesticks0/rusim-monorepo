@@ -1,15 +1,19 @@
-# dashboard
+# RuSim dashboard
 
-To install dependencies:
+Install dependencies with Bun:
 
 ```bash
 bun install
 ```
 
-To run:
+Start the development server:
 
 ```bash
-bun run index.ts
+bun run dev
 ```
 
-This project was created using `bun init` in bun v1.4.2. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+Create `.env.local` from `.env.example` and add your Supabase project URL and anon key. The temporary data preview remains visible until the `time_series_readings` table returns rows.
+
+Expected table columns: `device_id`, `recorded_at`, and `parameter_1` through `parameter_5`.
+
+Netlify is configured in `netlify.toml`; use `bun run build` for a production build or `bunx netlify deploy` to deploy.
