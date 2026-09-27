@@ -8,6 +8,7 @@
 .experiment-status-card .experiment-code { display: block; font-size: 18px; letter-spacing: -.04em; line-height: 1.15; white-space: nowrap; }
 .experiment-status-card .experiment-name { display: block; margin-top: 7px; color: #87919e; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .metrics .experiment-status-card:last-child { grid-column: auto; } }
+@media (max-width: 760px) { .result-metrics { grid-template-columns: repeat(2, 1fr); }.result-heading, .result-dates { flex-wrap: wrap; }.history-navigation { align-items: flex-start; gap: 12px; flex-direction: column; } }
 .history-list { display: grid; gap: 10px; margin-top: 18px; }
 .history-item { width: 100%; display: grid; gap: 5px; text-align: left; border: 1px solid #e2e6eb; border-radius: 8px; padding: 14px 16px; background: #fff; color: #202936; cursor: pointer; }
 .history-item:hover, .history-item.selected { border-color: #2462ee; }
@@ -15,3 +16,20 @@
 .history-item span { font-size: 13px; }
 .history-item small, .history-dates { color: #87919e; font-size: 11px; }
 .history-summary p:not(.eyebrow) { color: #87919e; font-size: 13px; margin: 10px 0 7px; }
+.history-navigation { align-items: center; }
+.history-tab { border: 1px solid #dce2e8; border-radius: 5px; padding: 7px 10px; color: #5f6c7a; background: white; cursor: pointer; font-size: 12px; margin-left: 7px; }
+.history-tab[aria-pressed="true"] { color: white; background: #202936; border-color: #202936; }
+.session-list, .result-list { display: grid; gap: 10px; margin-top: 18px; }
+.session-item { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; border-top: 1px solid #e2e6eb; padding: 12px 0; }
+.session-item:first-child { border-top: 0; padding-top: 0; }
+.session-item span, .session-item small { color: #87919e; font-size: 11px; }
+.session-item small { grid-column: 1 / -1; }
+.result-card { border: 1px solid #e2e6eb; border-radius: 8px; padding: 16px; }
+.result-heading, .result-dates { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.result-heading strong { display: block; font-size: 15px; }
+.result-heading span:not(.tag), .result-dates { color: #87919e; font-size: 11px; }
+.result-dates { justify-content: flex-start; margin-top: 8px; }
+.result-metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 14px; }
+.result-metric { background: #f4f6f8; border-radius: 6px; padding: 9px; display: grid; gap: 5px; }
+.result-metric strong { font: 500 11px 'DM Mono', monospace; }
+.result-metric span { color: #87919e; font: 10px 'DM Mono', monospace; line-height: 1.4; }

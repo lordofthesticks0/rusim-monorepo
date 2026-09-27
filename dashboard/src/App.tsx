@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import {
   fetchChambers,
   fetchExperimentChambers,
+  fetchExperimentResults,
   fetchExperimentTelemetry,
   fetchExperiments,
   fetchMonitoringStatus,
@@ -20,13 +21,16 @@ import {
   type NodeDatabaseRow,
   type DashboardTelemetryRow,
   type ExperimentChamberSummary,
+  type ExperimentChamberResult,
   type ExperimentHistoryItem,
+  type ExperimentResults,
   type TelemetryDatabaseRow,
 } from "./data";
 
 type ChartParameter = (typeof PARAMETER_NAMES)[number];
 type RealtimeStatus = "connecting" | "connected" | "disconnected" | "error";
 type DashboardView = "monitoring" | "history";
+type HistoryPanel = "data" | "results";
 
 function App() {
   const [view, setView] = useState<DashboardView>("monitoring");
@@ -44,6 +48,7 @@ function App() {
   const [error, setError] = useState("");
   const [experiments, setExperiments] = useState<ExperimentHistoryItem[]>([]);
   const [historyExperimentId, setHistoryExperimentId] = useState("");
+  const [historyPanel, setHistoryPanel] = useState<HistoryPanel>("data");
   const [historyChambers, setHistoryChambers] = useState<ExperimentChamberSummary[]>([]);
   const [historyChamberId, setHistoryChamberId] = useState("");
   const [historyRows, setHistoryRows] = useState<DashboardTelemetryRow[]>([]);
@@ -51,6 +56,9 @@ function App() {
   const [historyTelemetryLoading, setHistoryTelemetryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
+  const [experimentResults, setExperimentResults] = useState<ExperimentResults | null>(null);
+  const [resultsLoading, setResultsLoading] = useState(false);
+  const [resultsError, setResultsError] = useState("");
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
 
@@ -112,7 +120,7 @@ function App() {
   }, [view, historyExperimentId]);
 
   useEffect(() => {
-    if (view !== "history" || !historyExperimentId || !historyChamberId) {
+    if (view !== "history" || historyPanel !== "data" || !historyExperimentId || !historyChamberId) {
       setHistoryTelemetryLoading(false);
       return;
     }
@@ -126,7 +134,24 @@ function App() {
         setHistoryError(err instanceof Error ? err.message : "Unable to load historical telemetry");
       })
       .finally(() => setHistoryTelemetryLoading(false));
-  }, [view, historyExperimentId, historyChamberId]);
+  }, [view, historyPanel, historyExperimentId, historyChamberId]);
+
+  useEffect(() => {
+    if (view !== "history" || historyPanel !== "results" || !historyExperimentId) {
+      setResultsLoading(false);
+      return;
+    }
+
+    setResultsLoading(true);
+    setResultsError("");
+    void fetchExperimentResults(historyExperimentId)
+      .then(setExperimentResults)
+      .catch((err: unknown) => {
+        setExperimentResults(null);
+        setResultsError(err instanceof Error ? err.message : "Unable to load experiment results");
+      })
+      .finally(() => setResultsLoading(false));
+  }, [view, historyPanel, historyExperimentId]);
 
   const devices = useMemo(
     () => uniqueBy(chambers, (chamber) => chamber.device_code),
@@ -279,6 +304,13 @@ function App() {
     setSelectedChamber("");
   }
 
+  function handleHistoryExperimentSelect(experimentId: string) {
+    setHistoryExperimentId(experimentId);
+    setHistoryPanel("data");
+    setExperimentResults(null);
+    setResultsError("");
+  }
+
   return <main className="shell">
     <header className="topbar"><div className="brand"><span className="brand-mark">R</span><span>RuSim <small>/ telemetry</small></span></div><div className="status"><span className="pulse" /> {view === "monitoring" ? connectionStatus : "Experiment history"}<span className="divider" /> {view === "monitoring" ? <>Updated {lastUpdated}<span className="divider" /> Realtime {humanizeRealtimeStatus(realtimeStatus)}</> : "Historical data"}</div></header>
     <section className="intro"><div><p className="eyebrow">{view === "monitoring" ? "Operations overview" : "Experiment history"}</p><h1>{view === "monitoring" ? "Device telemetry" : "Experiment history"}</h1><p className="subtitle">{view === "monitoring" ? "A clear view of your connected environment." : "Review telemetry from completed and active experiments."}</p></div><button className="refresh" onClick={() => view === "monitoring" ? void loadData() : setHistoryRefreshToken((value) => value + 1)}>Refresh data</button></section>
@@ -308,7 +340,9 @@ function App() {
       experimentsLoading={historyLoading}
       selectedExperiment={selectedHistoryExperiment}
       selectedExperimentId={historyExperimentId}
-      onSelectExperiment={setHistoryExperimentId}
+      onSelectExperiment={handleHistoryExperimentSelect}
+      historyPanel={historyPanel}
+      onHistoryPanelChange={setHistoryPanel}
       chambers={historyChambers}
       chambersLoading={historyLoading && Boolean(historyExperimentId)}
       selectedChamberId={historyChamberId}
@@ -316,6 +350,9 @@ function App() {
       telemetryRows={historyRows}
       telemetryLoading={historyTelemetryLoading}
       error={historyError}
+      results={experimentResults}
+      resultsLoading={resultsLoading}
+      resultsError={resultsError}
       chartParameter={chartParameter}
       onChartParameterChange={setChartParameter}
     />}
@@ -328,6 +365,8 @@ type ExperimentHistoryViewProps = {
   selectedExperiment: ExperimentHistoryItem | undefined;
   selectedExperimentId: string;
   onSelectExperiment: (id: string) => void;
+  historyPanel: HistoryPanel;
+  onHistoryPanelChange: (panel: HistoryPanel) => void;
   chambers: ExperimentChamberSummary[];
   chambersLoading: boolean;
   selectedChamberId: string;
@@ -335,6 +374,9 @@ type ExperimentHistoryViewProps = {
   telemetryRows: DashboardTelemetryRow[];
   telemetryLoading: boolean;
   error: string;
+  results: ExperimentResults | null;
+  resultsLoading: boolean;
+  resultsError: string;
   chartParameter: ChartParameter;
   onChartParameterChange: (parameter: ChartParameter) => void;
 };
@@ -345,6 +387,8 @@ function ExperimentHistoryView({
   selectedExperiment,
   selectedExperimentId,
   onSelectExperiment,
+  historyPanel,
+  onHistoryPanelChange,
   chambers,
   chambersLoading,
   selectedChamberId,
@@ -352,6 +396,9 @@ function ExperimentHistoryView({
   telemetryRows,
   telemetryLoading,
   error,
+  results,
+  resultsLoading,
+  resultsError,
   chartParameter,
   onChartParameterChange,
 }: ExperimentHistoryViewProps) {
@@ -376,18 +423,61 @@ function ExperimentHistoryView({
     </section>
     {selectedExperimentId && !selectedExperiment && !experimentsLoading && <div className="notice">The selected experiment is unavailable.</div>}
     {selectedExperiment && <>
-      <section className="controls"><div className="control-copy"><span className="label">Selected experiment</span><strong>{selectedExperiment.experiment_code}</strong><span className="count">{humanizeStatus(selectedExperiment.status)}</span></div><label>Chamber <select value={selectedChamberId} onChange={(event) => onSelectChamber(event.target.value)} disabled={chambers.length === 0}><option value="" disabled>Select chamber</option>{chambers.map((chamber) => <option key={chamber.id} value={chamber.id}>{chamber.chamber_name ?? chamber.chamber_code} ({chamber.node_code})</option>)}</select></label></section>
-      <section className="panel history-summary"><p className="eyebrow">Historical data</p><h2>{selectedExperiment.name}</h2><p>{selectedExperiment.description ?? "No description available."}</p><span className="history-dates">Started {formatDate(selectedExperiment.started_at)}{selectedExperiment.ended_at ? ` | Ended ${formatDate(selectedExperiment.ended_at)}` : ""}</span></section>
-      {chambersLoading && <div className="notice">Loading experiment chambers...</div>}
-      {!chambersLoading && chambers.length === 0 && <div className="notice">This experiment has no assigned chambers.</div>}
-      {chambers.length > 0 && <>
-        <section className="metrics">{PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={latest ? getMetricValue(latest, name) : null} index={index} />)}</section>
-        {telemetryLoading && <div className="notice">Loading historical telemetry...</div>}
-        {!telemetryLoading && telemetryRows.length === 0 && <div className="notice">No telemetry data is available for this experiment chamber.</div>}
-        <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Historical telemetry</p><h2>{chartParameter} readings</h2></div><div><select aria-label="Historical chart parameter" value={chartParameter} onChange={(event) => { if (isChartParameter(event.target.value)) onChartParameterChange(event.target.value); }}>{PARAMETER_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}</select><span className="tag">{telemetryRows.length} records</span></div></div><div className="chart">{points.length < 2 ? <div className="notice">Not enough data for chart.</div> : <><div className="gridlines"><i /><i /><i /><i /></div><svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label={`${chartParameter} historical telemetry chart`}><path d={chartPath(points)} /></svg><div className="axis">{labels.map((label) => <span key={label}>{label}</span>)}</div></>}</div></section>
-      </>}
+      <section className="controls history-navigation"><div className="control-copy"><span className="label">Selected experiment</span><strong>{selectedExperiment.experiment_code}</strong><span className="count">{humanizeStatus(selectedExperiment.status)}</span></div><div><button className="history-tab" onClick={() => onHistoryPanelChange("data")} aria-pressed={historyPanel === "data"}>Historical Data</button><button className="history-tab" onClick={() => onHistoryPanelChange("results")} aria-pressed={historyPanel === "results"}>Results</button></div></section>
+      <section className="panel history-summary"><p className="eyebrow">{historyPanel === "data" ? "Historical data" : "Experiment results"}</p><h2>{selectedExperiment.name}</h2><p>{selectedExperiment.description ?? "No description available."}</p><span className="history-dates">Started {formatDate(selectedExperiment.started_at)}{selectedExperiment.ended_at ? ` | Ended ${formatDate(selectedExperiment.ended_at)}` : ""}</span></section>
+      {historyPanel === "data" ? <>
+        <section className="controls"><div className="control-copy"><span className="label">Chambers</span><strong>{chambers.length} assigned</strong></div><label>Chamber <select value={selectedChamberId} onChange={(event) => onSelectChamber(event.target.value)} disabled={chambers.length === 0}><option value="" disabled>Select chamber</option>{chambers.map((chamber) => <option key={chamber.id} value={chamber.id}>{chamber.chamber_name ?? chamber.chamber_code} ({chamber.node_code})</option>)}</select></label></section>
+        {chambersLoading && <div className="notice">Loading experiment chambers...</div>}
+        {!chambersLoading && chambers.length === 0 && <div className="notice">This experiment has no assigned chambers.</div>}
+        {chambers.length > 0 && <>
+          <section className="metrics">{PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={latest ? getMetricValue(latest, name) : null} index={index} />)}</section>
+          {telemetryLoading && <div className="notice">Loading historical telemetry...</div>}
+          {!telemetryLoading && telemetryRows.length === 0 && <div className="notice">No telemetry data is available for this experiment chamber.</div>}
+          <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Historical telemetry</p><h2>{chartParameter} readings</h2></div><div><select aria-label="Historical chart parameter" value={chartParameter} onChange={(event) => { if (isChartParameter(event.target.value)) onChartParameterChange(event.target.value); }}>{PARAMETER_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}</select><span className="tag">{telemetryRows.length} records</span></div></div><div className="chart">{points.length < 2 ? <div className="notice">Not enough data for chart.</div> : <><div className="gridlines"><i /><i /><i /><i /></div><svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label={`${chartParameter} historical telemetry chart`}><path d={chartPath(points)} /></svg><div className="axis">{labels.map((label) => <span key={label}>{label}</span>)}</div></>}</div></section>
+        </>}
+      </> : <ExperimentResultsView experiment={selectedExperiment} results={results} loading={resultsLoading} error={resultsError} />}
     </>}
   </>;
+}
+
+function ExperimentResultsView({
+  experiment,
+  results,
+  loading,
+  error,
+}: {
+  experiment: ExperimentHistoryItem;
+  results: ExperimentResults | null;
+  loading: boolean;
+  error: string;
+}) {
+  if (loading) return <div className="notice">Loading experiment results...</div>;
+  if (error) return <div className="notice">Unable to load experiment results. <span>{error}</span></div>;
+  if (!results) return <div className="notice">Experiment results are unavailable.</div>;
+
+  return <>
+    <section className="metrics results-overview">
+      <article className="metric"><p>Experiment</p><strong>{experiment.experiment_code}</strong><span className="unit">{experiment.name}</span></article>
+      <article className="metric"><p>Status</p><strong>{humanizeStatus(experiment.status)}</strong></article>
+      <article className="metric"><p>Chambers</p><strong>{results.chambers.length}</strong></article>
+      <article className="metric"><p>Telemetry records</p><strong>{results.total_telemetry_count}</strong></article>
+      <article className="metric"><p>Sessions</p><strong>{results.sessions.length}</strong></article>
+    </section>
+    <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Session summary</p><h2>Experiment sessions</h2></div><span className="tag">{results.sessions.length} sessions</span></div>{results.sessions.length === 0 ? <div className="notice">No sessions are recorded for this experiment.</div> : <div className="session-list">{results.sessions.map((session) => <div className="session-item" key={session.id}><strong>Session {session.session_number}</strong><span>{humanizeStatus(session.status)}</span><small>Started {formatDate(session.started_at)}{session.ended_at ? ` | Ended ${formatDate(session.ended_at)}` : ""}</small></div>)}</div>}</section>
+    <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Per-chamber results</p><h2>Telemetry summary</h2></div><span className="tag">{results.total_telemetry_count} total records</span></div>{results.chambers.length === 0 ? <div className="notice">No experiment chambers are assigned.</div> : <div className="result-list">{results.chambers.map((chamber) => <ChamberResultCard key={chamber.id} chamber={chamber} />)}</div>}</section>
+  </>;
+}
+
+function ChamberResultCard({ chamber }: { chamber: ExperimentChamberResult }) {
+  const metrics = [
+    ["CH4", chamber.ch4],
+    ["CO2", chamber.co2],
+    ["pH", chamber.ph],
+    ["Temperature", chamber.temperature],
+    ["Pressure", chamber.pressure],
+  ] as const;
+
+  return <article className="result-card"><div className="result-heading"><div><strong>{chamber.chamber_name ?? chamber.chamber_code}</strong><span>{chamber.chamber_code} | {chamber.node_name} ({chamber.node_code})</span></div><span className="tag">{chamber.record_count} records</span></div><div className="result-dates"><span>First: {formatDate(chamber.first_recorded_at)}</span><span>Last: {formatDate(chamber.last_recorded_at)}</span></div><div className="result-metrics">{metrics.map(([name, summary]) => <div className="result-metric" key={name}><strong>{name}</strong>{summary ? <span>Min {summary.min.toFixed(2)} | Avg {summary.average.toFixed(2)} | Max {summary.max.toFixed(2)}</span> : <span>No telemetry</span>}</div>)}</div></article>;
 }
 
 function formatDate(value: string | null): string {
