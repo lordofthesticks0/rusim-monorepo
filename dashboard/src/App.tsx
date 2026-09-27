@@ -211,6 +211,9 @@ function MetricCard({ name, value, index }: { name: string; value: number | null
 }
 
 function StatusCard({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  if (label === "Experiment") {
+    return <article className="metric status-card experiment-status-card"><p className="status-label">{label}</p><strong className="experiment-code">{value}</strong>{detail && <span className="experiment-name">{detail}</span>}</article>;
+  }
   return <article className="metric"><p>{label}</p><strong>{value}</strong>{detail && <span className="unit">{detail}</span>}</article>;
 }
 
