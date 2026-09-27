@@ -1,6 +1,12 @@
 import { supabase } from "./supabase";
 import type { Json } from "./types/database";
-import type { Metadata, TelemetryReading } from "./types/domain";
+import type {
+  ChamberStatus,
+  DeviceStatus,
+  Metadata,
+  NodeStatus,
+  TelemetryReading,
+} from "./types/domain";
 
 export const PARAMETER_NAMES = ["CH4", "CO2", "pH", "Temperature", "Pressure"] as const;
 
@@ -21,9 +27,42 @@ export type DashboardChamber = {
   chamber_name: string | null;
   node_id: string;
   node_code: string;
+  node_name: string;
   device_id: string;
   device_code: string;
   device_name: string | null;
+  device_status: DeviceStatus;
+  node_status: NodeStatus;
+  chamber_status: ChamberStatus;
+};
+
+export type MonitoringStatus = {
+  system_active: boolean;
+  experiment: {
+    id: string;
+    experiment_code: string;
+    name: string;
+    status: string;
+    started_at: string | null;
+  } | null;
+  device: {
+    id: string;
+    device_code: string;
+    name: string;
+    status: DeviceStatus;
+  } | null;
+  node: {
+    id: string;
+    node_code: string;
+    name: string;
+    status: NodeStatus;
+  } | null;
+  chamber: {
+    id: string;
+    chamber_code: string;
+    name: string | null;
+    status: ChamberStatus;
+  } | null;
 };
 
 function normalizeMetadata(value: Json): Metadata {
@@ -37,6 +76,48 @@ function normalizeMetadata(value: Json): Metadata {
 function normalizeQuality(value: string): TelemetryReading["quality"] {
   if (value === "valid" || value === "suspect" || value === "invalid") return value;
   throw new Error(`Unsupported telemetry quality: ${value}`);
+}
+
+function normalizeDeviceStatus(value: string): DeviceStatus {
+  switch (value) {
+    case "provisioning":
+    case "online":
+    case "offline":
+    case "degraded":
+    case "maintenance":
+    case "retired":
+      return value;
+  }
+  throw new Error(`Unsupported device status: ${value}`);
+}
+
+function normalizeNodeStatus(value: string): NodeStatus {
+  switch (value) {
+    case "provisioning":
+    case "online":
+    case "offline":
+    case "degraded":
+    case "fault":
+    case "maintenance":
+    case "retired":
+      return value;
+  }
+  throw new Error(`Unsupported node status: ${value}`);
+}
+
+function normalizeChamberStatus(value: string): ChamberStatus {
+  switch (value) {
+    case "configured":
+    case "ready":
+    case "running":
+    case "complete":
+    case "empty":
+    case "missing":
+    case "fault":
+    case "disabled":
+      return value;
+  }
+  throw new Error(`Unsupported chamber status: ${value}`);
 }
 
 export async function fetchTelemetry(): Promise<DashboardTelemetryRow[]> {
@@ -114,13 +195,17 @@ export async function fetchChambers(): Promise<DashboardChamber[]> {
         id,
         chamber_code,
         name,
+        status,
         node:nodes!bottles_node_id_fkey(
           id,
           node_code,
+          name,
+          status,
           device:devices!nodes_device_id_fkey(
             id,
             device_code,
-            name
+            name,
+            status
           )
         )
       `,
@@ -134,8 +219,70 @@ export async function fetchChambers(): Promise<DashboardChamber[]> {
     chamber_name: row.name,
     node_id: row.node.id,
     node_code: row.node.node_code,
+    node_name: row.node.name,
     device_id: row.node.device.id,
     device_code: row.node.device.device_code,
     device_name: row.node.device.name,
+    device_status: normalizeDeviceStatus(row.node.device.status),
+    node_status: normalizeNodeStatus(row.node.status),
+    chamber_status: normalizeChamberStatus(row.status),
   }));
+}
+
+export async function fetchMonitoringStatus(
+  selectedChamber: DashboardChamber | undefined,
+): Promise<MonitoringStatus> {
+  const { data, error } = await supabase
+    .from("experiments")
+    .select("id, experiment_code, name, status, started_at")
+    .eq("status", "active")
+    .order("started_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+
+  const experiment = data
+    ? {
+      id: data.id,
+      experiment_code: data.experiment_code,
+      name: data.name,
+      status: data.status,
+      started_at: data.started_at,
+    }
+    : null;
+  const device = selectedChamber
+    ? {
+      id: selectedChamber.device_id,
+      device_code: selectedChamber.device_code,
+      name: selectedChamber.device_name ?? selectedChamber.device_code,
+      status: selectedChamber.device_status,
+    }
+    : null;
+  const node = selectedChamber
+    ? {
+      id: selectedChamber.node_id,
+      node_code: selectedChamber.node_code,
+      name: selectedChamber.node_name,
+      status: selectedChamber.node_status,
+    }
+    : null;
+  const chamber = selectedChamber
+    ? {
+      id: selectedChamber.id,
+      chamber_code: selectedChamber.chamber_code,
+      name: selectedChamber.chamber_name,
+      status: selectedChamber.chamber_status,
+    }
+    : null;
+
+  return {
+    system_active: experiment !== null
+      && device?.status === "online"
+      && node?.status === "online"
+      && chamber?.status === "running",
+    experiment,
+    device,
+    node,
+    chamber,
+  };
 }

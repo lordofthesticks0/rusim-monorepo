@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchChambers,
+  fetchMonitoringStatus,
   fetchTelemetry,
   PARAMETER_NAMES,
   type DashboardChamber,
+  type MonitoringStatus,
   type DashboardTelemetryRow,
 } from "./data";
 
@@ -15,6 +17,9 @@ function App() {
   const [selectedDevice, setSelectedDevice] = useState("all");
   const [selectedChamber, setSelectedChamber] = useState("");
   const [chartParameter, setChartParameter] = useState<ChartParameter>("CH4");
+  const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [statusError, setStatusError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -82,6 +87,38 @@ function App() {
         ? "Data loaded"
         : "No telemetry data";
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeChamber) {
+      setMonitoringStatus(null);
+      setStatusError("");
+      setStatusLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setStatusLoading(true);
+    setStatusError("");
+    void fetchMonitoringStatus(activeChamber)
+      .then((status) => {
+        if (!cancelled) setMonitoringStatus(status);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setMonitoringStatus(null);
+          setStatusError(err instanceof Error ? err.message : "Unable to load monitoring status");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setStatusLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChamber]);
+
   function handleDeviceChange(deviceCode: string) {
     setSelectedDevice(deviceCode);
     setSelectedChamber("");
@@ -98,6 +135,13 @@ function App() {
       <label>Chamber <select value={activeChamber?.chamber_code ?? ""} onChange={(event) => setSelectedChamber(event.target.value)} disabled={deviceChambers.length === 0}><option value="" disabled>Select chamber</option>{deviceChambers.map((chamber) => <option key={chamber.chamber_code} value={chamber.chamber_code}>{chamber.chamber_name ?? chamber.chamber_code}</option>)}</select></label>
     </section>
     {activeChamber && <div className="notice">Device: {activeChamber.device_name ?? activeChamber.device_code} <span>Node: {activeChamber.node_code} | Chamber: {activeChamber.chamber_code}</span></div>}
+    <section className="metrics">
+      <StatusCard label="System" value={statusLoading ? "Loading" : !activeChamber || statusError ? "Unavailable" : monitoringStatus?.system_active ? "Active" : "Inactive"} />
+      <StatusCard label="Device" value={statusLoading ? "Loading" : humanizeStatus(monitoringStatus?.device?.status)} />
+      <StatusCard label="Node" value={statusLoading ? "Loading" : humanizeStatus(monitoringStatus?.node?.status)} />
+      <StatusCard label="Chamber" value={statusLoading ? "Loading" : humanizeStatus(monitoringStatus?.chamber?.status)} />
+      <StatusCard label="Experiment" value={statusLoading ? "Loading" : monitoringStatus?.experiment?.experiment_code ?? "No active experiment"} detail={monitoringStatus?.experiment?.name} />
+    </section>
     <section className="metrics">{PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={latest ? getMetricValue(latest, name) : null} index={index} />)}</section>
     {!loading && !error && activeChamber && selectedRows.length === 0 && <div className="notice">No telemetry data is available for this chamber.</div>}
     <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Across time</p><h2>Recent readings</h2></div><div><select aria-label="Chart parameter" value={chartParameter} onChange={(event) => { if (isChartParameter(event.target.value)) setChartParameter(event.target.value); }}>{PARAMETER_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}</select><span className="tag">{selectedRows.length} records</span></div></div><div className="chart">{chartPoints.length < 2 ? <div className="notice">Not enough data for chart.</div> : <><div className="gridlines"><i /><i /><i /><i /></div><svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label={`${chartParameter} telemetry chart`}><path d={chartPath(chartPoints)} /></svg><div className="axis">{timeLabels.map((label) => <span key={label}>{label}</span>)}</div></>}</div></section>
@@ -164,6 +208,15 @@ function createTimeLabels(rows: DashboardTelemetryRow[]): string[] {
 function MetricCard({ name, value, index }: { name: string; value: number | null; index: number }) {
   const colors = ["blue", "orange", "green", "purple", "pink"];
   return <article className="metric"><div className={`metric-icon ${colors[index]}`}><span /></div><div><p>{name}</p><strong>{value === null ? "-" : value.toFixed(1)}</strong><span className="unit">{value === null ? "" : " units"}</span></div><span className="trend">{value === null ? "-" : "Data"}</span></article>;
+}
+
+function StatusCard({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return <article className="metric"><p>{label}</p><strong>{value}</strong>{detail && <span className="unit">{detail}</span>}</article>;
+}
+
+function humanizeStatus(status: string | undefined): string {
+  if (!status) return "Unavailable";
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 export default App;
