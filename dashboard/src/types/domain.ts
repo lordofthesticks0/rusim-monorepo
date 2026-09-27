@@ -17,7 +17,7 @@ export type NodeStatus =
   | "maintenance"
   | "retired";
 
-export type BottleStatus =
+export type ChamberStatus =
   | "configured"
   | "ready"
   | "running"
@@ -71,12 +71,12 @@ export interface Node {
   updated_at: string;
 }
 
-export interface Bottle {
+export interface Chamber {
   id: string;
   node_id: string;
-  bottle_code: string;
+  chamber_code: string;
   name: string | null;
-  status: BottleStatus;
+  status: ChamberStatus;
   enabled: boolean;
   metadata: Metadata;
   created_at: string;
@@ -116,6 +116,15 @@ export interface ExperimentNode {
   metadata: Metadata;
 }
 
+export interface ExperimentChamber {
+  id: string;
+  experiment_id: string;
+  chamber_id: string;
+  assigned_at: string;
+  removed_at: string | null;
+  metadata: Metadata;
+}
+
 export interface ExperimentSession {
   id: string;
   experiment_id: string;
@@ -132,7 +141,7 @@ export interface ExperimentSession {
 export interface TelemetryReading {
   id: number;
   experiment_id: string;
-  experiment_node_id: string;
+  experiment_chamber_id: string;
   session_id: string;
   recorded_at: string;
   ch4: number;
@@ -166,12 +175,12 @@ export interface NodeStatusEvent {
   metadata: Metadata;
 }
 
-export interface BottleStatusEvent {
+export interface ChamberStatusEvent {
   id: number;
-  bottle_id: string;
+  chamber_id: string;
   experiment_id: string | null;
   recorded_at: string;
-  status: BottleStatus;
+  status: ChamberStatus;
   message: string | null;
   metadata: Metadata;
 }
