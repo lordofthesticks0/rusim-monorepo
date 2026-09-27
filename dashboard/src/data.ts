@@ -12,6 +12,18 @@ export type DashboardTelemetryRow = TelemetryReading & {
   node_code: string;
   chamber_id: string;
   chamber_code: string;
+  chamber_name: string | null;
+};
+
+export type DashboardChamber = {
+  id: string;
+  chamber_code: string;
+  chamber_name: string | null;
+  node_id: string;
+  node_code: string;
+  device_id: string;
+  device_code: string;
+  device_name: string | null;
 };
 
 function normalizeMetadata(value: Json): Metadata {
@@ -50,6 +62,7 @@ export async function fetchTelemetry(): Promise<DashboardTelemetryRow[]> {
           chamber:chambers!experiment_chambers_chamber_id_fkey(
             id,
             chamber_code,
+            name,
             node:nodes!bottles_node_id_fkey(
               id,
               node_code,
@@ -89,5 +102,40 @@ export async function fetchTelemetry(): Promise<DashboardTelemetryRow[]> {
     node_code: row.experiment_chamber.chamber.node.node_code,
     chamber_id: row.experiment_chamber.chamber.id,
     chamber_code: row.experiment_chamber.chamber.chamber_code,
+    chamber_name: row.experiment_chamber.chamber.name,
+  }));
+}
+
+export async function fetchChambers(): Promise<DashboardChamber[]> {
+  const { data, error } = await supabase
+    .from("chambers")
+    .select(
+      `
+        id,
+        chamber_code,
+        name,
+        node:nodes!bottles_node_id_fkey(
+          id,
+          node_code,
+          device:devices!nodes_device_id_fkey(
+            id,
+            device_code,
+            name
+          )
+        )
+      `,
+    )
+    .order("chamber_code", { ascending: true });
+  if (error) throw error;
+
+  return (data ?? []).map((row): DashboardChamber => ({
+    id: row.id,
+    chamber_code: row.chamber_code,
+    chamber_name: row.name,
+    node_id: row.node.id,
+    node_code: row.node.node_code,
+    device_id: row.node.device.id,
+    device_code: row.node.device.device_code,
+    device_name: row.node.device.name,
   }));
 }
