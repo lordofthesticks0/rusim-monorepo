@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import type { Json } from "./types/database";
+import type { Database, Json } from "./types/database";
 import type {
   ChamberStatus,
   DeviceStatus,
@@ -65,6 +65,12 @@ export type MonitoringStatus = {
   } | null;
 };
 
+export type TelemetryDatabaseRow = Database["public"]["Tables"]["telemetry_readings"]["Row"];
+export type DeviceDatabaseRow = Database["public"]["Tables"]["devices"]["Row"];
+export type NodeDatabaseRow = Database["public"]["Tables"]["nodes"]["Row"];
+export type ChamberDatabaseRow = Database["public"]["Tables"]["chambers"]["Row"];
+export type ExperimentDatabaseRow = Database["public"]["Tables"]["experiments"]["Row"];
+
 function normalizeMetadata(value: Json): Metadata {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
 
@@ -78,7 +84,7 @@ function normalizeQuality(value: string): TelemetryReading["quality"] {
   throw new Error(`Unsupported telemetry quality: ${value}`);
 }
 
-function normalizeDeviceStatus(value: string): DeviceStatus {
+export function normalizeDeviceStatus(value: string): DeviceStatus {
   switch (value) {
     case "provisioning":
     case "online":
@@ -91,7 +97,7 @@ function normalizeDeviceStatus(value: string): DeviceStatus {
   throw new Error(`Unsupported device status: ${value}`);
 }
 
-function normalizeNodeStatus(value: string): NodeStatus {
+export function normalizeNodeStatus(value: string): NodeStatus {
   switch (value) {
     case "provisioning":
     case "online":
@@ -105,7 +111,7 @@ function normalizeNodeStatus(value: string): NodeStatus {
   throw new Error(`Unsupported node status: ${value}`);
 }
 
-function normalizeChamberStatus(value: string): ChamberStatus {
+export function normalizeChamberStatus(value: string): ChamberStatus {
   switch (value) {
     case "configured":
     case "ready":
@@ -284,5 +290,30 @@ export async function fetchMonitoringStatus(
     device,
     node,
     chamber,
+  };
+}
+
+export function mapRealtimeTelemetryRow(
+  row: TelemetryDatabaseRow,
+  context: DashboardTelemetryRow | undefined,
+): DashboardTelemetryRow | undefined {
+  if (!context || context.experiment_chamber_id !== row.experiment_chamber_id) return undefined;
+
+  return {
+    ...context,
+    id: row.id,
+    experiment_id: row.experiment_id,
+    experiment_chamber_id: row.experiment_chamber_id,
+    session_id: row.session_id,
+    recorded_at: row.recorded_at,
+    ch4: row.ch4,
+    co2: row.co2,
+    ph: row.ph,
+    temperature: row.temperature,
+    pressure: row.pressure,
+    quality: normalizeQuality(row.quality),
+    source_sequence: row.source_sequence,
+    received_at: row.received_at,
+    metadata: normalizeMetadata(row.metadata),
   };
 }

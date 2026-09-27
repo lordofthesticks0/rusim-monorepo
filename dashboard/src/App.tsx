@@ -1,15 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "./supabase";
 import {
   fetchChambers,
   fetchMonitoringStatus,
   fetchTelemetry,
+  mapRealtimeTelemetryRow,
+  normalizeChamberStatus,
+  normalizeDeviceStatus,
+  normalizeNodeStatus,
   PARAMETER_NAMES,
+  type ChamberDatabaseRow,
+  type DeviceDatabaseRow,
   type DashboardChamber,
+  type ExperimentDatabaseRow,
   type MonitoringStatus,
+  type NodeDatabaseRow,
   type DashboardTelemetryRow,
+  type TelemetryDatabaseRow,
 } from "./data";
 
 type ChartParameter = (typeof PARAMETER_NAMES)[number];
+type RealtimeStatus = "connecting" | "connected" | "disconnected" | "error";
 
 function App() {
   const [rows, setRows] = useState<DashboardTelemetryRow[]>([]);
@@ -20,12 +31,17 @@ function App() {
   const [monitoringStatus, setMonitoringStatus] = useState<MonitoringStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState("");
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>("disconnected");
+  const [statusRefreshToken, setStatusRefreshToken] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
 
   async function loadData() {
     setLoading(true);
     setError("");
+    setStatusRefreshToken((value) => value + 1);
     try {
       const [telemetry, chamberCatalog] = await Promise.all([fetchTelemetry(), fetchChambers()]);
       setRows(telemetry);
@@ -61,6 +77,11 @@ function App() {
   );
   const activeChamber = deviceChambers.find((chamber) => chamber.chamber_code === selectedChamber)
     ?? defaultChamber;
+  const selectedTelemetryContext = rows.find(
+    (row) => activeChamber !== undefined && row.chamber_id === activeChamber.id,
+  );
+  const experimentChamberId = selectedTelemetryContext?.experiment_chamber_id;
+  const activeExperimentId = monitoringStatus?.experiment?.id;
   const selectedRows = useMemo(
     () => rows
       .filter((row) => activeChamber !== undefined && row.chamber_code === activeChamber.chamber_code)
@@ -117,7 +138,71 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeChamber]);
+  }, [activeChamber?.id, selectedChamber, selectedDevice, statusRefreshToken]);
+
+  useEffect(() => {
+    if (!activeChamber) {
+      setRealtimeStatus("disconnected");
+      return;
+    }
+
+    setRealtimeStatus("connecting");
+    const channel = supabase.channel(`dashboard-monitoring-${activeChamber.device_id}-${activeChamber.node_id}-${activeChamber.id}`);
+
+    const applyTelemetry = (row: TelemetryDatabaseRow) => {
+      const context = rowsRef.current.find((item) => item.experiment_chamber_id === row.experiment_chamber_id);
+      const nextRow = mapRealtimeTelemetryRow(row, context);
+      if (!nextRow) return;
+
+      setRows((current) => {
+        const next = current.filter((item) => item.id !== nextRow.id);
+        next.push(nextRow);
+        return next.sort((left, right) => Date.parse(right.recorded_at) - Date.parse(left.recorded_at));
+      });
+    };
+
+    if (experimentChamberId) {
+      channel
+        .on<TelemetryDatabaseRow>("postgres_changes", { event: "INSERT", schema: "public", table: "telemetry_readings", filter: `experiment_chamber_id=eq.${experimentChamberId}` }, (payload) => applyTelemetry(payload.new))
+        .on<TelemetryDatabaseRow>("postgres_changes", { event: "UPDATE", schema: "public", table: "telemetry_readings", filter: `experiment_chamber_id=eq.${experimentChamberId}` }, (payload) => applyTelemetry(payload.new));
+    }
+
+    channel.on<DeviceDatabaseRow>("postgres_changes", { event: "UPDATE", schema: "public", table: "devices", filter: `id=eq.${activeChamber.device_id}` }, (payload) => {
+      const status = normalizeDeviceStatus(payload.new.status);
+      setChambers((current) => current.map((chamber) => chamber.device_id === payload.new.id ? { ...chamber, device_status: status } : chamber));
+      setMonitoringStatus((current) => current ? recomputeSystemActive({ ...current, device: current.device && current.device.id === payload.new.id ? { ...current.device, status } : current.device }) : current);
+    });
+    channel.on<NodeDatabaseRow>("postgres_changes", { event: "UPDATE", schema: "public", table: "nodes", filter: `id=eq.${activeChamber.node_id}` }, (payload) => {
+      const status = normalizeNodeStatus(payload.new.status);
+      setChambers((current) => current.map((chamber) => chamber.node_id === payload.new.id ? { ...chamber, node_status: status } : chamber));
+      setMonitoringStatus((current) => current ? recomputeSystemActive({ ...current, node: current.node && current.node.id === payload.new.id ? { ...current.node, status } : current.node }) : current);
+    });
+    channel.on<ChamberDatabaseRow>("postgres_changes", { event: "UPDATE", schema: "public", table: "chambers", filter: `id=eq.${activeChamber.id}` }, (payload) => {
+      const status = normalizeChamberStatus(payload.new.status);
+      setChambers((current) => current.map((chamber) => chamber.id === payload.new.id ? { ...chamber, chamber_status: status } : chamber));
+      setMonitoringStatus((current) => current ? recomputeSystemActive({ ...current, chamber: current.chamber && current.chamber.id === payload.new.id ? { ...current.chamber, status } : current.chamber }) : current);
+    });
+    if (activeExperimentId) {
+      channel.on<ExperimentDatabaseRow>("postgres_changes", { event: "UPDATE", schema: "public", table: "experiments", filter: `id=eq.${activeExperimentId}` }, (payload) => {
+        setMonitoringStatus((current) => current ? recomputeSystemActive({
+          ...current,
+          experiment: current.experiment && current.experiment.id === payload.new.id
+            ? { ...current.experiment, status: payload.new.status }
+            : current.experiment,
+        }) : current);
+      });
+    }
+
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") setRealtimeStatus("connected");
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setRealtimeStatus("error");
+      if (status === "CLOSED") setRealtimeStatus("disconnected");
+    });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [activeChamber?.device_id, activeChamber?.node_id, activeChamber?.id, activeExperimentId, experimentChamberId]);
 
   function handleDeviceChange(deviceCode: string) {
     setSelectedDevice(deviceCode);
@@ -125,7 +210,7 @@ function App() {
   }
 
   return <main className="shell">
-    <header className="topbar"><div className="brand"><span className="brand-mark">R</span><span>RuSim <small>/ telemetry</small></span></div><div className="status"><span className="pulse" /> {connectionStatus}<span className="divider" /> Updated {lastUpdated}</div></header>
+    <header className="topbar"><div className="brand"><span className="brand-mark">R</span><span>RuSim <small>/ telemetry</small></span></div><div className="status"><span className="pulse" /> {connectionStatus}<span className="divider" /> Updated {lastUpdated}<span className="divider" /> Realtime {humanizeRealtimeStatus(realtimeStatus)}</div></header>
     <section className="intro"><div><p className="eyebrow">Operations overview</p><h1>Device telemetry</h1><p className="subtitle">A clear view of your connected environment.</p></div><button className="refresh" onClick={() => void loadData()}>Refresh data</button></section>
     {error && <div className="notice">Unable to load telemetry data. <span>{error}</span></div>}
     {!loading && !error && rows.length === 0 && <div className="notice">No telemetry data is available.</div>}
@@ -220,6 +305,20 @@ function StatusCard({ label, value, detail }: { label: string; value: string; de
 function humanizeStatus(status: string | undefined): string {
   if (!status) return "Unavailable";
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function humanizeRealtimeStatus(status: RealtimeStatus): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function recomputeSystemActive(status: MonitoringStatus): MonitoringStatus {
+  return {
+    ...status,
+    system_active: status.experiment?.status === "active"
+      && status.device?.status === "online"
+      && status.node?.status === "online"
+      && status.chamber?.status === "running",
+  };
 }
 
 export default App;
