@@ -3,6 +3,8 @@ import type { Database, Json } from "./types/database";
 import type {
   ChamberStatus,
   DeviceStatus,
+  Experiment,
+  ExperimentStatus,
   Metadata,
   NodeStatus,
   TelemetryReading,
@@ -71,6 +73,17 @@ export type NodeDatabaseRow = Database["public"]["Tables"]["nodes"]["Row"];
 export type ChamberDatabaseRow = Database["public"]["Tables"]["chambers"]["Row"];
 export type ExperimentDatabaseRow = Database["public"]["Tables"]["experiments"]["Row"];
 
+export type ExperimentHistoryItem = Pick<Experiment, "id" | "experiment_code" | "name" | "description" | "status" | "started_at" | "ended_at">;
+
+export type ExperimentChamberSummary = {
+  id: string;
+  experiment_id: string;
+  chamber_id: string;
+  chamber_code: string;
+  chamber_name: string | null;
+  node_code: string;
+};
+
 function normalizeMetadata(value: Json): Metadata {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
 
@@ -124,6 +137,20 @@ export function normalizeChamberStatus(value: string): ChamberStatus {
       return value;
   }
   throw new Error(`Unsupported chamber status: ${value}`);
+}
+
+export function normalizeExperimentStatus(value: string): ExperimentStatus {
+  switch (value) {
+    case "draft":
+    case "scheduled":
+    case "active":
+    case "paused":
+    case "completed":
+    case "cancelled":
+    case "failed":
+      return value;
+  }
+  throw new Error(`Unsupported experiment status: ${value}`);
 }
 
 export async function fetchTelemetry(): Promise<DashboardTelemetryRow[]> {
@@ -316,4 +343,126 @@ export function mapRealtimeTelemetryRow(
     received_at: row.received_at,
     metadata: normalizeMetadata(row.metadata),
   };
+}
+
+export async function fetchExperiments(): Promise<ExperimentHistoryItem[]> {
+  const { data, error } = await supabase
+    .from("experiments")
+    .select("id, experiment_code, name, description, status, started_at, ended_at")
+    .order("started_at", { ascending: false, nullsFirst: false });
+  if (error) throw error;
+
+  return (data ?? []).map((row): ExperimentHistoryItem => ({
+    id: row.id,
+    experiment_code: row.experiment_code,
+    name: row.name,
+    description: row.description,
+    status: normalizeExperimentStatus(row.status),
+    started_at: row.started_at,
+    ended_at: row.ended_at,
+  }));
+}
+
+export async function fetchExperimentChambers(experimentId: string): Promise<ExperimentChamberSummary[]> {
+  const { data, error } = await supabase
+    .from("experiment_chambers")
+    .select(
+      `
+        id,
+        experiment_id,
+        chamber_id,
+        chamber:chambers!experiment_chambers_chamber_id_fkey(
+          chamber_code,
+          name,
+          node:nodes!bottles_node_id_fkey(
+            node_code
+          )
+        )
+      `,
+    )
+    .eq("experiment_id", experimentId)
+    .order("assigned_at", { ascending: true });
+  if (error) throw error;
+
+  return (data ?? []).map((row): ExperimentChamberSummary => ({
+    id: row.id,
+    experiment_id: row.experiment_id,
+    chamber_id: row.chamber_id,
+    chamber_code: row.chamber.chamber_code,
+    chamber_name: row.chamber.name,
+    node_code: row.chamber.node.node_code,
+  }));
+}
+
+export async function fetchExperimentTelemetry(
+  experimentId: string,
+  experimentChamberId: string,
+): Promise<DashboardTelemetryRow[]> {
+  const { data, error } = await supabase
+    .from("telemetry_readings")
+    .select(
+      `
+        id,
+        experiment_id,
+        experiment_chamber_id,
+        session_id,
+        recorded_at,
+        ch4,
+        co2,
+        ph,
+        temperature,
+        pressure,
+        quality,
+        source_sequence,
+        received_at,
+        metadata,
+        experiment_chamber:experiment_chambers!telemetry_readings_experiment_chamber_fk(
+          chamber:chambers!experiment_chambers_chamber_id_fkey(
+            id,
+            chamber_code,
+            name,
+            node:nodes!bottles_node_id_fkey(
+              id,
+              node_code,
+              name,
+              device:devices!nodes_device_id_fkey(
+                id,
+                device_code,
+                name
+              )
+            )
+          )
+        )
+      `,
+    )
+    .eq("experiment_id", experimentId)
+    .eq("experiment_chamber_id", experimentChamberId)
+    .order("recorded_at", { ascending: false })
+    .limit(5000);
+  if (error) throw error;
+
+  return (data ?? []).map((row): DashboardTelemetryRow => ({
+    id: row.id,
+    experiment_id: row.experiment_id,
+    experiment_chamber_id: row.experiment_chamber_id,
+    session_id: row.session_id,
+    recorded_at: row.recorded_at,
+    ch4: row.ch4,
+    co2: row.co2,
+    ph: row.ph,
+    temperature: row.temperature,
+    pressure: row.pressure,
+    quality: normalizeQuality(row.quality),
+    source_sequence: row.source_sequence,
+    received_at: row.received_at,
+    metadata: normalizeMetadata(row.metadata),
+    device_id: row.experiment_chamber.chamber.node.device.id,
+    device_code: row.experiment_chamber.chamber.node.device.device_code,
+    device_name: row.experiment_chamber.chamber.node.device.name,
+    node_id: row.experiment_chamber.chamber.node.id,
+    node_code: row.experiment_chamber.chamber.node.node_code,
+    chamber_id: row.experiment_chamber.chamber.id,
+    chamber_code: row.experiment_chamber.chamber.chamber_code,
+    chamber_name: row.experiment_chamber.chamber.name,
+  }));
 }

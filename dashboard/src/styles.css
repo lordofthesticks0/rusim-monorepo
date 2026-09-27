@@ -8,3 +8,10 @@
 .experiment-status-card .experiment-code { display: block; font-size: 18px; letter-spacing: -.04em; line-height: 1.15; white-space: nowrap; }
 .experiment-status-card .experiment-name { display: block; margin-top: 7px; color: #87919e; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .metrics .experiment-status-card:last-child { grid-column: auto; } }
+.history-list { display: grid; gap: 10px; margin-top: 18px; }
+.history-item { width: 100%; display: grid; gap: 5px; text-align: left; border: 1px solid #e2e6eb; border-radius: 8px; padding: 14px 16px; background: #fff; color: #202936; cursor: pointer; }
+.history-item:hover, .history-item.selected { border-color: #2462ee; }
+.history-item strong { font: 500 16px 'DM Mono', monospace; letter-spacing: -.04em; }
+.history-item span { font-size: 13px; }
+.history-item small, .history-dates { color: #87919e; font-size: 11px; }
+.history-summary p:not(.eyebrow) { color: #87919e; font-size: 13px; margin: 10px 0 7px; }
