@@ -12,8 +12,8 @@
 .history-list { display: grid; gap: 10px; margin-top: 18px; }
 .history-item { width: 100%; display: grid; gap: 5px; text-align: left; border: 1px solid #e2e6eb; border-radius: 8px; padding: 14px 16px; background: #fff; color: #202936; cursor: pointer; }
 .history-item:hover, .history-item.selected { border-color: #2462ee; }
-.history-item strong { font: 500 16px 'DM Mono', monospace; letter-spacing: -.04em; }
-.history-item span { font-size: 13px; }
+.history-item strong { display: block; min-width: 0; font: 500 16px 'DM Mono', monospace; letter-spacing: -.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.history-item span { display: block; min-width: 0; color: #586575; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
 .history-item small, .history-dates { color: #87919e; font-size: 11px; }
 .history-summary p:not(.eyebrow) { color: #87919e; font-size: 13px; margin: 10px 0 7px; }
 .history-navigation { align-items: center; }
@@ -33,3 +33,11 @@
 .result-metric { background: #f4f6f8; border-radius: 6px; padding: 9px; display: grid; gap: 5px; }
 .result-metric strong { font: 500 11px 'DM Mono', monospace; }
 .result-metric span { color: #87919e; font: 10px 'DM Mono', monospace; line-height: 1.4; }
+.section-navigation { justify-content: flex-start; gap: 8px; }
+.nav-tab { border: 1px solid #dce2e8; border-radius: 6px; padding: 9px 13px; color: #697584; background: #f8fafc; cursor: pointer; font-size: 12px; }
+.nav-tab:hover { border-color: #2462ee; color: #2462ee; }
+.nav-tab.active { border-color: #2462ee; background: #2462ee; color: white; box-shadow: 0 3px 8px rgba(36, 98, 238, .18); }
+.history-chart-grid { display: grid; gap: 16px; }
+.telemetry-chart-panel { min-width: 0; }
+.telemetry-chart-panel h2 { font-size: 18px; }
+@media (max-width: 760px) { .section-navigation { flex-direction: row; align-items: stretch; overflow-x: auto; }.nav-tab { flex: 1 0 auto; }.history-chart-grid { gap: 12px; }.telemetry-chart-panel { padding: 18px 15px 12px; }.telemetry-chart-panel .chart { height: 235px; } }

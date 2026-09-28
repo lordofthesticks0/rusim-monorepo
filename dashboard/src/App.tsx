@@ -13,6 +13,7 @@ import {
   normalizeDeviceStatus,
   normalizeNodeStatus,
   PARAMETER_NAMES,
+  PARAMETER_UNITS,
   type ChamberDatabaseRow,
   type DeviceDatabaseRow,
   type DashboardChamber,
@@ -314,7 +315,7 @@ function App() {
   return <main className="shell">
     <header className="topbar"><div className="brand"><span className="brand-mark">R</span><span>RuSim <small>/ telemetry</small></span></div><div className="status"><span className="pulse" /> {view === "monitoring" ? connectionStatus : "Experiment history"}<span className="divider" /> {view === "monitoring" ? <>Updated {lastUpdated}<span className="divider" /> Realtime {humanizeRealtimeStatus(realtimeStatus)}</> : "Historical data"}</div></header>
     <section className="intro"><div><p className="eyebrow">{view === "monitoring" ? "Operations overview" : "Experiment history"}</p><h1>{view === "monitoring" ? "Device telemetry" : "Experiment history"}</h1><p className="subtitle">{view === "monitoring" ? "A clear view of your connected environment." : "Review telemetry from completed and active experiments."}</p></div><button className="refresh" onClick={() => view === "monitoring" ? void loadData() : setHistoryRefreshToken((value) => value + 1)}>Refresh data</button></section>
-    <section className="controls"><button className="refresh" onClick={() => setView("monitoring")}>Realtime Monitoring</button><button className="refresh" onClick={() => setView("history")}>Experiment History</button></section>
+    <section className="controls section-navigation"><button className={`nav-tab${view === "monitoring" ? " active" : ""}`} onClick={() => setView("monitoring")} aria-pressed={view === "monitoring"}>Realtime Monitoring</button><button className={`nav-tab${view === "history" ? " active" : ""}`} onClick={() => setView("history")} aria-pressed={view === "history"}>Experiment History</button></section>
     {view === "monitoring" ? <>
     {error && <div className="notice">Unable to load telemetry data. <span>{error}</span></div>}
     {!loading && !error && rows.length === 0 && <div className="notice">No telemetry data is available.</div>}
@@ -333,7 +334,7 @@ function App() {
     </section>
     <section className="metrics">{PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={latest ? getMetricValue(latest, name) : null} index={index} />)}</section>
     {!loading && !error && activeChamber && selectedRows.length === 0 && <div className="notice">No telemetry data is available for this chamber.</div>}
-    <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Across time</p><h2>Recent readings</h2></div><div><select aria-label="Chart parameter" value={chartParameter} onChange={(event) => { if (isChartParameter(event.target.value)) setChartParameter(event.target.value); }}>{PARAMETER_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}</select><span className="tag">{selectedRows.length} records</span></div></div><div className="chart">{chartPoints.length < 2 ? <div className="notice">Not enough data for chart.</div> : <><div className="gridlines"><i /><i /><i /><i /></div><svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label={`${chartParameter} telemetry chart`}><path d={chartPath(chartPoints)} /></svg><div className="axis">{timeLabels.map((label) => <span key={label}>{label}</span>)}</div></>}</div></section>
+    <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Across time</p><h2>{parameterLabel(chartParameter)} readings</h2></div><div><select aria-label="Chart parameter" value={chartParameter} onChange={(event) => { if (isChartParameter(event.target.value)) setChartParameter(event.target.value); }}>{PARAMETER_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}</select><span className="tag">{selectedRows.length} records</span></div></div><div className="chart">{chartPoints.length < 2 ? <div className="notice">Not enough data for chart.</div> : <><div className="gridlines"><i /><i /><i /><i /></div><svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label={`${parameterLabel(chartParameter)} telemetry chart`}><path d={chartPath(chartPoints)} /></svg><div className="axis">{timeLabels.map((label) => <span key={label}>{label}</span>)}</div></>}</div></section>
     <footer><span>Data source: Supabase</span><span>-</span><span>Selected chamber telemetry</span></footer>
     </> : <ExperimentHistoryView
       experiments={experiments}
@@ -353,8 +354,6 @@ function App() {
       results={experimentResults}
       resultsLoading={resultsLoading}
       resultsError={resultsError}
-      chartParameter={chartParameter}
-      onChartParameterChange={setChartParameter}
     />}
   </main>;
 }
@@ -377,8 +376,6 @@ type ExperimentHistoryViewProps = {
   results: ExperimentResults | null;
   resultsLoading: boolean;
   resultsError: string;
-  chartParameter: ChartParameter;
-  onChartParameterChange: (parameter: ChartParameter) => void;
 };
 
 function ExperimentHistoryView({
@@ -399,19 +396,12 @@ function ExperimentHistoryView({
   results,
   resultsLoading,
   resultsError,
-  chartParameter,
-  onChartParameterChange,
 }: ExperimentHistoryViewProps) {
   const orderedRows = useMemo(
     () => [...telemetryRows].sort((left, right) => Date.parse(left.recorded_at) - Date.parse(right.recorded_at)),
     [telemetryRows],
   );
   const latest = orderedRows.length > 0 ? orderedRows[orderedRows.length - 1] : undefined;
-  const points = useMemo(
-    () => createChartPoints(orderedRows, chartParameter),
-    [orderedRows, chartParameter],
-  );
-  const labels = useMemo(() => createTimeLabels(orderedRows), [orderedRows]);
 
   return <>
     {error && <div className="notice">Unable to load experiment history. <span>{error}</span></div>}
@@ -433,7 +423,7 @@ function ExperimentHistoryView({
           <section className="metrics">{PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={latest ? getMetricValue(latest, name) : null} index={index} />)}</section>
           {telemetryLoading && <div className="notice">Loading historical telemetry...</div>}
           {!telemetryLoading && telemetryRows.length === 0 && <div className="notice">No telemetry data is available for this experiment chamber.</div>}
-          <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Historical telemetry</p><h2>{chartParameter} readings</h2></div><div><select aria-label="Historical chart parameter" value={chartParameter} onChange={(event) => { if (isChartParameter(event.target.value)) onChartParameterChange(event.target.value); }}>{PARAMETER_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}</select><span className="tag">{telemetryRows.length} records</span></div></div><div className="chart">{points.length < 2 ? <div className="notice">Not enough data for chart.</div> : <><div className="gridlines"><i /><i /><i /><i /></div><svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label={`${chartParameter} historical telemetry chart`}><path d={chartPath(points)} /></svg><div className="axis">{labels.map((label) => <span key={label}>{label}</span>)}</div></>}</div></section>
+          <div className="history-chart-grid">{PARAMETER_NAMES.map((parameter) => <TelemetryChart key={parameter} rows={orderedRows} parameter={parameter} recordCount={telemetryRows.length} />)}</div>
         </>}
       </> : <ExperimentResultsView experiment={selectedExperiment} results={results} loading={resultsLoading} error={resultsError} />}
     </>}
@@ -477,7 +467,22 @@ function ChamberResultCard({ chamber }: { chamber: ExperimentChamberResult }) {
     ["Pressure", chamber.pressure],
   ] as const;
 
-  return <article className="result-card"><div className="result-heading"><div><strong>{chamber.chamber_name ?? chamber.chamber_code}</strong><span>{chamber.chamber_code} | {chamber.node_name} ({chamber.node_code})</span></div><span className="tag">{chamber.record_count} records</span></div><div className="result-dates"><span>First: {formatDate(chamber.first_recorded_at)}</span><span>Last: {formatDate(chamber.last_recorded_at)}</span></div><div className="result-metrics">{metrics.map(([name, summary]) => <div className="result-metric" key={name}><strong>{name}</strong>{summary ? <span>Min {summary.min.toFixed(2)} | Avg {summary.average.toFixed(2)} | Max {summary.max.toFixed(2)}</span> : <span>No telemetry</span>}</div>)}</div></article>;
+  return <article className="result-card"><div className="result-heading"><div><strong>{chamber.chamber_name ?? chamber.chamber_code}</strong><span>{chamber.chamber_code} | {chamber.node_name} ({chamber.node_code})</span></div><span className="tag">{chamber.record_count} records</span></div><div className="result-dates"><span>First: {formatDate(chamber.first_recorded_at)}</span><span>Last: {formatDate(chamber.last_recorded_at)}</span></div><div className="result-metrics">{metrics.map(([name, summary]) => <div className="result-metric" key={name}><strong>{parameterLabel(name)}</strong>{summary ? <span>Min {summary.min.toFixed(2)} | Avg {summary.average.toFixed(2)} | Max {summary.max.toFixed(2)}</span> : <span>No telemetry</span>}</div>)}</div></article>;
+}
+
+function TelemetryChart({
+  rows,
+  parameter,
+  recordCount,
+}: {
+  rows: DashboardTelemetryRow[];
+  parameter: ChartParameter;
+  recordCount: number;
+}) {
+  const points = useMemo(() => createChartPoints(rows, parameter), [rows, parameter]);
+  const labels = useMemo(() => createTimeLabels(rows), [rows]);
+
+  return <section className="panel telemetry-chart-panel"><div className="panel-heading"><div><p className="eyebrow">Historical telemetry</p><h2>{parameterLabel(parameter)} fluctuation</h2></div><span className="tag">{recordCount} records</span></div><div className="chart">{points.length < 2 ? <div className="notice">Not enough data for chart.</div> : <><div className="gridlines"><i /><i /><i /><i /></div><svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label={`${parameterLabel(parameter)} historical telemetry chart`}><path d={chartPath(points)} /></svg><div className="axis">{labels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}</div></>}</div></section>;
 }
 
 function formatDate(value: string | null): string {
@@ -502,6 +507,11 @@ function getMetricValue(row: DashboardTelemetryRow, name: ChartParameter): numbe
     case "Temperature": return row.temperature;
     case "Pressure": return row.pressure;
   }
+}
+
+function parameterLabel(name: ChartParameter): string {
+  const unit = PARAMETER_UNITS[name];
+  return unit ? `${name} (${unit})` : name;
 }
 
 function isChartParameter(value: string): value is ChartParameter {
@@ -540,9 +550,9 @@ function createTimeLabels(rows: DashboardTelemetryRow[]): string[] {
   });
 }
 
-function MetricCard({ name, value, index }: { name: string; value: number | null; index: number }) {
+function MetricCard({ name, value, index }: { name: ChartParameter; value: number | null; index: number }) {
   const colors = ["blue", "orange", "green", "purple", "pink"];
-  return <article className="metric"><div className={`metric-icon ${colors[index]}`}><span /></div><div><p>{name}</p><strong>{value === null ? "-" : value.toFixed(1)}</strong><span className="unit">{value === null ? "" : " units"}</span></div><span className="trend">{value === null ? "-" : "Data"}</span></article>;
+  return <article className="metric"><div className={`metric-icon ${colors[index]}`}><span /></div><div><p>{name}</p><strong>{value === null ? "-" : value.toFixed(1)}</strong><span className="unit">{value === null ? "" : PARAMETER_UNITS[name]}</span></div><span className="trend">{value === null ? "-" : "Latest"}</span></article>;
 }
 
 function StatusCard({ label, value, detail }: { label: string; value: string; detail?: string }) {

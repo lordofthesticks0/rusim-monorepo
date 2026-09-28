@@ -14,6 +14,14 @@ import type {
 
 export const PARAMETER_NAMES = ["CH4", "CO2", "pH", "Temperature", "Pressure"] as const;
 
+export const PARAMETER_UNITS = {
+  CH4: "ppm",
+  CO2: "ppm",
+  pH: "",
+  Temperature: "°C",
+  Pressure: "kPa",
+} as const satisfies Record<(typeof PARAMETER_NAMES)[number], string>;
+
 export type DashboardTelemetryRow = TelemetryReading & {
   device_id: string;
   device_code: string;
