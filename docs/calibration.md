@@ -70,8 +70,7 @@ To convert `rs` to `ppm` (parts per million), we use the following logic:
 ```cpp
 float rsToPpm(float rs, int sensor_idx) {
   if (rs <= 0) return -1.0;
-  float log_rs = log10(rs);
-  float log_ppm = (log_rs - c_intercept[sensor_idx]) / m_slope[sensor_idx];
-  return pow(10.0, log_ppm);
+  float log_resistance_ratio = log10(RS_AIR[sensor_idx] / rs);
+  return PPM_AIR + (PPM_SPAN - PPM_AIR) * log_resistance_ratio / log_resistance_span[sensor_idx];
 }
 ```
