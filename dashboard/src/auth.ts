@@ -4,6 +4,12 @@ import type { DeviceSession } from "./types/domain";
 
 const STORAGE_KEY = "rusim.device_session";
 
+// Client-side login backoff state (module scope so it survives re-renders).
+// The server enforces the real throttle; this only spaces out accidental
+// rapid retries instead of hammering the RPC.
+let consecutiveFailures = 0;
+let lastAttemptAt = 0;
+
 type StoredSession = {
   sessionToken: string;
   device: DeviceSession["device"];
@@ -70,11 +76,22 @@ export function useAuth(): AuthState {
     setSigningIn(true);
     setError("");
     try {
+      // Client-side backoff complements the server throttle in
+      // device_data.authenticate (30 failures / 5 min globally): rapid
+      // repeat submits wait briefly instead of hammering the RPC.
+      const waited = Date.now() - lastAttemptAt;
+      const backoffMs = Math.min(1000 * 2 ** Math.max(consecutiveFailures - 1, 0), 5000);
+      if (consecutiveFailures >= 2 && waited < backoffMs) {
+        await new Promise((resolve) => setTimeout(resolve, backoffMs - waited));
+      }
+      lastAttemptAt = Date.now();
       const next = await authenticate(token);
+      consecutiveFailures = 0;
       writeStoredSession(next);
       setSession(next);
       return true;
     } catch (err) {
+      consecutiveFailures += 1;
       setError(err instanceof Error ? err.message : "Unable to sign in with that token.");
       return false;
     } finally {

@@ -68,7 +68,7 @@ function LoginScreen({
       </label>
       {error && <div className="notice login-error">{error}</div>}
       <button className="refresh" type="submit" disabled={signingIn || token === ""}>{signingIn ? "Checking token..." : "Sign in"}</button>
-      <p className="login-hint">Your token is exchanged for a session that only grants access to its own device. Tokens are never stored in the browser after the page loads.</p>
+      <p className="login-hint">Your device token is exchanged for a 12-hour session scoped to its own device. The device token itself is never stored; only the session token is kept until you sign out or it expires.</p>
     </form>
   </main>;
 }

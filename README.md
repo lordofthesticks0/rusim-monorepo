@@ -12,9 +12,10 @@
 
 ## Stack
 ### 1. Dashboard (Frontend)
-TBD
-### 2. Dashboard (Backend)
-TBD
+Ask for dashboard token. Device 0 is the development device.
+### 2. Database
+The database is managed by [Supabase](https://supabase.com/).
+
 ### 3. Firmware
 Firmware uses [PlatformIO](https://platformio.org/). Install the CLI first. See the [Installation Guide](https://docs.platformio.org/en/latest/core/installation/index.html).
 

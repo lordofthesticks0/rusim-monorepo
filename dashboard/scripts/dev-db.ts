@@ -563,6 +563,7 @@ function printHelp(): void {
       "  --token-hash <hex>       override DEV_0_TOKEN_HASH from .env",
       '  --token-hash ""          clear the device token, freeing the hash for another device',
       "  --tls / --no-tls         override the TLS guess from the database host",
+      "  --allow-remote           required to run against any non-loopback host (prod guard)",
       "  --help                   show this message",
       "",
       "Requires DATABASE_URL, either exported or set in .env.",
@@ -586,6 +587,7 @@ async function main(): Promise<void> {
     "token-hash",
     "tls",
     "no-tls",
+    "allow-remote",
     "help",
   ]);
   const unknown = Object.keys(flags).filter((name) => !knownFlags.has(name));
@@ -614,6 +616,23 @@ async function main(): Promise<void> {
         "  export DATABASE_URL='postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres'\n" +
         "  or add DATABASE_URL to dashboard/.env",
     );
+  }
+
+  // Safety guard: this script DELETEs an experiment's readings and overwrites
+  // token hashes, so it must never run against production by accident. Remote
+  // hosts require an explicit opt-in; local loopback always works.
+  try {
+    const hostname = new URL(databaseUrl).hostname;
+    const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+    if (!isLocal && flags["allow-remote"] === undefined) {
+      throw new Error(
+        `Refusing to run against remote host "${hostname}": this script deletes and rewrites data.\n` +
+          "If you really mean it (e.g. seeding a staging project), re-run with --allow-remote.",
+      );
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Refusing to run against remote host")) throw error;
+    // Unparseable URL: let the SQL driver report it below rather than masking it.
   }
 
   const knobs = { ...DEFAULTS };

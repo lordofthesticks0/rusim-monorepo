@@ -87,7 +87,15 @@ function toReading(row: ReadingRow): Reading {
  */
 export async function authenticate(deviceToken: string): Promise<DeviceSession> {
   const { data, error } = await getSupabase(null).rpc("authenticate", { p_token: deviceToken });
-  if (error) throw new Error("Invalid device token.");
+  if (error) {
+    // Preserve the throttle signal (SQLSTATE 42900) so the UI can tell
+    // "slow down" apart from "wrong token". Everything else stays generic
+    // to avoid oracling device existence.
+    if (/too many attempts/i.test(error.message)) {
+      throw new Error("Too many attempts. Try again later.");
+    }
+    throw new Error("Invalid device token.");
+  }
   const row = data?.[0];
   if (!row) throw new Error("Invalid device token.");
 
@@ -134,14 +142,24 @@ export async function fetchDevice(sessionToken: string): Promise<Device | undefi
 }
 
 export async function fetchReadings(sessionToken: string): Promise<Reading[]> {
-  const { data, error } = await getSupabase(sessionToken)
-    .from("readings")
-    .select(READING_COLUMNS)
-    .order("timestamp", { ascending: false })
-    .limit(5000);
-  if (error) throw error;
+  // PostgREST caps a single response at max_rows (1000 locally, similarly
+  // bounded remotely), so a bare `.limit(5000)` would silently truncate.
+  // Page through instead, keeping the 5000-row safety cap.
+  const PAGE_SIZE = 1000;
+  const MAX_ROWS = 5000;
+  const rows: ReadingRow[] = [];
+  for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
+    const { data, error } = await getSupabase(sessionToken)
+      .from("readings")
+      .select(READING_COLUMNS)
+      .order("timestamp", { ascending: false })
+      .range(offset, Math.min(offset + PAGE_SIZE - 1, MAX_ROWS - 1));
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
 
-  return (data ?? []).map(toReading);
+  return rows.map(toReading);
 }
 
 /**
@@ -151,15 +169,22 @@ export async function fetchReadings(sessionToken: string): Promise<Reading[]> {
  * is applied here.
  */
 export async function fetchExperimentReadings(sessionToken: string, experimentId: number): Promise<Reading[]> {
-  const { data, error } = await getSupabase(sessionToken)
-    .from("readings")
-    .select(READING_COLUMNS)
-    .eq("experiment_id", experimentId)
-    .order("bottle_id", { ascending: true })
-    .limit(5000);
-  if (error) throw error;
+  const PAGE_SIZE = 1000;
+  const MAX_ROWS = 5000;
+  const rows: ReadingRow[] = [];
+  for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
+    const { data, error } = await getSupabase(sessionToken)
+      .from("readings")
+      .select(READING_COLUMNS)
+      .eq("experiment_id", experimentId)
+      .order("bottle_id", { ascending: true })
+      .range(offset, Math.min(offset + PAGE_SIZE - 1, MAX_ROWS - 1));
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
 
-  return (data ?? []).map(toReading);
+  return rows.map(toReading);
 }
 
 /**
