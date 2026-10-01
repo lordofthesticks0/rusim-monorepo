@@ -7,8 +7,8 @@
  * Flash offset: 0x0
  *
  * Usage:
- *   bun scripts/flash-factory.ts [--port /dev/ttyUSB0] [--binary .backup/display_factory.bin] [--baud 921600] [--chip esp32-s3]
- *   bun scripts/flash-factory.ts --list-ports
+ *   bun scripts-hardware/flash-factory.ts [--port /dev/ttyUSB0] [--binary .backup/display_factory.bin] [--baud 921600] [--chip esp32-s3]
+ *   bun scripts-hardware/flash-factory.ts --list-ports
  *
  * Port autodetect uses `pio device list --json-output` and ignores
  * internal /dev/ttyS* entries with hwid "n/a". If several candidates
@@ -18,9 +18,10 @@
 
 type Device = { port: string; description?: string; hwid?: string };
 
-const REPO_ROOT = import.meta.dir.endsWith("/scripts")
-  ? `${import.meta.dir}/..`
-  : process.cwd();
+// This file sits in <repo>/scripts-hardware/, so the repo root is its parent.
+// Resolving it from the script's own location keeps the default image path
+// correct no matter which directory the script is invoked from.
+const REPO_ROOT = `${import.meta.dir}/..`;
 
 const DEFAULT_BINARY = `${REPO_ROOT}/.backup/display_factory.bin`;
 const ESPTOOL_PACKAGE = "platformio/tool-esptoolpy@^2.41100.260830";
@@ -32,7 +33,7 @@ function printHelp() {
   console.log(`Flash display factory image via PlatformIO esptool
 
 Usage:
-  bun scripts/flash-factory.ts [options]
+  bun scripts-hardware/flash-factory.ts [options]
 
 Options:
   --binary <path>   Factory .bin to flash (default: .backup/display_factory.bin)
@@ -43,9 +44,9 @@ Options:
   -h, --help        Show this help
 
 Examples:
-  bun scripts/flash-factory.ts
-  bun scripts/flash-factory.ts --port /dev/ttyUSB0
-  bun scripts/flash-factory.ts --list-ports`);
+  bun scripts-hardware/flash-factory.ts
+  bun scripts-hardware/flash-factory.ts --port /dev/ttyUSB0
+  bun scripts-hardware/flash-factory.ts --list-ports`);
 }
 
 function getArg(name: string): string | undefined {

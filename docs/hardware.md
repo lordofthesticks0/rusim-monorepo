@@ -38,7 +38,7 @@ This module is used for the main interface to upload to the network. Wi-Fi does 
 | Datasheet V1.4 (EN) | [WT32‑ETH01_datasheet_V1.4-en.pdf](https://en.wireless-tag.com/product-item-2.html) |
 | Getting Started Guide | [Getting+Started+Guide+for+WT32‑ETH01.pdf](https://en.wireless-tag.com/product-item-2.html) |
 | Unofficial Community Guide | [github.com/egnor/wt32-eth01](https://github.com/egnor/wt32-eth01) |
-| LLM Generated Summary | [wt32-eth01-LLM.md](llm-summary/wt32-eth01-LLM.md) |
+| LLM Generated Summary | [wt32-eth01-LLM.md](llm-generated/wt32-eth01.md) |
 
 ### Important Notes
 
@@ -51,14 +51,280 @@ The WT32-ETH01 does not come with a USB port. A USB to UART adapter is required 
 
 ## 3. ESP32-8048S050
 
-This module is a ESP32 display module made by Sunton. Documentation is scarce and difficult to find. See the LLM generated summary [here](llm-summary/sunton-LLM.md).
+This module is a ESP32 display module made by Sunton. Documentation is scarce and difficult to find. See the LLM generated summary [here](llm-generated/SUNTON-luna.md). Another summary is available [here](llm-generated/SUNTON-qwen.md).
 
-## 4. Sensors
+## 4. ATmega2560 Mega Mini
+![ATmega2560 Mega Mini Pinout](https://m.media-amazon.com/images/I/714vZN-0BbL.jpg)
+### Pin Layout Overview
+
+The Mega Mini's I/O pins are arranged along the board edges. Based on vendor documentation and community references, the typical physical arrangement is:
+
+- **Left edge:** D22–D53 (extended digital pins, sequentially)
+- **Right edge:** D0–D21, A0–A15, plus power pins (3.3V, 5V, GND, VIN)
+
+This is confirmed by RobotDyn's documentation for the Mega 2560 PRO (Embed) variant, which states: "Left edge: D22–D53 (port pins, sequentially) — Right edge: D0–D21, A0–A15, plus power (3.3V, 5V, GND, Vin)".
+
+> **Physical note:** The board does not accept standard Arduino shields. Connections are made via 0.1" (2.54 mm) male headers, which can be soldered to a protoboard, PCB, or connected with female jumper wires.
+
+---
+
+#### Complete Digital Pin Mapping (D0–D53)
+
+The following table maps each Arduino digital pin to its corresponding ATmega2560 port pin, along with alternate functions (PWM, UART, external interrupt, SPI, I²C). This data is derived from the official Arduino ATmega2560 pin mapping documentation.
+
+| Arduino Pin | ATmega2560 Port Pin | Alternate Functions | PWM? | External Interrupt? |
+|---|---|---|---|---|
+| D0 | PE0 | RXD0 (Serial 0 RX), PCINT8 | — | — |
+| D1 | PE1 | TXD0 (Serial 0 TX) | — | — |
+| D2 | PE4 | OC3B, INT4 | **Yes** | **INT4** |
+| D3 | PE5 | OC3C, INT5 | **Yes** | **INT5** |
+| D4 | PG5 | OC0B | **Yes** | — |
+| D5 | PE3 | OC3A, AIN1 | **Yes** | — |
+| D6 | PH3 | OC4A | **Yes** | — |
+| D7 | PH4 | OC4B | **Yes** | — |
+| D8 | PH5 | OC4C | **Yes** | — |
+| D9 | PH6 | OC2B | **Yes** | — |
+| D10 | PB4 | OC2A, PCINT4 | **Yes** | — |
+| D11 | PB5 | OC1A, PCINT5 | **Yes** | — |
+| D12 | PB6 | OC1B, PCINT6 | **Yes** | — |
+| D13 | PB7 | OC0A, OC1C, PCINT7 | **Yes** | — |
+| D14 | PJ1 | TXD3 (Serial 3 TX) | — | — |
+| D15 | PJ0 | RXD3 (Serial 3 RX) | — | — |
+| D16 | PH1 | TXD2 (Serial 2 TX) | — | — |
+| D17 | PH0 | RXD2 (Serial 2 RX) | — | — |
+| D18 | PD3 | TXD1 (Serial 1 TX), INT3 | — | **INT3** |
+| D19 | PD2 | RXD1 (Serial 1 RX), INT2 | — | **INT2** |
+| D20 | PD1 | SDA (I²C Data), INT1 | — | **INT1** |
+| D21 | PD0 | SCL (I²C Clock), INT0 | — | **INT0** |
+| D22 | PA0 | ADC0 | — | — |
+| D23 | PA1 | ADC1 | — | — |
+| D24 | PA2 | ADC2 | — | — |
+| D25 | PA3 | ADC3 | — | — |
+| D26 | PA4 | ADC4 | — | — |
+| D27 | PA5 | ADC5 | — | — |
+| D28 | PA6 | ADC6 | — | — |
+| D29 | PA7 | ADC7 | — | — |
+| D30 | PC7 | — | — | — |
+| D31 | PC6 | — | — | — |
+| D32 | PC5 | — | — | — |
+| D33 | PC4 | — | — | — |
+| D34 | PC3 | — | — | — |
+| D35 | PC2 | — | — | — |
+| D36 | PC1 | — | — | — |
+| D37 | PC0 | — | — | — |
+| D38 | PD7 | T0 | — | — |
+| D39 | PG2 | — | — | — |
+| D40 | PG1 | — | — | — |
+| D41 | PG0 | — | — | — |
+| D42 | PL7 | — | — | — |
+| D43 | PL6 | — | — | — |
+| D44 | PL5 | OC5C | **Yes** | — |
+| D45 | PL4 | OC5B | **Yes** | — |
+| D46 | PL3 | OC5A | **Yes** | — |
+| D47 | PL2 | T5 | — | — |
+| D48 | PL1 | ICP5 | — | — |
+| D49 | PL0 | ICP4 | — | — |
+| D50 | PB3 | MISO (SPI), PCINT3 | — | — |
+| D51 | PB2 | MOSI (SPI), PCINT2 | — | — |
+| D52 | PB1 | SCK (SPI), PCINT1 | — | — |
+| D53 | PB0 | SS (SPI), PCINT0 | — | — |
+
+> **Sources:** The port mappings and alternate functions are taken from the official Arduino ATmega2560 pin mapping table. External interrupt assignments (INT0–INT5) are confirmed by the ATmega2560 technical reference.
+
+---
+
+#### Analog Input Pins (A0–A15)
+
+The Mega Mini provides **16 analog input channels** with 10-bit resolution (0–1023). These pins are on Port F (ADC0–ADC7) and Port K (ADC8–ADC15) of the ATmega2560.
+
+| Arduino Analog Pin | ATmega2560 Port Pin | ADC Channel | Can Also Be Used As |
+|---|---|---|---|
+| A0 | PF0 | ADC0 | Digital I/O |
+| A1 | PF1 | ADC1 | Digital I/O |
+| A2 | PF2 | ADC2 | Digital I/O |
+| A3 | PF3 | ADC3 | Digital I/O |
+| A4 | PF4 | ADC4 | Digital I/O |
+| A5 | PF5 | ADC5 | Digital I/O |
+| A6 | PF6 | ADC6 | Digital I/O |
+| A7 | PF7 | ADC7 | Digital I/O |
+| A8 | PK0 | ADC8 | Digital I/O |
+| A9 | PK1 | ADC9 | Digital I/O |
+| A10 | PK2 | ADC10 | Digital I/O |
+| A11 | PK3 | ADC11 | Digital I/O |
+| A12 | PK4 | ADC12 | Digital I/O |
+| A13 | PK5 | ADC13 | Digital I/O |
+| A14 | PK6 | ADC14 | Digital I/O |
+| A15 | PK7 | ADC15 | Digital I/O |
+
+**Important notes:**
+- The analog pins can also be used as digital I/O. In the Arduino Mega 2560 pin numbering scheme, A0–A15 correspond to digital pins **54–69**.
+- The analog reference voltage (AREF) pin is available separately. By default, the ADC uses the 5V rail as the reference. You can change this using `analogReference()`.
+- **Internal pull-ups** are available on all analog pins when used as digital inputs.
+
+---
+
+#### PWM Output Pins
+
+The Mega Mini provides **15 PWM channels**, generated by the ATmega2560's Timer/Counter peripherals. The PWM-capable pins are:
+
+| PWM Pin | ATmega2560 Timer | Notes |
+|---|---|---|
+| D2 | Timer 3 (OC3B) | 8-bit |
+| D3 | Timer 3 (OC3C) | 8-bit |
+| D4 | Timer 0 (OC0B) | 8-bit (used for `millis()` timing) |
+| D5 | Timer 3 (OC3A) | 8-bit |
+| D6 | Timer 4 (OC4A) | 16-bit |
+| D7 | Timer 4 (OC4B) | 16-bit |
+| D8 | Timer 4 (OC4C) | 16-bit |
+| D9 | Timer 2 (OC2B) | 8-bit |
+| D10 | Timer 2 (OC2A) | 8-bit |
+| D11 | Timer 1 (OC1A) | 16-bit |
+| D12 | Timer 1 (OC1B) | 16-bit |
+| D13 | Timer 0 (OC0A) / Timer 1 (OC1C) | 8-bit / 16-bit |
+| D44 | Timer 5 (OC5C) | 16-bit |
+| D45 | Timer 5 (OC5B) | 16-bit |
+| D46 | Timer 5 (OC5A) | 16-bit |
+
+**Caveats:**
+- **Pin D4** is tied to Timer 0, which is also used for `millis()` and `micros()`. Changing its PWM frequency will affect timing functions.
+- **Pins D11 and D12** (Timer 1) are used by the `Servo` library on some Arduino cores. If you use `Servo.h`, you may lose PWM on these pins.
+- The **`analogWrite()`** function accepts values from 0 (always off) to 255 (always on) for 8-bit timers, and 0–255 for 16-bit timers (the Arduino core scales the value).
+
+---
+
+#### Serial Communication (UART) Pins
+
+The ATmega2560 has **four hardware serial ports** (UARTs). On the Mega Mini, these are exposed on the following pins:
+
+| Serial Port | RX Pin | TX Pin | Notes |
+|---|---|---|---|
+| **Serial 0** | D0 (PE0) | D1 (PE1) | Used by the bootloader for programming via FTDI |
+| **Serial 1** | D19 (PD2) | D18 (PD3) | Free for peripherals |
+| **Serial 2** | D17 (PH0) | D16 (PH1) | Free for peripherals |
+| **Serial 3** | D15 (PJ0) | D14 (PJ1) | Free for peripherals |
+
+**Critical note:** Pins D0 and D1 are **reserved for USB-serial communication** during programming. If your sketch uses them for other purposes, the upload process may interfere. For most projects, use Serial1, Serial2, or Serial3 for external devices.
+
+---
+
+#### I²C (TWI) Pins
+
+The Mega Mini has a dedicated hardware I²C (TWI) interface on:
+
+| Signal | Arduino Pin | ATmega2560 Pin |
+|---|---|---|
+| **SDA** (Data) | D20 | PD1 |
+| **SCL** (Clock) | D21 | PD0 |
+
+**Important:** The Mega Mini does **not** have onboard I²C pull-up resistors. When connecting I²C devices, you must add external **4.7 kΩ pull-up resistors** from SDA and SCL to the 5V rail. Without these, I²C communication will fail or be unreliable.
+
+---
+
+#### SPI Pins
+
+The Mega Mini has a dedicated hardware SPI interface on the following pins:
+
+| Signal | Arduino Pin | ATmega2560 Pin |
+|---|---|---|
+| **MISO** (Master In, Slave Out) | D50 | PB3 |
+| **MOSI** (Master Out, Slave In) | D51 | PB2 |
+| **SCK** (Serial Clock) | D52 | PB1 |
+| **SS** (Slave Select) | D53 | PB0 |
+
+**Important:** The SPI pins are also available on the **6-pin ICSP header** (see below). When using the SPI library, the SS pin (D53) must be kept as an output (or set to input with pull-up) for the SPI hardware to operate correctly in master mode. If D53 is configured as an input without a pull-up, the ATmega2560 will automatically revert to slave mode.
+
+---
+
+#### External Interrupt Pins
+
+The Mega Mini supports external interrupts on the following pins:
+
+| Interrupt | Arduino Pin | ATmega2560 Pin | Notes |
+|---|---|---|---|
+| **INT0** | D21 | PD0 | Also SCL |
+| **INT1** | D20 | PD1 | Also SDA |
+| **INT2** | D19 | PD2 | Also RX1 |
+| **INT3** | D18 | PD3 | Also TX1 |
+| **INT4** | D2 | PE4 | Also PWM |
+| **INT5** | D3 | PE5 | Also PWM |
+
+These are confirmed by the ATmega2560 technical reference. Use `attachInterrupt()` with `digitalPinToInterrupt(pin)` to configure them.
+
+---
+
+#### ICSP Header (6-Pin)
+
+The Mega Mini includes a **6-pin ICSP (In-Circuit Serial Programming) header** on the board edge. This allows you to program the ATmega2560 directly using an external programmer (AVR ISP, USBasp, etc.), bypassing the bootloader entirely.
+
+| ICSP Pin | Signal | ATmega2560 Pin |
+|---|---|---|
+| 1 | MISO | PB3 (D50) |
+| 2 | VCC | 5V |
+| 3 | SCK | PB1 (D52) |
+| 4 | MOSI | PB2 (D51) |
+| 5 | RESET | RESET |
+| 6 | GND | GND |
+
+**Note:** The ICSP header is not the same as the FTDI header. The ICSP header is for direct microcontroller programming; the FTDI header is for uploading sketches via the bootloader.
+
+---
+
+#### FTDI / USB-TTL Header
+
+On the PRO Mini version (no onboard USB), programming is done through a dedicated **FTDI header**. The pinout is:
+
+| FTDI Adapter Pin | Mega 2560 PRO Mini Pin |
+|---|---|
+| TX | RX0 (D0) |
+| RX | TX0 (D1) |
+| DTR | DTR (auto-reset) |
+| GND | GND |
+| VCC (5V) | VCC |
+
+The **DTR line** is connected to the reset circuit via a capacitor. When the Arduino IDE initiates an upload, the DTR signal pulses, resetting the ATmega2560 and allowing the bootloader to run. This enables **auto-reset** during programming.
+
+> **Wiring caution:** A common mistake is to connect TX→TX and RX→RX. The correct wiring is **TX→RX** and **RX→TX** (crossover).
+
+---
+
+#### Power Pins
+
+| Pin | Description |
+|---|---|
+| **VIN** | External power input (6–12 V recommended, 6–20 V limits). Connects to the onboard voltage regulator. |
+| **5V** | Regulated 5V output/input. Can be used to power the board from a regulated 5V supply, or to power external 5V devices. |
+| **3.3V** | Regulated 3.3V output (max ~800 mA). Derived from the 5V rail via an onboard LDO. |
+| **GND** | Ground (multiple GND pins are available on the board). |
+| **AREF** | Analog reference voltage for the ADC. By default, the ADC uses the 5V rail. |
+| **RESET** | Active-low reset pin. Pull low to reset the ATmega2560. |
+
+**Power notes:**
+- The onboard LDO can supply approximately **800 mA on the 5V rail** and **800 mA on the 3.3V rail**. However, the higher the input voltage, the lower the available output current due to thermal dissipation.
+- The ATmega2560 itself draws ~20–30 mA at 16 MHz, 5V. The remaining current budget is available for peripherals.
+- The **3.3V rail** is derived from the 5V rail. If you need significant current at 3.3V, consider an external regulator.
+
+---
+
+#### Quick Reference: Pin Count Summary
+
+| Category | Count | Pins |
+|---|---|---|
+| Digital I/O | 54 | D0–D53 |
+| PWM Output | 15 | D2–D13, D44–D46 |
+| Analog Input | 16 | A0–A15 |
+| Hardware UART | 4 | Serial0–Serial3 |
+| I²C (TWI) | 1 | SDA (D20), SCL (D21) |
+| SPI | 1 | MISO (D50), MOSI (D51), SCK (D52), SS (D53) |
+| External Interrupt | 6 | INT0–INT5 (see table above) |
+
+See [further documentation](llm-generated/atmega2560-mega-mini.md) if needed.
+
+## 5. Sensors
 
 Currently, 5 sensors are used. See [calibration documentation](calibration.md) for calibration details.
 
 
-### 4.1 HX710B (pressure)
+### 5.1 HX710B (pressure)
 
 This is a piezoelectric differential sensor. Uses a similar protocol to I2C for communication. Clock speeds are far lower. Depends on a [HX711 library](https://www.arduinolibraries.info/libraries/hx711). The actual HX710B chip is the name for the ADC IC. Not sure what the whole module is named. 
 
@@ -71,7 +337,7 @@ This is a piezoelectric differential sensor. Uses a similar protocol to I2C for 
 | 3 | OUT / DOUT / DATA | Digital data output from the HX710B ADC. Connect this to a digital input on your microcontroller. |
 | 4 | SCK / CLK / SLC | Serial clock input. Connect this to a digital output on your microcontroller to clock out the data. |
 
-### 4.2 TGS2611 (CH4)
+### 5.2 TGS2611 (CH4)
 
 This is a gas sensor that detects combustible gases. Current implementation is tuned for CH4 (methane). Detects between 500 to 10,000 ppm.
 
@@ -94,7 +360,7 @@ This is a gas sensor that detects combustible gases. Current implementation is t
 - Sensor Resistance (Rs): 0.68 ~ 6.8 kΩ in 5000 ppm methane
 - Package: TO-5 metal can
 
-### 4.3 MH-Z19C (CO2)
+### 5.3 MH-Z19C (CO2)
 
 This is a CO2 sensor that detects the concentration of carbon dioxide in the air. Detects between 400 to 5,000 ppm.
 > Note: Rumen headspace gas is ~70% CO2 (~700,000 ppm). This sensor is fundamentally incompatible. This documentation exist for the sake of documentation. Future readers should consider fixing this.
@@ -153,7 +419,7 @@ Sensor is a one-wire digital temperature sensor. Uses its own [library](https://
 - Alarm Function: User-definable nonvolatile upper and lower temperature trigger points with alarm search command.
 
 
-### 4.5. PH-402C (pH)
+### 5.5. PH-402C (pH)
 
 The sensor is a pH probe that allows you to connect a BNC glass electrode to something accurately measured. Calibration is a pain. If issues were to be encountered in the future, try replacing this with something.
 

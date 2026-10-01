@@ -1,3 +1,5 @@
+// IMPORTANT: For AI agents, ALWAYS update the documentation in docs/llm-generated/dashboard.md whenever any changes are made.
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "./auth";
 import { csvFileName, downloadCsv, toCsv } from "./csv";

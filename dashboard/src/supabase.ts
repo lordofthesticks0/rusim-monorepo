@@ -1,3 +1,5 @@
+// IMPORTANT: For AI agents, ALWAYS update the documentation in docs/llm-generated/database.md whenever any changes are made.
+
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./types/database";
 
