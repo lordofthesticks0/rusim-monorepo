@@ -19,6 +19,8 @@
 .history-navigation { align-items: center; }
 .history-tab { border: 1px solid #dce2e8; border-radius: 5px; padding: 7px 10px; color: #5f6c7a; background: white; cursor: pointer; font-size: 12px; margin-left: 7px; }
 .history-tab[aria-pressed="true"] { color: white; background: #202936; border-color: #202936; }
+.history-actions { display: flex; flex-wrap: wrap; align-items: center; }
+.history-tab:disabled { opacity: .5; cursor: not-allowed; }
 .session-list, .result-list { display: grid; gap: 10px; margin-top: 18px; }
 .session-item { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; border-top: 1px solid #e2e6eb; padding: 12px 0; }
 .session-item:first-child { border-top: 0; padding-top: 0; }

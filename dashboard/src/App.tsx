@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "./auth";
+import { csvFileName, downloadCsv, toCsv } from "./csv";
 import {
   fetchReadings,
   fetchExperimentReadings,
   getParameterValue,
   isConcluded,
+  MAX_READING_ROWS,
   PARAMETER_NAMES,
   PARAMETER_UNITS,
   POLL_INTERVAL_MS,
@@ -308,7 +310,15 @@ function ExperimentHistoryView({
     {selectedExperiment && <>
       <section className="controls history-navigation">
         <div className="control-copy"><span className="label">Selected experiment</span><strong>{formatExperimentId(selectedExperiment.experiment_id)}</strong><span className="count">{selectedExperiment.concluded ? "Concluded" : "Live"}</span></div>
-        <div>
+        <div className="history-actions">
+          <button
+            className="history-tab"
+            onClick={() => downloadExperimentCsv(selectedExperiment.experiment_id, readings)}
+            disabled={detailLoading || detailError !== "" || readings.length === 0}
+            title={csvDisabledReason(readings.length, detailLoading, detailError)}
+          >
+            Download CSV
+          </button>
           <button className="history-tab" onClick={() => setHistoryPanel("readings")} aria-pressed={historyPanel === "readings"}>Bottle Readings</button>
           <button className="history-tab" onClick={() => setHistoryPanel("results")} aria-pressed={historyPanel === "results"}>Results</button>
         </div>
@@ -324,6 +334,9 @@ function ExperimentHistoryView({
       {detailError && <div className="notice">Unable to load experiment readings. <span>{detailError}</span></div>}
       {detailLoading && !detailError && <div className="notice">Loading experiment readings...</div>}
       {!detailLoading && !detailError && readings.length === 0 && <div className="notice">No readings are available for this experiment.</div>}
+      {isTruncated(readings.length) && <div className="notice">
+        Only the most recent {MAX_READING_ROWS.toLocaleString()} readings were loaded, so this experiment is incomplete on screen and any CSV export is truncated too.
+      </div>}
 
       {readings.length > 0 && historyPanel === "readings" && <>
         <section className="metrics">
@@ -381,6 +394,33 @@ function ExperimentResultsView({
       </div>
     </section>
   </>;
+}
+
+/**
+ * Saves the selected experiment's loaded readings as a CSV file.
+ *
+ * This exports what is already on screen rather than re-querying, so the file and
+ * the charts always describe the same rows. A truncated read therefore produces a
+ * truncated file, which is why the limit is called out on screen next to the
+ * button. Nothing happens for an experiment with no loaded rows.
+ */
+function downloadExperimentCsv(experimentId: number, readings: Reading[]): void {
+  const csv = toCsv(readings);
+  if (csv === "") return;
+  downloadCsv(csv, csvFileName(experimentId));
+}
+
+/** Explains a disabled download button, so the reason is not left to guesswork. */
+function csvDisabledReason(rowCount: number, loading: boolean, error: string): string {
+  if (loading) return "Readings are still loading";
+  if (error !== "") return "Readings failed to load, so there is nothing to export";
+  if (rowCount === 0) return "This experiment has no readings to export";
+  return "Download this experiment's readings as CSV";
+}
+
+/** Whether a read hit the row limit and therefore holds only part of the data. */
+function isTruncated(rowCount: number): boolean {
+  return rowCount >= MAX_READING_ROWS;
 }
 
 /** Pairs each bottle with its reading, so charts and tables can align by bottle. */

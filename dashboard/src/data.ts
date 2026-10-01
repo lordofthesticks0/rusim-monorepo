@@ -59,6 +59,25 @@ export const CONCLUDED_AFTER_MS = 10 * 60 * 1000;
 /** How often to re-check an experiment that still looks live. */
 export const POLL_INTERVAL_MS = 5 * 60 * 1000 + 30 * 1000;
 
+/**
+ * Upper bound on rows any single read returns.
+ *
+ * PostgREST caps each response at max_rows, so reads page rather than asking for
+ * everything at once. Callers that hit this bound receive a partial result, so
+ * anything presenting itself as a complete dataset (notably CSV export) must
+ * check the row count against this and say so.
+ */
+export const MAX_READING_ROWS = 5000;
+
+/**
+ * Rows requested per PostgREST request while paging.
+ *
+ * Must stay at or below the server's max_rows setting, otherwise every page
+ * returns a truncated response and the paging loop misreads the last one as
+ * the end of the data.
+ */
+const PAGE_SIZE = 1000;
+
 export function isConcluded(timestamp: string, now: number = Date.now()): boolean {
   const sampled = Date.parse(timestamp);
   if (Number.isNaN(sampled)) return true;
@@ -142,18 +161,13 @@ export async function fetchDevice(sessionToken: string): Promise<Device | undefi
 }
 
 export async function fetchReadings(sessionToken: string): Promise<Reading[]> {
-  // PostgREST caps a single response at max_rows (1000 locally, similarly
-  // bounded remotely), so a bare `.limit(5000)` would silently truncate.
-  // Page through instead, keeping the 5000-row safety cap.
-  const PAGE_SIZE = 1000;
-  const MAX_ROWS = 5000;
   const rows: ReadingRow[] = [];
-  for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
+  for (let offset = 0; offset < MAX_READING_ROWS; offset += PAGE_SIZE) {
     const { data, error } = await getSupabase(sessionToken)
       .from("readings")
       .select(READING_COLUMNS)
       .order("timestamp", { ascending: false })
-      .range(offset, Math.min(offset + PAGE_SIZE - 1, MAX_ROWS - 1));
+      .range(offset, Math.min(offset + PAGE_SIZE - 1, MAX_READING_ROWS - 1));
     if (error) throw error;
     rows.push(...(data ?? []));
     if (!data || data.length < PAGE_SIZE) break;
@@ -166,19 +180,19 @@ export async function fetchReadings(sessionToken: string): Promise<Reading[]> {
  * Reads every bottle's reading for one experiment.
  *
  * RLS already restricts this to the session's own device, so no device filter
- * is applied here.
+ * is applied here. Ordering by bottle then time keeps a multi-page read
+ * contiguous, so `computeBottleStats` sees each bottle's samples together.
  */
 export async function fetchExperimentReadings(sessionToken: string, experimentId: number): Promise<Reading[]> {
-  const PAGE_SIZE = 1000;
-  const MAX_ROWS = 5000;
   const rows: ReadingRow[] = [];
-  for (let offset = 0; offset < MAX_ROWS; offset += PAGE_SIZE) {
+  for (let offset = 0; offset < MAX_READING_ROWS; offset += PAGE_SIZE) {
     const { data, error } = await getSupabase(sessionToken)
       .from("readings")
       .select(READING_COLUMNS)
       .eq("experiment_id", experimentId)
       .order("bottle_id", { ascending: true })
-      .range(offset, Math.min(offset + PAGE_SIZE - 1, MAX_ROWS - 1));
+      .order("timestamp", { ascending: true })
+      .range(offset, Math.min(offset + PAGE_SIZE - 1, MAX_READING_ROWS - 1));
     if (error) throw error;
     rows.push(...(data ?? []));
     if (!data || data.length < PAGE_SIZE) break;
