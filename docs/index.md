@@ -1,4 +1,4 @@
-# Subsystem index
+# Repository Index
 
 Scope: every part of the repository, and the document that describes it. Use this
 to find the right file before reading anything else.

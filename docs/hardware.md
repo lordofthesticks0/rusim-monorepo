@@ -1,5 +1,14 @@
-# PCB Documentation
+# PCB
 The PCB uses a couple modules. The documentation are available below. Access the gerber files [here](https://drive.google.com/drive/folders/1VZM8af3p2Q1-N58rCPVywv5uHUcG0zeH?usp=drive_link).
+
+This section is work in progress.
+
+# 3D Models
+3D modelling uses Tinkercad. Models will be available soon. Contact me if I forgot to update this section.
+
+This section is work in progress.
+
+# Electronics
 
 ## 1. Motor Driver Module
 

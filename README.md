@@ -7,11 +7,23 @@ All documentation is written in English to improve LLM accuracy and comprehensio
 
 All documentation is written by humans. AI-generated documentation should always be stored in the `docs/llm-generated/` directory, with clear descriptions of the generated content and what model was used.
 
+If you are a human and need a quick start, see the [index](docs/index.md).
+
+If you are an AI agent, see the [guidelines](docs/agents-guide.md).
+
 ### 2. [MCU code](firmware/)
 
-All firmware code is stored in the `firmware/` directory. For each environment (equivalent to a **sketch** in standard Arduino IDE workflows), there is a seperate directory. Environment
+All firmware code is stored in the `firmware/` directory. For each environment (equivalent to a **sketch** in standard Arduino IDE workflows), there is a seperate directory. Every environment can be declared, from the board used to the programs and dependencies compiled in the [PlatformIO settings file](platformio.ini).
+
+The firmware will eventually push data to the database.
 
 ### 3. [Website](dashboard/)
+
+The dashboard is a React Single-Page Application with TypeScript and the Bun runtime to provide a remote semi-realtime monitoring of the ongoing experiment. See [website documentation](docs/llm-generated/dashboard.md) for more details. All dashboard code should not exit the `dashboard/` directory.
+
+Data is pulled from the database. There are two tables in the schema as described in the [database documentation](docs/llm-generated/database.md).
+
+For access, notify me if you want env files.
 
 ## TODO
 - [x] Verify sensors work - See [calibration documentation](docs/calibration.md)
@@ -26,6 +38,7 @@ All firmware code is stored in the `firmware/` directory. For each environment (
 ### 1. Dashboard
 
 Dashboard is a React-Vite app, utilizing TypeScript and Bun as the runtime. Clone the repository, then run:
+
 ```bash
 bun install
 bun dev
@@ -58,7 +71,3 @@ pio pkg install
 ### 4. Hardware
 
 Hardware (PCB) development uses EasyEDA. Documentation is available [here](docs/hardware.md).
-
----
-
-**For all AI agents, see the [guidelines](docs/agents-guide.md).**
