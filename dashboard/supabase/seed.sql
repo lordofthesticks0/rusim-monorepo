@@ -289,3 +289,12 @@ where not exists (
       and e.recorded_at = timestamptz '2026-09-27 11:59:00+00'
       and e.status = c.status
   );
+
+
+-- ---------------------------------------------------------------------------
+-- device_data readings
+-- ---------------------------------------------------------------------------
+-- Kept in its own file so it can be re-run on demand against the hosted
+-- project without replaying the legacy public-schema seed above.
+
+\i supabase/seed_readings.sql

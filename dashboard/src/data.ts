@@ -1,647 +1,266 @@
-import { supabase } from "./supabase";
-import type { Database, Json } from "./types/database";
-import type {
-  ChamberStatus,
-  DeviceStatus,
-  Experiment,
-  ExperimentSession,
-  ExperimentSessionStatus,
-  ExperimentStatus,
-  Metadata,
-  NodeStatus,
-  TelemetryReading,
-} from "./types/domain";
+import { getSupabase } from "./supabase";
+import type { Device, DeviceSession, Reading } from "./types/domain";
 
-export const PARAMETER_NAMES = ["CH4", "CO2", "pH", "Temperature", "Pressure"] as const;
+export const PARAMETER_NAMES = ["pH", "Temp", "CO2", "CH4", "Pressure"] as const;
+
+export type ParameterName = (typeof PARAMETER_NAMES)[number];
 
 export const PARAMETER_UNITS = {
-  CH4: "ppm",
-  CO2: "ppm",
   pH: "",
-  Temperature: "°C",
+  Temp: "°C",
+  CO2: "ppm",
+  CH4: "ppm",
   Pressure: "kPa",
-} as const satisfies Record<(typeof PARAMETER_NAMES)[number], string>;
+} as const satisfies Record<ParameterName, string>;
 
-export type DashboardTelemetryRow = TelemetryReading & {
-  device_id: string;
-  device_code: string;
-  device_name: string | null;
-  node_id: string;
-  node_code: string;
-  chamber_id: string;
-  chamber_code: string;
-  chamber_name: string | null;
+type ReadingRow = {
+  device_id: number;
+  bottle_id: number;
+  experiment_id: number;
+  timestamp: string;
+  ph: number | null;
+  pressure: number | null;
+  temp: number | null;
+  co2: number | null;
+  ch4: number | null;
 };
 
-export type DashboardChamber = {
-  id: string;
-  chamber_code: string;
-  chamber_name: string | null;
-  node_id: string;
-  node_code: string;
-  node_name: string;
-  device_id: string;
-  device_code: string;
-  device_name: string | null;
-  device_status: DeviceStatus;
-  node_status: NodeStatus;
-  chamber_status: ChamberStatus;
+const READING_COLUMNS = "device_id, bottle_id, experiment_id, timestamp, ph, pressure, temp, co2, ch4";
+
+/**
+ * A reading annotated with how concluded its experiment looks.
+ *
+ * The readings table holds one row per bottle per experiment, so "concluded" is
+ * inferred from the sample time rather than stored.
+ */
+export type ReadingWithStatus = Reading & { concluded: boolean };
+
+export type ExperimentSummary = {
+  experiment_id: number;
+  reading_count: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  concluded: boolean;
 };
 
-export type MonitoringStatus = {
-  system_active: boolean;
-  experiment: {
-    id: string;
-    experiment_code: string;
-    name: string;
-    status: string;
-    started_at: string | null;
-  } | null;
-  device: {
-    id: string;
-    device_code: string;
-    name: string;
-    status: DeviceStatus;
-  } | null;
-  node: {
-    id: string;
-    node_code: string;
-    name: string;
-    status: NodeStatus;
-  } | null;
-  chamber: {
-    id: string;
-    chamber_code: string;
-    name: string | null;
-    status: ChamberStatus;
-  } | null;
-};
-
-export type TelemetryDatabaseRow = Database["public"]["Tables"]["telemetry_readings"]["Row"];
-export type DeviceDatabaseRow = Database["public"]["Tables"]["devices"]["Row"];
-export type NodeDatabaseRow = Database["public"]["Tables"]["nodes"]["Row"];
-export type ChamberDatabaseRow = Database["public"]["Tables"]["chambers"]["Row"];
-export type ExperimentDatabaseRow = Database["public"]["Tables"]["experiments"]["Row"];
-
-export type ExperimentHistoryItem = Pick<Experiment, "id" | "experiment_code" | "name" | "description" | "status" | "started_at" | "ended_at">;
-
-export type ExperimentChamberSummary = {
-  id: string;
-  experiment_id: string;
-  chamber_id: string;
-  chamber_code: string;
-  chamber_name: string | null;
-  node_code: string;
-  node_name: string;
-};
-
-export type ExperimentSessionSummary = Pick<ExperimentSession, "id" | "session_number" | "status" | "started_at" | "ended_at">;
-
-export type MetricSummary = {
+/** Cross-bottle statistics for one parameter within one experiment. */
+export type ParameterStats = {
   min: number;
   average: number;
   max: number;
 };
 
-export type ExperimentChamberResult = ExperimentChamberSummary & {
-  record_count: number;
-  first_recorded_at: string | null;
-  last_recorded_at: string | null;
-  ch4: MetricSummary | null;
-  co2: MetricSummary | null;
-  ph: MetricSummary | null;
-  temperature: MetricSummary | null;
-  pressure: MetricSummary | null;
-};
+/**
+ * Readings stop counting as live once this stale, in milliseconds.
+ * A sample older than this means the device has gone quiet for that experiment.
+ */
+export const CONCLUDED_AFTER_MS = 10 * 60 * 1000;
 
-export type ExperimentResults = {
-  experiment_id: string;
-  sessions: ExperimentSessionSummary[];
-  chambers: ExperimentChamberResult[];
-  total_telemetry_count: number;
-};
+/** How often to re-check an experiment that still looks live. */
+export const POLL_INTERVAL_MS = 5 * 60 * 1000 + 30 * 1000;
 
-function normalizeMetadata(value: Json): Metadata {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
-
-  const metadata: Metadata = {};
-  for (const [key, entry] of Object.entries(value)) metadata[key] = entry;
-  return metadata;
+export function isConcluded(timestamp: string, now: number = Date.now()): boolean {
+  const sampled = Date.parse(timestamp);
+  if (Number.isNaN(sampled)) return true;
+  return now - sampled > CONCLUDED_AFTER_MS;
 }
 
-function normalizeQuality(value: string): TelemetryReading["quality"] {
-  if (value === "valid" || value === "suspect" || value === "invalid") return value;
-  throw new Error(`Unsupported telemetry quality: ${value}`);
-}
-
-export function normalizeDeviceStatus(value: string): DeviceStatus {
-  switch (value) {
-    case "provisioning":
-    case "online":
-    case "offline":
-    case "degraded":
-    case "maintenance":
-    case "retired":
-      return value;
-  }
-  throw new Error(`Unsupported device status: ${value}`);
-}
-
-export function normalizeNodeStatus(value: string): NodeStatus {
-  switch (value) {
-    case "provisioning":
-    case "online":
-    case "offline":
-    case "degraded":
-    case "fault":
-    case "maintenance":
-    case "retired":
-      return value;
-  }
-  throw new Error(`Unsupported node status: ${value}`);
-}
-
-export function normalizeChamberStatus(value: string): ChamberStatus {
-  switch (value) {
-    case "configured":
-    case "ready":
-    case "running":
-    case "complete":
-    case "empty":
-    case "missing":
-    case "fault":
-    case "disabled":
-      return value;
-  }
-  throw new Error(`Unsupported chamber status: ${value}`);
-}
-
-export function normalizeExperimentStatus(value: string): ExperimentStatus {
-  switch (value) {
-    case "draft":
-    case "scheduled":
-    case "active":
-    case "paused":
-    case "completed":
-    case "cancelled":
-    case "failed":
-      return value;
-  }
-  throw new Error(`Unsupported experiment status: ${value}`);
-}
-
-function normalizeExperimentSessionStatus(value: string): ExperimentSessionStatus {
-  switch (value) {
-    case "active":
-    case "paused":
-    case "interrupted":
-    case "completed":
-    case "abandoned":
-      return value;
-  }
-  throw new Error(`Unsupported experiment session status: ${value}`);
-}
-
-export async function fetchTelemetry(): Promise<DashboardTelemetryRow[]> {
-  const { data, error } = await supabase
-    .from("telemetry_readings")
-    .select(
-      `
-        id,
-        experiment_id,
-        experiment_chamber_id,
-        session_id,
-        recorded_at,
-        ch4,
-        co2,
-        ph,
-        temperature,
-        pressure,
-        quality,
-        source_sequence,
-        received_at,
-        metadata,
-        experiment_chamber:experiment_chambers!telemetry_readings_experiment_chamber_fk(
-          chamber:chambers!experiment_chambers_chamber_id_fkey(
-            id,
-            chamber_code,
-            name,
-            node:nodes!bottles_node_id_fkey(
-              id,
-              node_code,
-              device:devices!nodes_device_id_fkey(
-                id,
-                device_code,
-                name
-              )
-            )
-          )
-        )
-      `,
-    )
-    .order("recorded_at", { ascending: false })
-    .limit(5000);
-  if (error) throw error;
-
-  return (data ?? []).map((row): DashboardTelemetryRow => ({
-    id: row.id,
+function toReading(row: ReadingRow): Reading {
+  return {
+    device_id: row.device_id,
+    bottle_id: row.bottle_id,
     experiment_id: row.experiment_id,
-    experiment_chamber_id: row.experiment_chamber_id,
-    session_id: row.session_id,
-    recorded_at: row.recorded_at,
-    ch4: row.ch4,
-    co2: row.co2,
+    timestamp: row.timestamp,
     ph: row.ph,
-    temperature: row.temperature,
     pressure: row.pressure,
-    quality: normalizeQuality(row.quality),
-    source_sequence: row.source_sequence,
-    received_at: row.received_at,
-    metadata: normalizeMetadata(row.metadata),
-    device_id: row.experiment_chamber.chamber.node.device.id,
-    device_code: row.experiment_chamber.chamber.node.device.device_code,
-    device_name: row.experiment_chamber.chamber.node.device.name,
-    node_id: row.experiment_chamber.chamber.node.id,
-    node_code: row.experiment_chamber.chamber.node.node_code,
-    chamber_id: row.experiment_chamber.chamber.id,
-    chamber_code: row.experiment_chamber.chamber.chamber_code,
-    chamber_name: row.experiment_chamber.chamber.name,
-  }));
+    temp: row.temp,
+    co2: row.co2,
+    ch4: row.ch4,
+  };
 }
 
-export async function fetchChambers(): Promise<DashboardChamber[]> {
-  const { data, error } = await supabase
-    .from("chambers")
-    .select(
-      `
-        id,
-        chamber_code,
-        name,
-        status,
-        node:nodes!bottles_node_id_fkey(
-          id,
-          node_code,
-          name,
-          status,
-          device:devices!nodes_device_id_fkey(
-            id,
-            device_code,
-            name,
-            status
-          )
-        )
-      `,
-    )
-    .order("chamber_code", { ascending: true });
-  if (error) throw error;
+/**
+ * Exchanges a plaintext device token for a session.
+ *
+ * The database does the hashing and comparison, so the plaintext never reaches
+ * storage. The returned session token is what scopes every later read.
+ */
+export async function authenticate(deviceToken: string): Promise<DeviceSession> {
+  const { data, error } = await getSupabase(null).rpc("authenticate", { p_token: deviceToken });
+  if (error) throw new Error("Invalid device token.");
+  const row = data?.[0];
+  if (!row) throw new Error("Invalid device token.");
 
-  return (data ?? []).map((row): DashboardChamber => ({
-    id: row.id,
-    chamber_code: row.chamber_code,
-    chamber_name: row.name,
-    node_id: row.node.id,
-    node_code: row.node.node_code,
-    node_name: row.node.name,
-    device_id: row.node.device.id,
-    device_code: row.node.device.device_code,
-    device_name: row.node.device.name,
-    device_status: normalizeDeviceStatus(row.node.device.status),
-    node_status: normalizeNodeStatus(row.node.status),
-    chamber_status: normalizeChamberStatus(row.status),
-  }));
+  return {
+    sessionToken: row.session_token,
+    device: {
+      device_id: row.device_id,
+      bottle_count: row.bottle_count,
+      owner_name: row.owner_name,
+      owner_email: row.owner_email,
+    },
+    expiresAt: row.expires_at,
+  };
 }
 
-export async function fetchMonitoringStatus(
-  selectedChamber: DashboardChamber | undefined,
-): Promise<MonitoringStatus> {
-  const { data, error } = await supabase
-    .from("experiments")
-    .select("id, experiment_code, name, status, started_at")
-    .eq("status", "active")
-    .order("started_at", { ascending: false, nullsFirst: false })
-    .limit(1)
+/**
+ * Ends the caller's session server side.
+ *
+ * A failure here must not trap the operator in the dashboard, since the
+ * session expires on its own within a day.
+ */
+export async function signOut(sessionToken: string): Promise<void> {
+  try {
+    await getSupabase(sessionToken).rpc("revoke_session");
+  } catch {
+    // Ignored deliberately; see above.
+  }
+}
+
+export async function fetchDevice(sessionToken: string): Promise<Device | undefined> {
+  const { data, error } = await getSupabase(sessionToken)
+    .from("devices")
+    .select("device_id, bottle_count, owner_name, owner_email")
     .maybeSingle();
   if (error) throw error;
-
-  const experiment = data
-    ? {
-      id: data.id,
-      experiment_code: data.experiment_code,
-      name: data.name,
-      status: data.status,
-      started_at: data.started_at,
-    }
-    : null;
-  const device = selectedChamber
-    ? {
-      id: selectedChamber.device_id,
-      device_code: selectedChamber.device_code,
-      name: selectedChamber.device_name ?? selectedChamber.device_code,
-      status: selectedChamber.device_status,
-    }
-    : null;
-  const node = selectedChamber
-    ? {
-      id: selectedChamber.node_id,
-      node_code: selectedChamber.node_code,
-      name: selectedChamber.node_name,
-      status: selectedChamber.node_status,
-    }
-    : null;
-  const chamber = selectedChamber
-    ? {
-      id: selectedChamber.id,
-      chamber_code: selectedChamber.chamber_code,
-      name: selectedChamber.chamber_name,
-      status: selectedChamber.chamber_status,
-    }
-    : null;
+  if (!data) return undefined;
 
   return {
-    system_active: experiment !== null
-      && device?.status === "online"
-      && node?.status === "online"
-      && chamber?.status === "running",
-    experiment,
-    device,
-    node,
-    chamber,
+    device_id: data.device_id,
+    bottle_count: data.bottle_count,
+    owner_name: data.owner_name,
+    owner_email: data.owner_email,
   };
 }
 
-export function mapRealtimeTelemetryRow(
-  row: TelemetryDatabaseRow,
-  context: DashboardTelemetryRow | undefined,
-): DashboardTelemetryRow | undefined {
-  if (!context || context.experiment_chamber_id !== row.experiment_chamber_id) return undefined;
-
-  return {
-    ...context,
-    id: row.id,
-    experiment_id: row.experiment_id,
-    experiment_chamber_id: row.experiment_chamber_id,
-    session_id: row.session_id,
-    recorded_at: row.recorded_at,
-    ch4: row.ch4,
-    co2: row.co2,
-    ph: row.ph,
-    temperature: row.temperature,
-    pressure: row.pressure,
-    quality: normalizeQuality(row.quality),
-    source_sequence: row.source_sequence,
-    received_at: row.received_at,
-    metadata: normalizeMetadata(row.metadata),
-  };
-}
-
-export async function fetchExperiments(): Promise<ExperimentHistoryItem[]> {
-  const { data, error } = await supabase
-    .from("experiments")
-    .select("id, experiment_code, name, description, status, started_at, ended_at")
-    .order("started_at", { ascending: false, nullsFirst: false });
-  if (error) throw error;
-
-  return (data ?? []).map((row): ExperimentHistoryItem => ({
-    id: row.id,
-    experiment_code: row.experiment_code,
-    name: row.name,
-    description: row.description,
-    status: normalizeExperimentStatus(row.status),
-    started_at: row.started_at,
-    ended_at: row.ended_at,
-  }));
-}
-
-export async function fetchExperimentChambers(experimentId: string): Promise<ExperimentChamberSummary[]> {
-  const { data, error } = await supabase
-    .from("experiment_chambers")
-    .select(
-      `
-        id,
-        experiment_id,
-        chamber_id,
-        chamber:chambers!experiment_chambers_chamber_id_fkey(
-          chamber_code,
-          name,
-          node:nodes!bottles_node_id_fkey(
-            node_code,
-            name
-          )
-        )
-      `,
-    )
-    .eq("experiment_id", experimentId)
-    .order("assigned_at", { ascending: true });
-  if (error) throw error;
-
-  return (data ?? []).map((row): ExperimentChamberSummary => ({
-    id: row.id,
-    experiment_id: row.experiment_id,
-    chamber_id: row.chamber_id,
-    chamber_code: row.chamber.chamber_code,
-    chamber_name: row.chamber.name,
-    node_code: row.chamber.node.node_code,
-    node_name: row.chamber.node.name,
-  }));
-}
-
-export async function fetchExperimentTelemetry(
-  experimentId: string,
-  experimentChamberId: string,
-): Promise<DashboardTelemetryRow[]> {
-  const { data, error } = await supabase
-    .from("telemetry_readings")
-    .select(
-      `
-        id,
-        experiment_id,
-        experiment_chamber_id,
-        session_id,
-        recorded_at,
-        ch4,
-        co2,
-        ph,
-        temperature,
-        pressure,
-        quality,
-        source_sequence,
-        received_at,
-        metadata,
-        experiment_chamber:experiment_chambers!telemetry_readings_experiment_chamber_fk(
-          chamber:chambers!experiment_chambers_chamber_id_fkey(
-            id,
-            chamber_code,
-            name,
-            node:nodes!bottles_node_id_fkey(
-              id,
-              node_code,
-              name,
-              device:devices!nodes_device_id_fkey(
-                id,
-                device_code,
-                name
-              )
-            )
-          )
-        )
-      `,
-    )
-    .eq("experiment_id", experimentId)
-    .eq("experiment_chamber_id", experimentChamberId)
-    .order("recorded_at", { ascending: false })
+export async function fetchReadings(sessionToken: string): Promise<Reading[]> {
+  const { data, error } = await getSupabase(sessionToken)
+    .from("readings")
+    .select(READING_COLUMNS)
+    .order("timestamp", { ascending: false })
     .limit(5000);
   if (error) throw error;
 
-  return (data ?? []).map((row): DashboardTelemetryRow => ({
-    id: row.id,
-    experiment_id: row.experiment_id,
-    experiment_chamber_id: row.experiment_chamber_id,
-    session_id: row.session_id,
-    recorded_at: row.recorded_at,
-    ch4: row.ch4,
-    co2: row.co2,
-    ph: row.ph,
-    temperature: row.temperature,
-    pressure: row.pressure,
-    quality: normalizeQuality(row.quality),
-    source_sequence: row.source_sequence,
-    received_at: row.received_at,
-    metadata: normalizeMetadata(row.metadata),
-    device_id: row.experiment_chamber.chamber.node.device.id,
-    device_code: row.experiment_chamber.chamber.node.device.device_code,
-    device_name: row.experiment_chamber.chamber.node.device.name,
-    node_id: row.experiment_chamber.chamber.node.id,
-    node_code: row.experiment_chamber.chamber.node.node_code,
-    chamber_id: row.experiment_chamber.chamber.id,
-    chamber_code: row.experiment_chamber.chamber.chamber_code,
-    chamber_name: row.experiment_chamber.chamber.name,
-  }));
+  return (data ?? []).map(toReading);
 }
 
-async function fetchExperimentSessions(experimentId: string): Promise<ExperimentSessionSummary[]> {
-  const { data, error } = await supabase
-    .from("experiment_sessions")
-    .select("id, session_number, status, started_at, ended_at")
+/**
+ * Reads every bottle's reading for one experiment.
+ *
+ * RLS already restricts this to the session's own device, so no device filter
+ * is applied here.
+ */
+export async function fetchExperimentReadings(sessionToken: string, experimentId: number): Promise<Reading[]> {
+  const { data, error } = await getSupabase(sessionToken)
+    .from("readings")
+    .select(READING_COLUMNS)
     .eq("experiment_id", experimentId)
-    .order("session_number", { ascending: true });
-  if (error) throw error;
-
-  return (data ?? []).map((row): ExperimentSessionSummary => ({
-    id: row.id,
-    session_number: row.session_number,
-    status: normalizeExperimentSessionStatus(row.status),
-    started_at: row.started_at,
-    ended_at: row.ended_at,
-  }));
-}
-
-async function fetchExperimentTelemetryForResults(experimentId: string): Promise<DashboardTelemetryRow[]> {
-  const { data, error } = await supabase
-    .from("telemetry_readings")
-    .select(
-      `
-        id,
-        experiment_id,
-        experiment_chamber_id,
-        session_id,
-        recorded_at,
-        ch4,
-        co2,
-        ph,
-        temperature,
-        pressure,
-        quality,
-        source_sequence,
-        received_at,
-        metadata,
-        experiment_chamber:experiment_chambers!telemetry_readings_experiment_chamber_fk(
-          chamber:chambers!experiment_chambers_chamber_id_fkey(
-            id,
-            chamber_code,
-            name,
-            node:nodes!bottles_node_id_fkey(
-              id,
-              node_code,
-              name,
-              device:devices!nodes_device_id_fkey(
-                id,
-                device_code,
-                name
-              )
-            )
-          )
-        )
-      `,
-    )
-    .eq("experiment_id", experimentId)
-    .order("recorded_at", { ascending: true })
+    .order("bottle_id", { ascending: true })
     .limit(5000);
   if (error) throw error;
 
-  return (data ?? []).map((row): DashboardTelemetryRow => ({
-    id: row.id,
-    experiment_id: row.experiment_id,
-    experiment_chamber_id: row.experiment_chamber_id,
-    session_id: row.session_id,
-    recorded_at: row.recorded_at,
-    ch4: row.ch4,
-    co2: row.co2,
-    ph: row.ph,
-    temperature: row.temperature,
-    pressure: row.pressure,
-    quality: normalizeQuality(row.quality),
-    source_sequence: row.source_sequence,
-    received_at: row.received_at,
-    metadata: normalizeMetadata(row.metadata),
-    device_id: row.experiment_chamber.chamber.node.device.id,
-    device_code: row.experiment_chamber.chamber.node.device.device_code,
-    device_name: row.experiment_chamber.chamber.node.device.name,
-    node_id: row.experiment_chamber.chamber.node.id,
-    node_code: row.experiment_chamber.chamber.node.node_code,
-    chamber_id: row.experiment_chamber.chamber.id,
-    chamber_code: row.experiment_chamber.chamber.chamber_code,
-    chamber_name: row.experiment_chamber.chamber.name,
-  }));
+  return (data ?? []).map(toReading);
 }
 
-function summarizeMetric(values: number[]): MetricSummary | null {
-  if (values.length === 0) return null;
+/**
+ * Groups readings into one summary per experiment, newest first.
+ *
+ * Derived from the readings themselves because the schema has no experiments
+ * table; experiment 0 is the testing experiment and sorts first.
+ */
+export function summarizeExperiments(readings: Reading[], now: number = Date.now()): ExperimentSummary[] {
+  const summaries = new Map<number, ExperimentSummary>();
+
+  for (const reading of readings) {
+    const existing = summaries.get(reading.experiment_id);
+    if (!existing) {
+      summaries.set(reading.experiment_id, {
+        experiment_id: reading.experiment_id,
+        reading_count: 1,
+        first_timestamp: reading.timestamp,
+        last_timestamp: reading.timestamp,
+        concluded: isConcluded(reading.timestamp, now),
+      });
+      continue;
+    }
+
+    existing.reading_count += 1;
+    if (reading.timestamp < (existing.first_timestamp ?? reading.timestamp)) {
+      existing.first_timestamp = reading.timestamp;
+    }
+    if (reading.timestamp > (existing.last_timestamp ?? reading.timestamp)) {
+      existing.last_timestamp = reading.timestamp;
+    }
+    // An experiment stays live while any of its samples is still fresh.
+    if (!isConcluded(reading.timestamp, now)) existing.concluded = false;
+  }
+
+  return [...summaries.values()].sort((left, right) => right.experiment_id - left.experiment_id);
+}
+
+/**
+ * Reads one parameter from a sample.
+ *
+ * Returns null when the sensor produced no value, so callers must handle a
+ * missing measurement rather than assuming every reported sample is complete.
+ */
+export function getParameterValue(reading: Reading, parameter: ParameterName): number | null {
+  switch (parameter) {
+    case "pH": return reading.ph;
+    case "Temp": return reading.temp;
+    case "CO2": return reading.co2;
+    case "CH4": return reading.ch4;
+    case "Pressure": return reading.pressure;
+  }
+}
+
+/**
+ * Determines which bottles reported at a given sample time.
+ *
+ * A bottle that is configured on the device but has no row at the latest sample
+ * is treated as disconnected: it sent nothing at all for that timestamp. This is
+ * distinct from a row that exists with null measurements, which means the bottle
+ * reported but that one sensor failed.
+ *
+ * Returns the connected and disconnected bottle ids for the most recent sample.
+ */
+export function splitBottlesByPresence(
+  readings: Reading[],
+  bottleCount: number,
+): { latestSample: string | null; connected: number[]; disconnected: number[] } {
+  const all = Array.from({ length: bottleCount }, (_, bottleId) => bottleId);
+  if (readings.length === 0) {
+    return { latestSample: null, connected: [], disconnected: all };
+  }
+
+  const latestSample = readings.reduce(
+    (latest, reading) => (reading.timestamp > latest ? reading.timestamp : latest),
+    readings[0]!.timestamp,
+  );
+  const reporting = new Set(
+    readings.filter((reading) => reading.timestamp === latestSample).map((reading) => reading.bottle_id),
+  );
+
   return {
-    min: Math.min(...values),
-    average: values.reduce((sum, value) => sum + value, 0) / values.length,
-    max: Math.max(...values),
+    latestSample,
+    connected: all.filter((bottleId) => reporting.has(bottleId)),
+    disconnected: all.filter((bottleId) => !reporting.has(bottleId)),
   };
 }
 
-export async function fetchExperimentResults(experimentId: string): Promise<ExperimentResults> {
-  const [sessions, chamberSummaries, telemetryRows] = await Promise.all([
-    fetchExperimentSessions(experimentId),
-    fetchExperimentChambers(experimentId),
-    fetchExperimentTelemetryForResults(experimentId),
-  ]);
-
-  const chambers = chamberSummaries.map((chamber): ExperimentChamberResult => {
-    const rows = telemetryRows.filter(
-      (row) => row.experiment_id === experimentId && row.experiment_chamber_id === chamber.id,
-    );
-    const recordedAt = rows.map((row) => row.recorded_at).sort();
-    return {
-      ...chamber,
-      record_count: rows.length,
-      first_recorded_at: recordedAt[0] ?? null,
-      last_recorded_at: recordedAt[recordedAt.length - 1] ?? null,
-      ch4: summarizeMetric(rows.map((row) => row.ch4)),
-      co2: summarizeMetric(rows.map((row) => row.co2)),
-      ph: summarizeMetric(rows.map((row) => row.ph)),
-      temperature: summarizeMetric(rows.map((row) => row.temperature)),
-      pressure: summarizeMetric(rows.map((row) => row.pressure)),
-    };
-  });
-
+/**
+ * Cross-bottle statistics for one parameter.
+ *
+ * Nulls are excluded rather than treated as zero: a bottle that reported no
+ * value should lower the sample count, not drag the average toward nothing.
+ * Returns null when no bottle produced a value at all.
+ */
+export function summarizeParameter(values: Array<number | null>): ParameterStats | null {
+  const reported = values.filter((value): value is number => value !== null);
+  if (reported.length === 0) return null;
   return {
-    experiment_id: experimentId,
-    sessions,
-    chambers,
-    total_telemetry_count: telemetryRows.filter((row) => row.experiment_id === experimentId).length,
+    min: Math.min(...reported),
+    average: reported.reduce((sum, value) => sum + value, 0) / reported.length,
+    max: Math.max(...reported),
   };
 }

@@ -27,6 +27,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 *.tsbuildinfo
 
+# bunx scratch directories created when running the Supabase CLI via bunx
+.bun-tmp
+
 # IntelliJ based IDEs
 .idea
 

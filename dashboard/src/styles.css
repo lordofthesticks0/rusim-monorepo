@@ -37,6 +37,14 @@
 .nav-tab { border: 1px solid #dce2e8; border-radius: 6px; padding: 9px 13px; color: #697584; background: #f8fafc; cursor: pointer; font-size: 12px; }
 .nav-tab:hover { border-color: #2462ee; color: #2462ee; }
 .nav-tab.active { border-color: #2462ee; background: #2462ee; color: white; box-shadow: 0 3px 8px rgba(36, 98, 238, .18); }
+.login-panel { display: grid; gap: 16px; justify-items: start; max-width: 480px; }
+.login-field { display: grid; gap: 7px; width: 100%; }
+.login-field input { font: inherit; padding: 11px 13px; border: 1px solid #dce2e8; border-radius: 7px; width: 100%; }
+.login-field input:focus { outline: 2px solid #2462ee; outline-offset: 1px; border-color: #2462ee; }
+.login-error { margin-bottom: 0; width: 100%; }
+.login-hint { color: #87919e; font-size: 11px; margin: 0; }
+.link-button { background: none; border: 0; padding: 0; color: #2462ee; cursor: pointer; font: inherit; text-decoration: underline; }
+.refresh:disabled { opacity: .55; cursor: not-allowed; }
 .history-chart-grid { display: grid; gap: 16px; }
 .telemetry-chart-panel { min-width: 0; }
 .telemetry-chart-panel h2 { font-size: 18px; }
