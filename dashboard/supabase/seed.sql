@@ -294,7 +294,10 @@ where not exists (
 -- ---------------------------------------------------------------------------
 -- device_data readings
 -- ---------------------------------------------------------------------------
--- Kept in its own file so it can be re-run on demand against the hosted
--- project without replaying the legacy public-schema seed above.
-
-\i supabase/seed_readings.sql
+-- Not seeded here. Migration 20260930172000 already populates experiment 0, so
+-- a reset produces a dashboard with data in it.
+--
+-- Regenerating readings on demand is a script rather than a seed file, because
+-- `supabase db reset` cannot be re-run to pick up new data and every knob is
+-- parameterised. `bun run dev-db` owns that SQL; keeping a second copy in a .sql
+-- file would only let the two drift apart.

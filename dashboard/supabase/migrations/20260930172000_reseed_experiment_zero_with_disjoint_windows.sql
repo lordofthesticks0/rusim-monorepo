@@ -6,10 +6,9 @@
 -- experiments on one device can coexist without colliding on the
 -- (device_id, bottle_id, timestamp) primary key.
 --
--- The canonical, re-runnable script is supabase/seed_readings.sql, which takes
--- these values as psql variables. They are inlined here because `supabase db
--- push` cannot pass -v flags, so this migration records only the initial
--- population. Use `bun run add-fake-data` to regenerate.
+-- This migration records only the initial population, with the values inlined
+-- because migrations cannot take parameters. `bun run dev-db` owns the
+-- parameterised version and is what regenerates readings.
 
 
 begin;

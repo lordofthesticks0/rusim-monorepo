@@ -6,8 +6,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "add-fake-data": "bun run scripts/add-fake-data.ts",
-    "set-dev-token": "bun run scripts/set-dev-token.ts"
+    "dev-db": "bun run scripts/dev-db.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.57.4",
