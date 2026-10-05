@@ -1,11 +1,11 @@
 #include "ui_shell.h"
 
 #include "fake_data.h"
-#include "screen_boot.h"
 #include "screen_control.h"
 #include "screen_data.h"
 #include "screen_home.h"
 #include "screen_info.h"
+#include "screen_setup.h"
 #include "ui_config.h"
 
 // Layout: status bar 800x44 on top, content 800x436 below.
@@ -24,7 +24,7 @@ static bool s_warn41Shown = false;
 static bool s_trip45Shown = false;
 
 // Current route for in-place refresh.
-static int s_route = 0;  // 0 home, 1 picker, 2 cluster, 3 bottle, 4 control, 5 info
+static int s_route = 0;  // 0 home, 1 picker, 2 cluster, 3 bottle, 4 control, 5 info, 6 setup
 static int s_argC = 0;
 static int s_argB = 0;
 
@@ -211,6 +211,9 @@ static void render_current() {
     case 5:
       screen_info_show(s_content);
       break;
+    case 6:
+      screen_setup_show(s_content);
+      break;
     default:
       screen_home_show(s_content);
       break;
@@ -244,9 +247,15 @@ void ui_show_info() {
   s_route = 5;
   render_current();
 }
+void ui_show_setup() {
+  s_route = 6;
+  render_current();
+}
+bool ui_is_setup() { return s_route == 6; }
 
 void ui_refresh_current() {
-  if (!g.experimentRunning) return;  // boot gate still up
+  if (!g.experimentRunning) return;  // setup still up
+  if (s_route == 6) return;          // never wipe typed login text
   render_current();
   ui_update_bell();
 }
@@ -305,8 +314,7 @@ void ui_init() {
   lv_obj_set_size(s_content, 800, 436);
   style_plain(s_content, UI_COL_BG);
 
-  ui_show_home();
+  ui_show_setup();  // first route until the WT32 reports RESULT=success
   ui_update_bell();
-  screen_boot_show_gate();  // blocking gate on top until confirmed
   lv_timer_create(on_push_timer, UI_PUSH_PERIOD_MS, nullptr);
 }

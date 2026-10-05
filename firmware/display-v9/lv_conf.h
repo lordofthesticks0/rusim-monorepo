@@ -710,7 +710,7 @@
 
 #define LV_USE_BUTTON        1
 
-#define LV_USE_BUTTONMATRIX  0
+#define LV_USE_BUTTONMATRIX  1
 
 #define LV_USE_CALENDAR   0
 #if LV_USE_CALENDAR
@@ -727,7 +727,7 @@
     #define LV_USE_CALENDAR_CHINESE 0
 #endif  /*LV_USE_CALENDAR*/
 
-#define LV_USE_CANVAS     0
+#define LV_USE_CANVAS     1   /**< Required by LV_USE_QRCODE */
 
 #define LV_USE_CHART      1
 
@@ -739,7 +739,7 @@
 
 #define LV_USE_IMAGEBUTTON     0
 
-#define LV_USE_KEYBOARD   0
+#define LV_USE_KEYBOARD   0   /**< Was the /setup credential entry; now QR + phone */
 
 #define LV_USE_LABEL      1
 #if LV_USE_LABEL
@@ -937,7 +937,7 @@
 #define LV_USE_RLE 0
 
 /** QR code library */
-#define LV_USE_QRCODE 0
+#define LV_USE_QRCODE 1   /**< /setup shows a Wi-Fi join code, then the URL */
 
 /** Barcode code library */
 #define LV_USE_BARCODE 0

@@ -1,17 +1,25 @@
 #include "serial_cmd.h"
 
 #include "fake_data.h"
+#include "link_modbus.h"
+#include "provision_ap.h"
 #include "ui_config.h"
 #include "ui_shell.h"
 
-static char s_line[96];
+// 96 bytes was sized for the one-argument fake-data commands. CREDS carries a
+// username and a password of up to LINK_USER_MAX / LINK_PASS_MAX, so the
+// buffer has to fit the command word, both fields, two spaces and the
+// terminator. 200 is comfortably above that and still bounded.
+static char s_line[200];
 static size_t s_len = 0;
 
 static void print_help() {
   Serial.println("CMDS: TEMP <f> | SETPOINT <f> | DURATION <1-99> | STIRRER ON|OFF |");
   Serial.println("      POST ON|OFF | NODE <0-5> ON|OFF | NULL <c> <b> <s> |");
-  Serial.println("      UNNULL <c> <b> <s> | PUSH | STATUS | HELP");
+  Serial.println("      UNNULL <c> <b> <s> | PUSH | STATUS | LINK | HELP");
   Serial.println("      (s = 0 CO2,1 CH4,2 Press,3 pH,4 Temp)");
+  Serial.println("CREDS <user> <pass>   stage portal credentials for the WT32");
+  Serial.println("AP                    toggle the cloaked SoftAP credential form");
 }
 
 static void print_status() {
@@ -21,6 +29,27 @@ static void print_status() {
   for (int c = 0; c < UI_CLUSTERS; c++) {
     Serial.printf("node %d: %s\n", c, g.cluster[c].online ? "ONLINE" : "OFFLINE");
   }
+}
+
+// Credentials sourced from the phone form on /setup, and staged onto the
+// Modbus link exactly as the on-screen Confirm does. Username only: the
+// password would land in the terminal scrollback and in any captured log,
+// which is what the non-echoing serial prompt in the WT32 ping-test exists
+// to avoid. Use the SoftAP or the touchscreen for the password itself.
+static void handle_creds(char *args) {
+  char *user = strtok(args, " \t");
+  char *pass = strtok(nullptr, " \t");
+  if (user == nullptr || pass == nullptr) {
+    Serial.println("usage: CREDS <user> <pass>");
+    return;
+  }
+  int dur = g.durationH;
+  if (dur < UI_DURATION_MIN_H) dur = UI_DURATION_MIN_H;
+  if (dur > UI_DURATION_MAX_H) dur = UI_DURATION_MAX_H;
+  g.durationH = dur;
+  link_modbus_set_credentials(user, pass, dur);
+  Serial.printf("[SETUP] creds staged from serial user='%s' dur=%dh\n", user,
+                dur);
 }
 
 static bool parse_onoff(const char *t, bool &out) {
@@ -36,6 +65,9 @@ static bool parse_onoff(const char *t, bool &out) {
 }
 
 static void handle_line(char *line) {
+  // Captured before strtok starts replacing delimiters with NULs.
+  const size_t lineLen = strlen(line);
+
   // Tokenize: CMD [args...]
   char *cmd = strtok(line, " \t");
   if (cmd == nullptr || *cmd == '\0') return;
@@ -43,10 +75,42 @@ static void handle_line(char *line) {
 
   bool mutated = false;
 
-  if (strcmp(cmd, "HELP") == 0 || strcmp(cmd, "?") == 0) {
+  if (strcmp(cmd, "CREDS") == 0) {
+    // strtok replaced the first delimiter after the command word with a NUL,
+    // so the argument text starts one byte past the end of cmd. If cmd ran to
+    // the end of the line there was no delimiter, and stepping over the
+    // terminator would read past the line into whatever the previous, longer
+    // command left in the buffer.
+    size_t cmdLen = strlen(cmd);
+    if (cmd + cmdLen >= line + lineLen) {
+      Serial.println("usage: CREDS <user> <pass>");
+      return;
+    }
+    handle_creds(cmd + cmdLen + 1);
+    return;
+  } else if (strcmp(cmd, "AP") == 0) {
+    if (provision_ap_active()) {
+      provision_ap_end();
+      Serial.println("[AP] stopped");
+    } else {
+      provision_ap_begin();
+      if (provision_ap_active()) {
+        char payload[PROVISION_QR_MAX];
+        provision_ap_wifi_qr_payload(payload, sizeof(payload));
+        Serial.printf("[AP] ssid='%s' hidden=%d\n", provision_ap_ssid(),
+                      provision_ap_hidden() ? 1 : 0);
+        Serial.printf("[AP] step 1 QR: %s\n", payload);
+        Serial.printf("[AP] step 2 QR: %s\n", provision_ap_url());
+      } else {
+        Serial.println("[AP] failed to start");
+      }
+    }
+  } else if (strcmp(cmd, "HELP") == 0 || strcmp(cmd, "?") == 0) {
     print_help();
   } else if (strcmp(cmd, "STATUS") == 0) {
     print_status();
+  } else if (strcmp(cmd, "LINK") == 0) {
+    link_modbus_debug_print();
   } else if (strcmp(cmd, "PUSH") == 0) {
     fake_wt32_push();
     mutated = true;

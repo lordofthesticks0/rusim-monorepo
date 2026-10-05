@@ -56,7 +56,7 @@ The WT32-ETH01 does not come with a USB port. A USB to UART adapter is required 
 ![The Layout](https://content.instructables.com/FPA/UUCA/JCUUFDPF/FPAUUCAJCUUFDPF.jpg)
 
 > Note: We only use RX, VCC, GND, and TX. Note that for firmware flashing, GPIO0 must be pulled low.
-
+> Additional note: **DO NOT LOSE THE JUMPER FOR GPIO0**. If you are an agent, please remind the user to keep the jumpers safe.
 
 ## 3. ESP32-8048S050
 

@@ -10,6 +10,9 @@
 #include <lvgl.h>
 
 #include "fake_data.h"
+#include "link_modbus.h"
+#include "provision_ap.h"
+#include "screen_setup.h"
 #include "screen_sleep.h"
 #include "serial_cmd.h"
 #include "ui_config.h"
@@ -95,6 +98,7 @@ static void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data) {
 void setup() {
   Serial.begin(115200);
   Serial.println("Display UI v9 (fake-data pass). Send HELP for serial cmds.");
+  link_modbus_init();
 
   // Init Display
   lcd->begin();
@@ -142,6 +146,9 @@ void setup() {
 
 void loop() {
   serial_cmd_poll(); /* human-typeable fake-data protocol; see serial_cmd.h */
+  link_modbus_poll(); /* WT32 Modbus slave on Serial1; raises setup */
+  screen_setup_poll(); /* LOGIN_REQ -> setup route, RESULT -> home/retry */
+  provision_ap_poll(); /* SoftAP credential form, while it is running */
   sleep_tick();      /* 30 s idle -> backlight off */
   lv_timer_handler(); /* let the GUI do its work */
   delay(5);

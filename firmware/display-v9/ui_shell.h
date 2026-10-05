@@ -16,6 +16,10 @@ void ui_show_cluster(int c);
 void ui_show_bottle(int c, int b);
 void ui_show_control();
 void ui_show_info();
+// First-class setup route (portal login + duration). Shown first on boot;
+// the run starts only after the WT32 reports RESULT=success.
+void ui_show_setup();
+bool ui_is_setup();
 
 // Re-render the current route in place (called after fake pushes / serial).
 void ui_refresh_current();

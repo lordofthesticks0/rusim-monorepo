@@ -25,9 +25,10 @@ document is the source of truth for anything measured on real hardware.
 
 | Directory | Board | Document |
 |---|---|---|
-| `firmware/display-v9/` | ESP32-S3 DevKitC-1 | `display-docs.md`, `migration-notes.md` |
+| `firmware/display-v9/` | ESP32-S3 DevKitC-1 | `display-docs.md`, `migration-notes.md`, `display-wt32-link.md`, `display-provisioning-ap.md` |
 | `firmware/wt32-eth01_ping-test/` | WT32-ETH01 | `wt32-eth01-ping-test.md`, `wt32-eth01.md` |
 | `firmware/wt32-eth01_captive-recon/` | WT32-ETH01 | `wt32-eth01-captive-recon.md` |
+| `firmware/network-master/` | WT32-ETH01 | `network-master.md` (production), `display-wt32-link.md` |
 | `firmware/methane-calibrate/` | ATmega2560 Mega Mini | `sensor-calibration-firmware.md` §6 |
 | `firmware/pressure-calibrate/` | ATmega2560 Mega Mini | `sensor-calibration-firmware.md` §5 |
 | `firmware/co2-calibrate/` | ATmega328 Nano | `sensor-calibration-firmware.md` §4 |
@@ -46,6 +47,9 @@ document is the source of truth for anything measured on real hardware.
 | `rs485-loopback-test.md` | The dual-MAX485 loopback test and its direction control |
 | `wt32-eth01-ping-test.md` | The Ethernet and ping demo |
 | `wt32-eth01-captive-recon.md` | Captive portal recon firmware |
+| `network-master.md` | Production WT32 firmware: portal login via display Modbus |
+| `display-wt32-link.md` | The single Modbus RTU line: wiring, framing, register map, flows |
+| `display-provisioning-ap.md` | SoftAP credential form on the display: phone login instead of on-screen typing |
 | `flash-factory-tool.md` | `scripts-hardware/flash-factory.ts` and the factory image |
 | `captive-portal-workaround.md` | Plan for headless captive portal authentication on the WT32-ETH01 |
 
@@ -90,7 +94,6 @@ These describe boards rather than this project's code.
 
 | Path | Covers |
 |---|---|
-| `docs/agents-guide.md` | Rules for AI agents working in this repo. Never edit it. |
 | `docs/hardware.md` | PCB documentation: module pinouts, the full Mega pin map, sensors, MAX485 |
 | `docs/calibration.md` | Recorded calibration values and dates, per sensor |
 | `docs/images/` | Images referenced by the human documentation |

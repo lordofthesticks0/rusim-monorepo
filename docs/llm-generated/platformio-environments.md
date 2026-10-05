@@ -59,6 +59,7 @@ flashing script relies on (see `flash-factory-tool.md`).
 | `display-v9` | `esp32-s3-devkitc-1` | espressif32 | 115200 | `display-v9/` | LVGL 9.3.0, GFX 1.2.8, TAMC_GT911 1.0.2 |
 | `wt32-eth01_ping-test` | `wt32-eth01` | espressif32 | 115200 | `wt32-eth01_ping-test/` | `dvarrel/ESPping@^1.0.5` |
 | `wt32-eth01_captive-recon` | `wt32-eth01` | espressif32 | 115200 | `wt32-eth01_captive-recon/` | (core only) |
+| `network-master` | `wt32-eth01` | espressif32 | 115200 | `network-master/` | `dvarrel/ESPping@^1.0.5` |
 
 `build_src_filter = +<name>/` is what selects one directory. The `+` prefix adds
 that subtree to the (empty) default filter, so only the named directory compiles
@@ -147,6 +148,12 @@ each one produced a build failure rather than a warning.
 
 All nine environments now build from a clean checkout with `pio run`.
 
+`network-master` is the production WT32 env: same board and libraries as
+`wt32-eth01_ping-test`, but credentials come from the display over Modbus RTU
+(master, slave ID 1, 9600 8N1 on Serial1 RX=IO5/TX=IO17) instead of the
+serial console. See `network-master.md`. The two prototype envs
+(`wt32-eth01_ping-test`, `wt32-eth01_captive-recon`) stay for bench testing.
+
 ## 7. Related documents
 
 - `rs485-loopback-test.md` — the shared `max485-test` source.
@@ -154,6 +161,7 @@ All nine environments now build from a clean checkout with `pio run`.
   `methane-calibrate`, `pressure-calibrate`, `loadcell-test`.
 - `wt32-eth01-ping-test.md` — the `wt32-eth01_ping-test` environment.
 - `wt32-eth01-captive-recon.md` — the `wt32-eth01_captive-recon` environment.
+- `network-master.md` — the production `network-master` environment.
 - `display-docs.md`, `migration-notes.md` — the display environments.
 - `flash-factory-tool.md` — `scripts-hardware/flash-factory.ts`.
 - `../hardware.md` — pinouts for the boards referenced here.

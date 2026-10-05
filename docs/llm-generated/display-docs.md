@@ -31,12 +31,15 @@ hold-to-confirm 500 ms on binary toggles, no local log storage, 41 °C warn /
 
 | File | Role |
 |---|---|
-| `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `ui_init()`; `loop()` = serial poll → sleep tick → `lv_timer_handler()` |
-| `lv_conf.h` | Enables vs stock: `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART` = 1; fonts +12/+20/+28. **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
+| `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_modbus_init()` + `ui_init()`; `loop()` = USB serial poll → Modbus slave poll → boot-gate poll → sleep tick → `lv_timer_handler()` |
+| `lv_conf.h` | Enables vs stock: `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART, BUTTONMATRIX, QRCODE (+CANVAS, required by qrcode)` = 1; fonts +12/+20/+28. `KEYBOARD` is now 0 (credential entry moved to QR, §12). **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
+| `link_modbus.h/.cpp` | Modbus RTU slave ID 1 on `Serial1` (RX 18 / TX 17, 9600 8N1). FC 0x03/0x06/0x10 + CRC16. Register map in §10. `Serial` stays USB debug only |
+| `screen_setup.h/.cpp` | `/setup` first-class route: 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + duration spinbox 1–99 h + Start/Stop button. Shown first on boot and on WT32 `LOGIN_REQ`; routes home only on `RESULT=success`. No keyboard (§12) |
 | `touch.h` | Unchanged GT911 glue |
 | `ui_config.h` | Counts (6 clusters × 4 bottles, 2 online), ranges, 500 ms / 30 s / 5 min timings, thresholds, pins, palette, `FW_VERSION` |
 | `fake_data.h/.cpp` | `AppState g`: experiment, setpoint, stirrer, POST, chamber temp, 6×4 bottles × 5 sensors + NULL flags + temp trend ring; `fake_init()` seeds 2 online / 4 offline; `fake_wt32_push()` jitters online values every 5 min (lv_timer) |
-| `serial_cmd.h/.cpp` | Human-typeable debug protocol over USB serial (see §5). Display-local only |
+| `serial_cmd.h/.cpp` | Human-typeable debug protocol over USB serial (see §5). Display-local only. Also `CREDS` and `AP` (§12) |
+| `provision_ap.h/.cpp` | SoftAP + web credential form on the display, staging into the same Modbus registers as the touchscreen (§12) |
 | `ui_shell.h/.cpp` | Status bar, content router, single blocking-modal primitive, bell logic, overheat eval, `ui_mk_*` styled helpers (no LVGL theme is enabled, so all styling is explicit) |
 | `screen_boot.h/.cpp` | `/boot` blocking gate: spinbox 1–99 h ±1 h + confirm; must confirm every boot |
 | `screen_home.h/.cpp` | `/home`: DATA / CONTROL / INFO nav + run summary + serial hint |
@@ -70,7 +73,7 @@ overlay is a sibling of the content container so refreshes never dismiss it.
 USB serial, 115200, newline-terminated, case-insensitive command word:
 
 ```
-HELP | STATUS | PUSH
+HELP | STATUS | PUSH | LINK
 TEMP 38.3            chamber temp (drives 41/45 UI; TRY: TEMP 41.5, TEMP 45.2, TEMP 37.0)
 SETPOINT 37.5        35.0-40.0, mirrors the /control stepper
 DURATION 24          1-99 whole hours, mirrors the boot spinbox
@@ -83,11 +86,10 @@ UNNULL <c> <b> <s>   clear one field NULL
 
 There are deliberately **no on-screen debug buttons/modals for faking** —
 all injection goes through this port. `STATUS` prints run state + node list.
+`LINK` prints the Modbus slave state (`req/ready/result/user/dur`).
 
-> Future: Central→Display will be framed **JSON over UART** pushed every
-> 5 min and parsed into `AppState` (replacing `fake_wt32_push` internals and
-> this text protocol). On-screen code reads only `AppState`, so the swap is
-> contained in `fake_data.cpp` + a new UART parser (`TODO(WT32)`).
+> Display→WT32 login transport is now real Modbus RTU (see §10); the
+> remaining fake part is the sensor-data push, still via `fake_wt32_push()`.
 
 ## 6. Bell / NULL semantics (fake)
 
@@ -117,12 +119,106 @@ Home → Data → Cluster 0 → Bottle → back; open Cluster 4 (offline); tap b
 
 ## 9. Known gaps / next pass
 
-- Real WT32 UART JSON push parser + `Serial1` wiring + PSRAM single-cycle buffer.
+- Real WT32 sensor-data push over the Modbus link (today only login
+  transport is real; `fake_wt32_push()` still jitters local values).
 - Real `→WT32` command transport (today: `Serial.printf("[FAKE->WT32] …")`).
 - Backlight GPIO45 conflict resolution with EE.
 - `LV_MEM_SIZE` is still 64 KB — bump if chart/table-heavy screens OOM.
 - Duration sub-hour steps, wake-confirm UX, breaker power-domain scope: parked
   open questions, unchanged.
 
+## 10. WT32 login link (Modbus RTU slave, production)
+
+The display is the Modbus slave; the WT32 `network-master` env is the master.
+The full wire spec — wiring, framing, register map, transaction patterns —
+lives in `display-wt32-link.md`; this section is the display-end summary.
+USB `Serial` is debug only (see §5 plus the `LINK` command). The link is
+`Serial1`: RX IO18, TX IO17, 9600 8N1, common GND. `link_modbus_init()`
+drains boot noise; `link_modbus_poll()` runs every `loop()` before
+`screen_setup_poll()`.
+
+Supported functions: `0x03` read holding, `0x06` write single, `0x10` write
+multiple. Anything else returns exception `0x01`; unknown addresses return
+`0x02`. Fixed-length requests parse eagerly at 8 bytes; variable-length ones
+parse after 8 ms of line silence. CRC is standard Modbus CRC16.
+
+| Address | Name | Write owner | Meaning |
+|---|---|---|---|
+| `0x0000` | LOGIN_REQ | master | `1` = show the login gate |
+| `0x0001` | CREDS_READY | slave sets, master clears | `1` = staged creds ready |
+| `0x0002` | RESULT | master | `0` none, `1` success, `2` fail |
+| `0x0010-0x002F` | USERNAME | read-only | 64 B ASCII, big-endian, NUL-padded |
+| `0x0030-0x004F` | PASSWORD | read-only | same encoding as username |
+| `0x0060` | DURATION_H | read-only | 1-99 |
+| `0x0070-0x0077` | IP_ADDR | master | 16 B ASCII, shown live in /info |
+| `0x0078` | PING_MS | master | ms to 1.1.1.1, `0xFFFF` = none, shown live in /info |
+| `0x0079` | NET_UP | master | `1` = WT32 holds IP |
+
+`LOGIN_REQ=1` from the master routes to `/setup`. Confirm stages the
+strings, sets `CREDS_READY=1`, and shows "waiting for WT32". `RESULT=1`
+routes home and starts the run; `RESULT=2` stays in setup with "login
+failed, retry". The master writes `CREDS_READY=0` after each read;
+`LOGIN_REQ=0` only on success.
+
+## 11. Setup route
+
+`/setup` is a normal content route, not an overlay. `ui_refresh_current()`
+skips route 6, so the 5-minute fake push never disturbs it.
+
+The route was originally a two-textarea form with an `lv_keyboard`. That is
+gone; §12 describes what replaced it. What survives: the route is raised by
+`LOGIN_REQ` and lowered to `/home` on `RESULT=success`, and the duration
+spinbox still writes `g.durationH`.
+
+Verify: `pio run -e display-v9`; on device send `LINK` over USB serial to
+print `req/ready/result/user/dur`. Short RX to TX on the display alone to
+loop back Modbus frames during development.
+
+## 12. Credential entry by QR (`provision_ap`)
+
+The `/setup` keyboard has been removed. `LV_USE_KEYBOARD` is `0` and the
+route carries no textareas.
+
+`firmware/display-v9/provision_ap.{h,cpp}` raises a WPA2 SoftAP on demand with
+a cloaked SSID, and serves a form at `http://192.168.4.1/`. `/setup` shows a
+300 px QR that advances through two steps on its own:
+
+1. `WIFI:T:WPA;S:RUSIM-SETUP-<MAC>;P:setup-<MAC>;H:true;;` — scanning joins the
+   phone to the AP. Switches when `WiFi.softAPgetStationNum()` reports a station.
+2. `http://192.168.4.1/` — scanning opens the credential form. Reverts to step 1
+   if the phone disconnects.
+
+`T:WPA` is the only legal token for a passphrase network, and `H:` must be
+present when the SSID is cloaked. One constant (`kHidden`) drives both the radio
+and the payload's `H:` field, so they cannot disagree.
+
+Controls sit in a right-hand column: the SSID, the passphrase, the duration
+spinbox, and the Start/Stop button. The passphrase is there for a phone that
+scans the join code and does nothing — Settings → Other network, then type what
+the panel shows. The spinbox writes `g.durationH` on
+`LV_EVENT_VALUE_CHANGED`, so duration applies whether credentials arrive by QR
+or by serial. The Confirm button is gone; there is nothing on the panel to
+confirm.
+
+Build flags: `PROVISION_AP_HIDDEN=0` broadcasts the SSID,
+`PROVISION_AP_PASSWORD="secret"` (8–63 chars) replaces the MAC-derived
+passphrase.
+
+USB serial gained `AP` (toggle the AP, print both payloads) and
+`CREDS <user> <pass>` (stage directly; the password reaches the scrollback, so
+this is the bench path only).
+
+Credentials remain RAM-only on both boards; nothing reaches NVS or flash.
+`network-master` is unchanged and unaware of this path.
+
+Full detail: the WIFI: payload format and escaping rules, the cloaked-network
+tradeoff, the single-canvas re-encode, the `/status` state machine, and the
+verification steps are in `display-provisioning-ap.md`.
+
 ---
 Content generated by `openai/gpt-5.6-luna` in `codex`.
+Updated by `opencode/muse-spark-1.3-contributor-free` in `opencode`: Modbus slave link + combined login gate (§10, §11, file map).
+Updated by `opencode/muse-spark-1.3-contributor-free` in `opencode`: gate overlay replaced by the first-class `/setup` route with explicitly styled keyboard and fields.
+Updated by `opencode/space-bunny-free` in `opencode`: added `provision_ap` (§12), the SoftAP credential form and the `CREDS` / `AP` serial commands.
+Updated by `opencode/space-bunny-free` in `opencode`: `/setup` keyboard removed in favour of the two-step QR flow (§11, §12); `LV_USE_KEYBOARD` 0, `LV_USE_QRCODE`/`LV_USE_CANVAS` 1.
+Updated by `opencode/space-bunny-free` in `opencode`: SoftAP is WPA2 + cloaked rather than open; payload corrected to `T:WPA` with all four fields (§12).

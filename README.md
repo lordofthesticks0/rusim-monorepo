@@ -9,7 +9,7 @@ All documentation is written by humans. AI-generated documentation should always
 
 If you are a human and need a quick start, see the [index](docs/index.md).
 
-If you are an AI agent, see the [guidelines](docs/agents-guide.md).
+If you are an AI agent, see the [guidelines](AGENTS.md).
 
 ### 2. [MCU code](firmware/)
 
