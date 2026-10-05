@@ -1,7 +1,7 @@
 #include <Arduino.h>
 
 namespace {
-constexpr uint8_t kPwmPin = 2;
+constexpr uint8_t kPwmPin = 7;
 constexpr unsigned long kWaitTimeoutUs = 2000000UL;
 constexpr unsigned long kPeriodMinUs = 950000UL;
 constexpr unsigned long kPeriodMaxUs = 1060000UL;
@@ -56,7 +56,7 @@ static bool readCo2Ppm(float& ppmOut) {
 }
 
 void setup() {
-  pinMode(kPwmPin, INPUT);
+  pinMode(kPwmPin, INPUT_PULLUP);
   Serial.begin(9600);
   Serial.println(F("MH-Z19C PWM CO2 reader started"));
 }
