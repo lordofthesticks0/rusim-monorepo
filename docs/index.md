@@ -26,7 +26,8 @@ document is the source of truth for anything measured on real hardware.
 | Directory | Board | Document |
 |---|---|---|
 | `firmware/display-v9/` | ESP32-S3 DevKitC-1 | `display-docs.md`, `migration-notes.md` |
-| `firmware/wt32-eth01/` | WT32-ETH01 | `wt32-eth01-ethernet-demo.md`, `wt32-eth01.md` |
+| `firmware/wt32-eth01_ping-test/` | WT32-ETH01 | `wt32-eth01-ping-test.md`, `wt32-eth01.md` |
+| `firmware/wt32-eth01_captive-recon/` | WT32-ETH01 | `wt32-eth01-captive-recon.md` |
 | `firmware/methane-calibrate/` | ATmega2560 Mega Mini | `sensor-calibration-firmware.md` §6 |
 | `firmware/pressure-calibrate/` | ATmega2560 Mega Mini | `sensor-calibration-firmware.md` §5 |
 | `firmware/co2-calibrate/` | ATmega328 Nano | `sensor-calibration-firmware.md` §4 |
@@ -43,7 +44,8 @@ document is the source of truth for anything measured on real hardware.
 | `migration-notes.md` | LVGL v8 to v9 changes and the required code edits |
 | `sensor-calibration-firmware.md` | The five sensor test and calibration programs |
 | `rs485-loopback-test.md` | The dual-MAX485 loopback test and its direction control |
-| `wt32-eth01-ethernet-demo.md` | The Ethernet and ping demo |
+| `wt32-eth01-ping-test.md` | The Ethernet and ping demo |
+| `wt32-eth01-captive-recon.md` | Captive portal recon firmware |
 | `flash-factory-tool.md` | `scripts-hardware/flash-factory.ts` and the factory image |
 | `captive-portal-workaround.md` | Plan for headless captive portal authentication on the WT32-ETH01 |
 

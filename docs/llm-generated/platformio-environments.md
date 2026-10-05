@@ -57,7 +57,8 @@ flashing script relies on (see `flash-factory-tool.md`).
 | `max485-test1` | `megaatmega2560` | atmelavr | 9600 | `max485-test/` | none |
 | `max485-test2` | `nanoatmega328` | atmelavr | 9600 | `max485-test/` | none |
 | `display-v9` | `esp32-s3-devkitc-1` | espressif32 | 115200 | `display-v9/` | LVGL 9.3.0, GFX 1.2.8, TAMC_GT911 1.0.2 |
-| `wt32-eth01` | `wt32-eth01` | espressif32 | 115200 | `wt32-eth01/` | `dvarrel/ESPping@^1.0.5` |
+| `wt32-eth01_ping-test` | `wt32-eth01` | espressif32 | 115200 | `wt32-eth01_ping-test/` | `dvarrel/ESPping@^1.0.5` |
+| `wt32-eth01_captive-recon` | `wt32-eth01` | espressif32 | 115200 | `wt32-eth01_captive-recon/` | (core only) |
 
 `build_src_filter = +<name>/` is what selects one directory. The `+` prefix adds
 that subtree to the (empty) default filter, so only the named directory compiles
@@ -151,7 +152,8 @@ All nine environments now build from a clean checkout with `pio run`.
 - `rs485-loopback-test.md` — the shared `max485-test` source.
 - `sensor-calibration-firmware.md` — `blink-test`, `co2-calibrate`,
   `methane-calibrate`, `pressure-calibrate`, `loadcell-test`.
-- `wt32-eth01-ethernet-demo.md` — the `wt32-eth01` environment.
+- `wt32-eth01-ping-test.md` — the `wt32-eth01_ping-test` environment.
+- `wt32-eth01-captive-recon.md` — the `wt32-eth01_captive-recon` environment.
 - `display-docs.md`, `migration-notes.md` — the display environments.
 - `flash-factory-tool.md` — `scripts-hardware/flash-factory.ts`.
 - `../hardware.md` — pinouts for the boards referenced here.
