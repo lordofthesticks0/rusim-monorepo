@@ -34,7 +34,12 @@
 // Endpoints:
 //   GET  /        credential form
 //   POST /creds   stage credentials, reply with a result page
-//   GET  /status  plain-text state for the result page to poll
+//   GET  /status  plain-text state for the result page to poll; leads with a
+//                 "waiting" | "success" | "fail" token, then the message
+//
+// A staged pair also pulses the poll-request line (link_modbus, Display IO11 ->
+// WT32 IO14) so the master reads it immediately. A rejected pair leaves RESULT
+// at fail, which is what puts the wrong-password banner on the form.
 
 #include <Arduino.h>
 

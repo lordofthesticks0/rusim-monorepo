@@ -3,6 +3,7 @@
 // Modbus RTU slave for the Display <-> WT32 link (production).
 //
 // Wiring: Display IO17 = TX, IO18 = RX, 9600 8N1, common GND.
+// Poll-request line: Display IO11 -> WT32 IO14 (out of band, idle LOW).
 // WT32 side: AT-header TXD (IO17) -> Display IO18 (RX),
 //            AT-header RXD (IO5)  <- Display IO17 (TX).
 // If no frames arrive, swap the two data wires first.
@@ -43,6 +44,13 @@
 #define LINK_UART_BAUD 9600
 #define LINK_MODBUS_SLAVE_ID 1
 
+// Out-of-band poll-request line. Idle LOW; a pulse HIGH asks the master to poll
+// for staged credentials now instead of on its next 5 s cycle. IO14 on the WT32
+// is non-strapping, so a pulse during a WT32 boot cannot hold it in reset.
+// Driven from link_modbus_poll(); never a delay() in the staging path.
+#define LINK_NOTIFY_PIN 11
+#define LINK_NOTIFY_PULSE_MS 20
+
 #define LINK_REG_LOGIN_REQ 0x0000
 #define LINK_REG_CREDS_READY 0x0001
 #define LINK_REG_RESULT 0x0002
@@ -72,6 +80,13 @@
 
 void link_modbus_init();
 void link_modbus_poll();
+
+// Pulses the poll-request line so the master reads a freshly staged credential
+// pair immediately. Non-blocking: the pulse is finished by link_modbus_poll().
+// Called automatically from link_modbus_set_credentials(), so every staging
+// path (phone form, USB serial) gets the fast poll. Harmless with no master
+// attached; the line returns to idle.
+void link_notify_pulse();
 
 // Called from loop(). Returns true once per master LOGIN_REQ frame.
 bool link_modbus_take_login_request();

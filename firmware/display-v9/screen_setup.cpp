@@ -174,7 +174,7 @@ static void on_ap_toggle(lv_event_t *e) {
 }
 
 void screen_setup_show(lv_obj_t *parent) {
-  ui_mk_label(parent, "Setup: network login", 16, 6, 500, UI_COL_WHITE,
+  ui_mk_label(parent, "Setup: network login", 16, 6, 500, UI_COL_TEXT,
               &lv_font_montserrat_20);
   s_stepLabel = ui_mk_label(parent, "Tap Start to show the Wi-Fi code.", 16, 34,
                             760, UI_COL_DIM, &lv_font_montserrat_14);
@@ -185,8 +185,9 @@ void screen_setup_show(lv_obj_t *parent) {
   lv_obj_set_pos(s_qr, 24, 64);
   lv_obj_set_size(s_qr, kQrSize, kQrSize);
   lv_qrcode_set_size(s_qr, kQrSize);
-  // White on black rather than the reverse: phone cameras key on a light
-  // background, and the panel background is dark.
+  // Black modules on a white field. Phone cameras key on the light field, and
+  // the light theme sets the panel background to UI_COL_BG, so a light code
+  // would vanish into it.
   lv_qrcode_set_dark_color(s_qr, lv_color_hex(0x000000));
   lv_qrcode_set_light_color(s_qr, lv_color_hex(0xFFFFFF));
   // Fresh canvas, so nothing is painted yet. Forget the previous payload too:
@@ -199,7 +200,7 @@ void screen_setup_show(lv_obj_t *parent) {
   lv_obj_add_flag(s_qr, LV_OBJ_FLAG_HIDDEN);
 
   const int rx = 356;
-  ui_mk_label(parent, "Network:", rx, 64, 130, UI_COL_WHITE,
+  ui_mk_label(parent, "Network:", rx, 64, 130, UI_COL_TEXT,
               &lv_font_montserrat_14);
   s_ssidLabel = ui_mk_label(parent, "(off)", rx, 86, 400, UI_COL_ACCENT,
                             &lv_font_montserrat_14);
@@ -208,7 +209,7 @@ void screen_setup_show(lv_obj_t *parent) {
   // not auto-join a cloaked network from a QR code. Both come off the MAC, so
   // neither is a secret worth protecting from someone already holding the
   // device, and the AP only exists while someone is standing here.
-  ui_mk_label(parent, "Password:", rx, 116, 76, UI_COL_WHITE,
+  ui_mk_label(parent, "Password:", rx, 116, 76, UI_COL_TEXT,
               &lv_font_montserrat_14);
   s_passLabel = ui_mk_label(parent, "-", rx + 80, 116, 260, UI_COL_ACCENT,
                             &lv_font_montserrat_14);
@@ -286,12 +287,13 @@ void screen_setup_poll() {
       Serial.println("[SETUP] WT32 auth FAILED, staying in setup for retry");
       if (!ui_is_setup()) ui_show_setup();
       if (provision_ap_active()) {
-        // The credentials came from the phone, so the phone is where they
-        // have to be corrected. The result page is already showing the
-        // failure and will poll again on the next submission.
-        status_show("WT32 rejected them. Correct on your phone and resend.");
+        // The credentials came from the phone, so the phone is where they have
+        // to be corrected. The result page shows the same verdict and offers a
+        // link back to the form, which is served with the failure banner on it.
+        status_show("Wrong username or password. Correct them on your phone "
+                    "and resend.");
       } else {
-        status_show("WT32 login failed (wrong credentials?).");
+        status_show("Wrong username or password.");
       }
     }
     return;
@@ -306,8 +308,9 @@ void screen_setup_poll() {
   }
 
   // Leaving /setup closes the credential form: an AP that accepts passwords
-  // should not outlive the screen that offers it.
-  if (provision_ap_active()) {
+  // should not outlive the screen that offers it. /info offers the same form
+  // through its own QR, so while that route is up it owns the AP instead.
+  if (provision_ap_active() && !ui_is_info()) {
     Serial.println("[SETUP] left /setup, stopping phone login");
     provision_ap_end();
   }

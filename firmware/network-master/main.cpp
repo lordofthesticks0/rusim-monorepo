@@ -51,15 +51,26 @@
 #define LINK_BAUD 9600
 #define LINK_SLAVE_ID 1
 
-// Test interrupt line from display (backlog #10 bring-up).
-// Display IO11 -> WT32 IO14 + common GND. IO14 is non-strapping, so the
-// display may pulse HIGH even across a WT32 reboot. TEST_LED is an optional
-// external LED+1k to GND on IO2 (pulled low at boot, safe for strapping);
-// the onboard RX/TX LEDs (IO5/IO17) also blink on traffic.
-#define INT_TEST_PIN 14
+// Poll-request line from the display. Display IO11 -> WT32 IO14 + common GND.
+// A HIGH pulse (20 ms, driven by the display's link_modbus) means "a new
+// credential pair is staged, poll now" and cuts the 5 s credential wait.
+// IO14 is non-strapping, so the display may pulse across a WT32 reboot.
+//
+// The ISR does nothing but set a flag: the Modbus transaction and its logs stay
+// in loop(). The flag is consumed in STAGE_NEED_CREDS, the only stage that can
+// poll for credentials, so a pulse that arrives while the master is mid-login
+// is worth one early poll afterwards and is never lost.
+//
+// TEST_LED is an optional external LED+1k to GND on IO2 (pulled low at boot,
+// safe for strapping). It blinks briefly on each request as a bench
+// confirmation that the line arrived; the onboard RX/TX LEDs (IO5/IO17) also
+// blink on traffic.
+#define POLL_REQ_PIN 14
 #define TEST_LED_PIN 2
-static volatile bool s_intTestHit = false;
-static void IRAM_ATTR onIntTest() { s_intTestHit = true; }
+#define TEST_LED_MS 300
+static volatile bool s_pollRequest = false;
+static uint32_t s_ledOffMs = 0;
+static void IRAM_ATTR onPollRequest() { s_pollRequest = true; }
 
 #define LINK_REG_LOGIN_REQ 0x0000
 #define LINK_REG_CREDS_READY 0x0001
@@ -931,9 +942,10 @@ void setup() {
 
   pinMode(TEST_LED_PIN, OUTPUT);
   digitalWrite(TEST_LED_PIN, LOW);
-  pinMode(INT_TEST_PIN, INPUT_PULLDOWN);
-  attachInterrupt(digitalPinToInterrupt(INT_TEST_PIN), onIntTest, RISING);
-  Serial.println("[INT-TEST] waiting for RISING on IO14 (display IO11 pulse)");
+  pinMode(POLL_REQ_PIN, INPUT_PULLDOWN);
+  attachInterrupt(digitalPinToInterrupt(POLL_REQ_PIN), onPollRequest, RISING);
+  Serial.printf("[INT] poll request on IO%d (display IO11); a staged pair is "
+                "polled at once\n", POLL_REQ_PIN);
 
   WiFi.onEvent(onEthEvent);
 
@@ -948,10 +960,15 @@ void setup() {
 }
 
 void loop() {
-  if (s_intTestHit) {
-    s_intTestHit = false;
-    digitalWrite(TEST_LED_PIN, HIGH);  // latch on; reboot to clear
-    Serial.println("[INT-TEST] HIT on IO14 -> LED IO2 ON");
+  // Blink the bench LED on a request, and take it down when the window ends.
+  // The request flag itself is left for STAGE_NEED_CREDS to consume.
+  if (s_ledOffMs == 0 && s_pollRequest) {
+    digitalWrite(TEST_LED_PIN, HIGH);
+    s_ledOffMs = millis() + TEST_LED_MS;
+  }
+  if (s_ledOffMs != 0 && (int32_t)(millis() - s_ledOffMs) >= 0) {
+    digitalWrite(TEST_LED_PIN, LOW);
+    s_ledOffMs = 0;
   }
   switch (stage) {
     case STAGE_WAIT_IP:
@@ -973,6 +990,15 @@ void loop() {
         pushNetStatus(-1, false);
         stage = STAGE_WAIT_IP;
         break;
+      }
+      // The display pulses the poll-request line when a pair is staged. Honour
+      // it before the 5 s gate: a corrected password must not sit unread while
+      // the user watches the page. The flag is cleared here because this is the
+      // only stage that can use it.
+      if (s_pollRequest) {
+        s_pollRequest = false;
+        Serial.println("[INT] display staged new credentials; polling now");
+        lastCredPollMs = 0;
       }
       if (millis() - lastCredPollMs >= kCredPollMs) {
         lastCredPollMs = millis();
@@ -1005,7 +1031,7 @@ void loop() {
         syncDbLatest(true);
         stage = STAGE_RUN;
       } else {
-        Serial.println("[LOGIN] will re-poll display in 5 s");
+        Serial.println("[LOGIN] will re-poll display in 5 s (or at once on a poll request)");
         lastCredPollMs = millis();
         stage = STAGE_NEED_CREDS;
       }

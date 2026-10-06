@@ -28,18 +28,18 @@ static void on_back_cluster(lv_event_t *e) {
 }
 
 void screen_data_picker_show(lv_obj_t *parent) {
-  ui_mk_label(parent, "/data clusters (fake)", 16, 8, 400, UI_COL_WHITE,
+  ui_mk_label(parent, "/data nodes (fake)", 16, 8, 400, UI_COL_TEXT,
               &lv_font_montserrat_20);
   for (int c = 0; c < UI_CLUSTERS; c++) {
     int row = c / 3, col = c % 3;
     int x = 16 + col * 256, y = 52 + row * 150;
     char t[64];
     if (g.cluster[c].online) {
-      snprintf(t, sizeof(t), "Cluster %d\nONLINE", c);
+      snprintf(t, sizeof(t), "Node %d\nONLINE", c);
     } else {
-      snprintf(t, sizeof(t), "Cluster %d\nNOT CONNECTED", c);
+      snprintf(t, sizeof(t), "Node %d\nNOT CONNECTED", c);
     }
-    uint32_t bg = g.cluster[c].online ? UI_COL_CARD : 0x2A2F3A;
+    uint32_t bg = g.cluster[c].online ? UI_COL_CARD : UI_COL_CARD_OFF;
     lv_obj_t *b = ui_mk_button(parent, t, x, y, 240, 130, bg);
     lv_obj_add_event_cb(b, on_pick_cluster, LV_EVENT_CLICKED, (void *)(intptr_t)c);
   }
@@ -49,8 +49,8 @@ void screen_data_picker_show(lv_obj_t *parent) {
 
 void screen_cluster_show(lv_obj_t *parent, int c) {
   char title[48];
-  snprintf(title, sizeof(title), "/data/%d bottles (fake)", c);
-  ui_mk_label(parent, title, 16, 8, 500, UI_COL_WHITE, &lv_font_montserrat_20);
+  snprintf(title, sizeof(title), "/data/%d chambers (fake)", c);
+  ui_mk_label(parent, title, 16, 8, 500, UI_COL_TEXT, &lv_font_montserrat_20);
   if (!g.cluster[c].online) {
     ui_mk_label(parent, "node offline (fake NULL fields)", 16, 40, 500, UI_COL_ALARM,
                 &lv_font_montserrat_14);
@@ -59,24 +59,24 @@ void screen_cluster_show(lv_obj_t *parent, int c) {
     int x = 16 + (b % 2) * 384, y = 76 + (b / 2) * 140;
     char t[96];
     if (!g.cluster[c].online) {
-      snprintf(t, sizeof(t), "Bottle %d\nnode offline", b);
+      snprintf(t, sizeof(t), "Chamber %d\nnode offline", b);
     } else {
       char tmp[32];
       fake_sensor_text(c, b, S_TEMP, tmp, sizeof(tmp));
-      snprintf(t, sizeof(t), "Bottle %d\n%s (fake)", b, tmp);
+      snprintf(t, sizeof(t), "Chamber %d\n%s (fake)", b, tmp);
     }
     lv_obj_t *btn = ui_mk_button(parent, t, x, y, 368, 124, UI_COL_CARD);
     lv_obj_add_event_cb(btn, on_pick_bottle, LV_EVENT_CLICKED,
                         (void *)(intptr_t)((c << 8) | b));
   }
-  lv_obj_t *back = ui_mk_button(parent, "< Clusters", 16, 360, 160, 48, UI_COL_CARD);
+  lv_obj_t *back = ui_mk_button(parent, "< Nodes", 16, 360, 160, 48, UI_COL_CARD);
   lv_obj_add_event_cb(back, on_back_picker, LV_EVENT_CLICKED, nullptr);
 }
 
 void screen_bottle_show(lv_obj_t *parent, int c, int b) {
   char title[48];
-  snprintf(title, sizeof(title), "/data/%d/bottle_%d (fake)", c, b);
-  ui_mk_label(parent, title, 16, 8, 500, UI_COL_WHITE, &lv_font_montserrat_20);
+  snprintf(title, sizeof(title), "/data/%d/chamber_%d (fake)", c, b);
+  ui_mk_label(parent, title, 16, 8, 500, UI_COL_TEXT, &lv_font_montserrat_20);
 
   if (!g.cluster[c].online) {
     ui_mk_label(parent, "node offline: values are NULL this cycle, not stale.", 16, 40, 500,
@@ -89,7 +89,7 @@ void screen_bottle_show(lv_obj_t *parent, int c, int b) {
     fake_sensor_text(c, b, s, val, sizeof(val));
     snprintf(row, sizeof(row), "%-6s  %s", SENSOR_NAMES[s], val);
     uint32_t col =
-        g.cluster[c].bottle[b].sensorNull[s] ? UI_COL_ALARM : UI_COL_WHITE;
+        g.cluster[c].bottle[b].sensorNull[s] ? UI_COL_ALARM : UI_COL_TEXT;
     ui_mk_label(parent, row, 24, 72 + s * 30, 320, col, &lv_font_montserrat_14);
   }
 
@@ -110,6 +110,6 @@ void screen_bottle_show(lv_obj_t *parent, int c, int b) {
   ui_mk_label(parent, "Temp trend x10C (fake ring)", 360, 300, 400, UI_COL_DIM,
               &lv_font_montserrat_14);
 
-  lv_obj_t *back = ui_mk_button(parent, "< Bottles", 16, 360, 160, 48, UI_COL_CARD);
+  lv_obj_t *back = ui_mk_button(parent, "< Chambers", 16, 360, 160, 48, UI_COL_CARD);
   lv_obj_add_event_cb(back, on_back_cluster, LV_EVENT_CLICKED, (void *)(intptr_t)c);
 }

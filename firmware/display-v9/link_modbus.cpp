@@ -4,10 +4,17 @@
 // buffer, a frame is parsed after 8 ms of line silence or a 128 ms
 // frame timeout. Only FC 0x03 / 0x06 / 0x10 are answered. All other
 // codes return exception 0x01, bad addresses return 0x02.
+//
+// Also drives the poll-request output (LINK_NOTIFY_PIN -> WT32 IO14): a staged
+// credential pair pulses it so the master reads the pair immediately instead of
+// waiting out its 5 s poll cycle. See link_modbus.h.
 
 static uint8_t s_rx[260];
 static size_t s_rxLen = 0;
 static uint32_t s_lastByteMs = 0;
+
+// Poll-request pulse deadline in millis(). 0 = line idle (LOW).
+static uint32_t s_notifyUntilMs = 0;
 
 static char s_user[LINK_USER_MAX + 1];
 static char s_pass[LINK_PASS_MAX + 1];
@@ -163,6 +170,9 @@ void link_modbus_init() {
   // Drain boot line noise so it can never parse as a frame.
   delay(20);
   while (Serial1.available()) Serial1.read();
+  pinMode(LINK_NOTIFY_PIN, OUTPUT);
+  digitalWrite(LINK_NOTIFY_PIN, LOW);
+  Serial.printf("[LINK] poll-request out on IO%d (idle LOW)\n", LINK_NOTIFY_PIN);
   Serial.printf("[LINK] Modbus slave ID %d on Serial1 RX=%d TX=%d %d 8N1\n",
                 LINK_MODBUS_SLAVE_ID, LINK_UART_RX_PIN, LINK_UART_TX_PIN,
                 LINK_UART_BAUD);
@@ -291,7 +301,22 @@ static void handle_frame(const uint8_t *f, size_t n) {
   send_exception(fn, 0x01);
 }
 
+// Returns the line to idle once the pulse has been high for its full width.
+// Called from link_modbus_poll() so staging never blocks the UI.
+static void notify_tick() {
+  if (s_notifyUntilMs == 0) return;
+  if ((int32_t)(millis() - s_notifyUntilMs) < 0) return;
+  digitalWrite(LINK_NOTIFY_PIN, LOW);
+  s_notifyUntilMs = 0;
+}
+
+void link_notify_pulse() {
+  digitalWrite(LINK_NOTIFY_PIN, HIGH);
+  s_notifyUntilMs = millis() + LINK_NOTIFY_PULSE_MS;
+}
+
 void link_modbus_poll() {
+  notify_tick();
   while (Serial1.available() > 0) {
     int c = Serial1.read();
     if (c < 0) break;
@@ -342,6 +367,11 @@ void link_modbus_set_credentials(const char *user, const char *pass) {
   s_pass[sizeof(s_pass) - 1] = '\0';
   s_credsReady = true;
   s_result = LINK_RESULT_NONE;
+  // Ask the master to read the pair now rather than on its next 5 s cycle. The
+  // registers above are already written, so the poll cannot observe a
+  // half-staged pair. The phone form and the CREDS serial command both land
+  // here, which is why the pulse is fired here and not at either call site.
+  link_notify_pulse();
   Serial.printf("[LINK] creds staged user='%s' ready=1\n", s_user);
 }
 

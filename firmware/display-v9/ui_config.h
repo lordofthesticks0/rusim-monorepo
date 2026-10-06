@@ -54,12 +54,17 @@
 #define IS_DEBUG 0
 #endif
 
-// Palette (dark background, matches earlier demo card).
-#define UI_COL_BG 0x000000
-#define UI_COL_CARD 0x202A44
-#define UI_COL_ACCENT 0x55C7E8
-#define UI_COL_OK 0x2EB85C
-#define UI_COL_WARN 0xE8A13D
-#define UI_COL_ALARM 0xE84C4C
-#define UI_COL_DIM 0x8A93A6
-#define UI_COL_WHITE 0xFFFFFF
+// Palette (light background). UI_COL_TEXT is the primary foreground, so it is
+// near-black here; UI_COL_CARD doubles as the button fill and is white.
+#define UI_COL_BG 0xEEF2F7
+#define UI_COL_CARD 0xFFFFFF
+#define UI_COL_ACCENT 0x2C6E9B
+#define UI_COL_OK 0x1E8E4E
+#define UI_COL_WARN 0xB87314
+#define UI_COL_ALARM 0xC0392B
+#define UI_COL_DIM 0x5B6472
+#define UI_COL_TEXT 0x1B2330
+// Fill for the raised status bar, which must read as separate from UI_COL_BG.
+#define UI_COL_BAR 0xDCE3EC
+// Fill for a button that is present but not usable (offline node).
+#define UI_COL_CARD_OFF 0xD5DBE3

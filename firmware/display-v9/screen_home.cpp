@@ -22,7 +22,7 @@ static void nav(lv_event_t *e) {
 }
 
 void screen_home_show(lv_obj_t *parent) {
-  ui_mk_label(parent, "Home (fake data)", 16, 8, 400, UI_COL_WHITE, &lv_font_montserrat_20);
+  ui_mk_label(parent, "Home (fake data)", 16, 8, 400, UI_COL_TEXT, &lv_font_montserrat_20);
 
   char sub[96];
   snprintf(sub, sizeof(sub), "Run %dh (fake) | %d/%d nodes online | push every 5 min (fake)",
@@ -39,9 +39,9 @@ void screen_home_show(lv_obj_t *parent) {
   char ch[96];
   snprintf(ch, sizeof(ch), "Chamber %.1fC (fake) | Setpoint %.1fC | Stirrer %s", g.chamberTempC,
            g.tempSetpointC, g.stirrerOn ? "ON" : "OFF");
-  ui_mk_label(parent, ch, 16, 230, 760, UI_COL_WHITE, &lv_font_montserrat_14);
+  ui_mk_label(parent, ch, 16, 230, 760, UI_COL_TEXT, &lv_font_montserrat_14);
   ui_mk_label(parent, "Tip: send HELP over USB serial to tweak fake values (e.g. TEMP 38.3).",
               16, 262, 760, UI_COL_DIM, &lv_font_montserrat_14);
-  ui_mk_label(parent, "Session: one bounded run, then shut down for bottle retrieval.", 16,
+  ui_mk_label(parent, "Session: one bounded run, then shut down for chamber retrieval.", 16,
               294, 760, UI_COL_DIM, &lv_font_montserrat_14);
 }

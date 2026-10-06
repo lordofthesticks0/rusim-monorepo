@@ -56,10 +56,14 @@ lv_obj_t *ui_mk_button(lv_obj_t *parent, const char *text, int x, int y, int w, 
   lv_obj_set_style_bg_color(b, lv_color_hex(bg), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_radius(b, 8, LV_PART_MAIN);
+  // The light theme fills a plain button with UI_COL_CARD (white), so a border
+  // is what separates it from the background.
+  lv_obj_set_style_border_color(b, lv_color_hex(UI_COL_ACCENT), LV_PART_MAIN);
+  lv_obj_set_style_border_width(b, 1, LV_PART_MAIN);
   lv_obj_t *l = lv_label_create(b);
   lv_label_set_text(l, text);
   lv_obj_center(l);
-  lv_obj_set_style_text_color(l, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_text_color(l, lv_color_hex(UI_COL_TEXT), LV_PART_MAIN);
   return b;
 }
 
@@ -90,7 +94,7 @@ static void on_bell_clicked(lv_event_t *e) {
       for (int s = 0; s < S_COUNT && shown < 10; s++) {
         if (g.cluster[c].bottle[b].sensorNull[s]) {
           char line[64];
-          snprintf(line, sizeof(line), "C%d/B%d %s NULL\n", c, b, SENSOR_NAMES[s]);
+          snprintf(line, sizeof(line), "N%d/C%d %s NULL\n", c, b, SENSOR_NAMES[s]);
           strncat(body, line, sizeof(body) - strlen(body) - 1);
           shown++;
           n++;
@@ -113,11 +117,11 @@ static void build_status_bar(lv_obj_t *scr) {
   lv_obj_t *bar = lv_obj_create(scr);
   lv_obj_set_pos(bar, 0, 0);
   lv_obj_set_size(bar, 800, 44);
-  style_plain(bar, 0x101828);
+  style_plain(bar, UI_COL_BAR);
   lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
   ui_mk_label(bar, "NET OK(fake)", 10, 12, 150, UI_COL_OK, &lv_font_montserrat_14);
-  s_postLabel = ui_mk_label(bar, "POST ON", 170, 12, 110, UI_COL_WHITE, &lv_font_montserrat_14);
+  s_postLabel = ui_mk_label(bar, "POST ON", 170, 12, 110, UI_COL_TEXT, &lv_font_montserrat_14);
   s_expLabel =
       ui_mk_label(bar, "exp --h (fake)", 290, 12, 220, UI_COL_DIM, &lv_font_montserrat_14);
 
@@ -173,9 +177,12 @@ void ui_modal_show(const char *title, const char *body, const char *ackLabel, Ui
   lv_obj_remove_flag(s_modal, LV_OBJ_FLAG_SCROLLABLE);
 
   lv_obj_t *card = ui_mk_card(s_modal, 150, 70, 500, 340);
-  ui_mk_label(card, title, 12, 8, 460, UI_COL_WHITE, &lv_font_montserrat_20);
-  ui_mk_label(card, body, 12, 48, 460, UI_COL_WHITE, &lv_font_montserrat_14);
+  ui_mk_label(card, title, 12, 8, 460, UI_COL_TEXT, &lv_font_montserrat_20);
+  ui_mk_label(card, body, 12, 48, 460, UI_COL_TEXT, &lv_font_montserrat_14);
   lv_obj_t *ack = ui_mk_button(card, ackLabel, 150, 250, 180, 48, UI_COL_ACCENT);
+  // The ack button is filled with the darker UI_COL_ACCENT, so it keeps a light
+  // label instead of the dark one ui_mk_button gives a white button.
+  lv_obj_set_style_text_color(lv_obj_get_child(ack, 0), lv_color_white(), LV_PART_MAIN);
   s_modalAck = onAck;
   lv_obj_add_event_cb(ack, on_modal_ack, LV_EVENT_CLICKED, nullptr);
 }
@@ -252,6 +259,7 @@ void ui_show_setup() {
   render_current();
 }
 bool ui_is_setup() { return s_route == 6; }
+bool ui_is_info() { return s_route == 5; }
 
 void ui_refresh_current() {
   if (!g.loggedIn) return;  // setup still up

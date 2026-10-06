@@ -33,19 +33,19 @@ hold-to-confirm 500 ms on binary toggles, no local log storage, 41 °C warn /
 |---|---|
 | `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_modbus_init()` + `ui_init()`; `loop()` = USB serial poll → Modbus slave poll → boot-gate poll → sleep tick → `lv_timer_handler()` |
 | `lv_conf.h` | Enables vs stock: `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART, BUTTONMATRIX, QRCODE (+CANVAS, required by qrcode)` = 1; fonts +12/+20/+28. `KEYBOARD` is now 0 (credential entry moved to QR, §12). **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
-| `link_modbus.h/.cpp` | Modbus RTU slave ID 1 on `Serial1` (RX 18 / TX 17, 9600 8N1). FC 0x03/0x06/0x10 + CRC16. Register map in §10. `Serial` stays USB debug only |
-| `screen_setup.h/.cpp` | `/setup` first-class route: 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + Start/Stop button. Shown first on boot and on WT32 `LOGIN_REQ`; routes home only on `RESULT=success`. No keyboard (§12); duration/exp number/run live on `/control` |
+| `link_modbus.h/.cpp` | Modbus RTU slave ID 1 on `Serial1` (RX 18 / TX 17, 9600 8N1). FC 0x03/0x06/0x10 + CRC16. Register map in §10. `Serial` stays USB debug only. Also owns the poll-request output (IO11 -> WT32 IO14): `link_modbus_set_credentials()` pulses it so the master re-reads a new pair at once |
+| `screen_setup.h/.cpp` | `/setup` first-class route: 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + Start/Stop button. Shown first on boot and on WT32 `LOGIN_REQ`; routes home only on `RESULT=success`. No keyboard (§12); duration/exp number/run live on `/control`. It owns the SoftAP except while `/info` is up (§13). `RESULT=fail` puts the wrong-password text on the panel, and the phone sees the same verdict (§12) |
 | `touch.h` | Unchanged GT911 glue |
-| `ui_config.h` | Counts (6 clusters × 4 bottles, 2 online), ranges, 500 ms / 30 s / 5 min timings, thresholds, pins, palette, `FW_VERSION` |
+| `ui_config.h` | Counts (6 clusters × 4 bottles, 2 online), ranges, 500 ms / 30 s / 5 min timings, thresholds, pins, light palette (§13), `FW_VERSION` |
 | `fake_data.h/.cpp` | `AppState g`: experiment, setpoint, stirrer, POST, chamber temp, 6×4 bottles × 5 sensors + NULL flags + temp trend ring; `fake_init()` seeds 2 online / 4 offline; `fake_wt32_push()` jitters online values every 5 min (lv_timer) |
 | `serial_cmd.h/.cpp` | Human-typeable debug protocol over USB serial (see §5). Display-local only. Also `CREDS` and `AP` (§12) |
-| `provision_ap.h/.cpp` | SoftAP + web credential form on the display, staging into the same Modbus registers as the touchscreen (§12) |
+| `provision_ap.h/.cpp` | SoftAP + web credential form on the display, staging into the same Modbus registers as the `CREDS` serial command (§12). `/status` leads with a `waiting`/`success`/`fail` token and a reject gets the error page with a retry link |
 | `ui_shell.h/.cpp` | Status bar, content router, single blocking-modal primitive, bell logic, overheat eval, `ui_mk_*` styled helpers (no LVGL theme is enabled, so all styling is explicit) |
 | `screen_boot.h/.cpp` | `/boot` blocking gate: spinbox 1–99 h ±1 h + confirm; must confirm every boot |
 | `screen_home.h/.cpp` | `/home`: DATA / CONTROL / INFO nav + run summary + serial hint |
 | `screen_data.h/.cpp` | `/data` picker (6 clusters, offline greyed), `/data/X` 2×2 bottle grid ("node offline" inline), `/data/X/bottle_Y` 5 sensor rows + `lv_chart` temp trend (values ×10, range 300–450) |
-| `screen_control.h/.cpp` | `/control`: setpoint −/+ 0.1 °C (35.0–40.0, logs `[FAKE->WT32]`), stirrer + POST switches with hold-to-confirm progress bars |
-| `screen_info.h/.cpp` | `/info`: rebuilt on every open; fake storage/IP/HTTP/FW rows + real heap/PSRAM rows + fetch timestamp |
+| `screen_control.h/.cpp` | `/control`: setpoint −/+ 0.1 °C (35.0–40.0, logs `[FAKE->WT32]`), stirrer + POST switches with hold-to-confirm progress bars, plus a `PULSE INT` button that calls `link_notify_pulse()` so the poll-request line can be exercised by hand |
+| `screen_info.h/.cpp` | `/info`: rebuilt on every open; fake storage/IP/HTTP/FW rows + real heap/PSRAM rows + fetch timestamp + a 180 px network QR with its own Start/Stop (§13). `screen_info_poll()` keeps the QR in step each loop |
 | `screen_sleep.h/.cpp` | Idle timer on last-touch millis; backlight off after 30 s, on at next touch tick |
 
 ## 4. Screen tree / state machine (as built)
@@ -54,7 +54,7 @@ hold-to-confirm 500 ms on binary toggles, no local log storage, 41 °C warn /
 /boot (blocking gate, spinbox 1-99h, confirm) -> /home
 /home -> /data (picker) -> /data/X (grid) -> /data/X/bottle_Y (5 sensors + chart)
 /home -> /control (setpoint, stirrer hold-500ms, POST hold-500ms)
-/home -> /info (fresh on open)
+/home -> /info (fresh on open; network QR + Start/Stop, raises the same SoftAP as /setup)
 [any, post-confirm]  chamber>=41 -> warn modal (ack; re-arms <41)
                      chamber>=45 -> trip modal (stirrer fake-OFF; re-arms <45)
 [any]  30 s no touch -> backlight off -> touch -> back on
@@ -158,12 +158,21 @@ parse after 8 ms of line silence. CRC is standard Modbus CRC16.
 | `0x0078` | PING_MS | master | ms to 1.1.1.1, `0xFFFF` = none, shown live in /info |
 | `0x0079` | NET_UP | master | `1` = WT32 holds IP |
 
-`LOGIN_REQ=1` from the master routes to `/setup`. Confirm stages the
-strings, sets `CREDS_READY=1`, and shows "waiting for WT32". `RESULT=1`
-routes home but does NOT start the run; `RESULT=2` stays in setup with
-"login failed, retry". The master writes `CREDS_READY=0` after each read;
-`LOGIN_REQ=0` only on success. The run starts from `/control`
-(hold-to-confirm), which flips `EXP_RUNNING` and increments `EXP_NUM`.
+`LOGIN_REQ=1` from the master routes to `/setup`. Staging a pair (phone form
+or `CREDS`) sets `CREDS_READY=1`, shows "waiting for WT32", and pulses the
+poll-request line on IO11 so the master reads it on its next loop pass instead
+of up to 5 s later. `RESULT=1` routes home but does NOT start the run;
+`RESULT=2` stays in setup with "wrong username or password" on the status line,
+while the phone's own page shows the same verdict and a retry link (§12). The
+master writes `CREDS_READY=0` after each read; `LOGIN_REQ=0` only on success.
+The run starts from `/control` (hold-to-confirm), which flips `EXP_RUNNING` and
+increments `EXP_NUM`.
+
+The poll-request line is one wire, Display IO11 -> WT32 IO14, idle LOW, and it
+carries no data: a 20 ms HIGH pulse means "poll now". The WT32 picks it up in an
+interrupt and consumes it in its credential stage. A pulse that arrives while
+the master is logging in is latched, so the retry after a failure is polled
+twice as fast as the 5 s cycle allows. Full spec: `display-wt32-link.md` §4.3.
 
 ## 11. Setup route
 
@@ -213,11 +222,51 @@ USB serial gained `AP` (toggle the AP, print both payloads) and
 this is the bench path only).
 
 Credentials remain RAM-only on both boards; nothing reaches NVS or flash.
-`network-master` is unchanged and unaware of this path.
+`network-master` is unaware of this path: it only sees a staged pair.
+
+A rejected pair is visible in three places (`display-provisioning-ap.md` §7.1):
+the phone's result page turns red with an **Enter them again** link, the form
+that link returns to carries a banner until the next pair is staged, and the
+`/setup` status line carries the same wording. Retrying stages the pair and
+pulses the poll-request line (§10), so the WT32 re-reads it on the next loop
+pass instead of on its next 5 s cycle.
 
 Full detail: the WIFI: payload format and escaping rules, the cloaked-network
 tradeoff, the single-canvas re-encode, the `/status` state machine, and the
 verification steps are in `display-provisioning-ap.md`.
+
+## 13. Light theme and the /info network QR
+
+Two UI changes sit outside the screen-tree logic.
+
+**Light theme.** `LV_USE_THEME_DEFAULT` stays `0`, so nothing is themed and
+styling stays explicit in the `ui_mk_*` helpers. The change is the palette in
+`ui_config.h`: `UI_COL_BG` and the status-bar fill are light, `UI_COL_CARD` is
+white, and the primary foreground is `UI_COL_TEXT` (near-black). That macro was
+renamed from `UI_COL_WHITE`, whose value is no longer white. Two fills were
+added: `UI_COL_BAR` for the status bar and `UI_COL_CARD_OFF` for a button that is
+present but not usable (an offline node). `ui_mk_button()` gained a 1 px accent
+border, which is what now separates a white button from a white card or the light
+background. The modal ack button and the bell label keep light text because both
+sit on a dark fill.
+
+**Network QR on /info.** `/info` carries a 180 px QR and a Start/Stop button. It
+runs the same two-step payload as `/setup`: the Wi-Fi join code first, then
+`http://192.168.4.1/` once a phone associates. `screen_info_poll()` repaints it
+each loop, so the payload follows association and an idle-timeout stop without a
+route change. There is no "phone connected" modal here; the step label carries
+that. It is smaller than the `/setup` code because the diagnostic rows share the
+same route.
+
+The SoftAP is shared with `/setup`. `screen_setup_poll()` no longer tears it down
+when the route is neither `/setup` nor `/info`; `ui_is_info()` is the guard. That
+keeps the rule that the credential form does not outlive the screens that offer
+it, while letting a phone rejoin from `/info` after the run has started.
+
+Verify: `pio run -e display-v9`; on device open `/info`, tap Start phone login,
+scan with a phone — the code changes to the URL after the phone associates, and
+the Home button stops the AP. Under `-DIS_DEBUG=1`, reach `/info` via the bypass
+and check the same.
 
 ---
 Content generated by `openai/gpt-5.6-luna` in `codex`.
@@ -226,3 +275,5 @@ Updated by `opencode/muse-spark-1.3-contributor-free` in `opencode`: gate overla
 Updated by `opencode/space-bunny-free` in `opencode`: added `provision_ap` (§12), the SoftAP credential form and the `CREDS` / `AP` serial commands.
 Updated by `opencode/space-bunny-free` in `opencode`: `/setup` keyboard removed in favour of the two-step QR flow (§11, §12); `LV_USE_KEYBOARD` 0, `LV_USE_QRCODE`/`LV_USE_CANVAS` 1.
 Updated by `opencode/space-bunny-free` in `opencode`: SoftAP is WPA2 + cloaked rather than open; payload corrected to `T:WPA` with all four fields (§12).
+Updated by `freebuff/buffy` in `freebuff`: light palette and button border, `UI_COL_WHITE` -> `UI_COL_TEXT` (§3, §13); network QR and Start/Stop on `/info` with the SoftAP shared with `/setup` (§3, §4, §13); on-screen wording `Bottle` -> `Chamber`, `Cluster` -> `Node`.
+Updated by `freebuff/buffy` in `freebuff`: wrong-password verdict on the phone's page and the panel, and the poll-request line so a corrected pair is re-read at once (§3, §10, §12).

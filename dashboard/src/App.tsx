@@ -171,7 +171,7 @@ function Dashboard({
       <div>
         <p className="eyebrow">{view === "monitoring" ? "Operations overview" : "Experiment history"}</p>
         <h1>{view === "monitoring" ? "Device telemetry" : "Experiment history"}</h1>
-        <p className="subtitle">{view === "monitoring" ? "Latest readings for the selected bottle." : "Review readings from testing and regular experiments."}</p>
+        <p className="subtitle">{view === "monitoring" ? "Latest readings for the selected chamber." : "Review readings from testing and regular experiments."}</p>
       </div>
       <button className="refresh" onClick={() => void loadData()}>Refresh data</button>
     </section>
@@ -186,10 +186,10 @@ function Dashboard({
       {!loading && !error && readings.length === 0 && <div className="notice">No readings are available for this device.</div>}
 
       <section className="controls">
-        <div className="control-copy"><span className="label">Showing</span><strong>Bottle {selectedBottle}</strong><span className="count">{bottleCount} bottles</span></div>
-        <label>Bottle
+        <div className="control-copy"><span className="label">Showing</span><strong>Chamber {selectedBottle}</strong><span className="count">{bottleCount} chambers</span></div>
+        <label>Chamber
           <select value={selectedBottle} onChange={(event) => setSelectedBottle(Number(event.target.value))}>
-            {Array.from({ length: bottleCount }, (_, bottleId) => <option key={bottleId} value={bottleId}>Bottle {bottleId}</option>)}
+            {Array.from({ length: bottleCount }, (_, bottleId) => <option key={bottleId} value={bottleId}>Chamber {bottleId}</option>)}
           </select>
         </label>
       </section>
@@ -197,7 +197,7 @@ function Dashboard({
       <div className="notice">Device {deviceId} <span>| {ownerName ?? "Unnamed owner"}{ownerEmail ? ` (${ownerEmail})` : ""}</span></div>
 
       <section className="metrics">
-        <StatusCard label="Bottle" value={`Bottle ${selectedBottle}`} />
+        <StatusCard label="Chamber" value={`Chamber ${selectedBottle}`} />
         <StatusCard label="Samples" value={String(bottleReadings.length)} />
         <StatusCard label="Latest sample" value={latestReadingAt} />
         <StatusCard
@@ -207,7 +207,7 @@ function Dashboard({
       </section>
 
       {presence.latestSample && presence.disconnected.length > 0 && <div className="notice">
-        Disconnected at {formatDate(presence.latestSample)}: bottles {presence.disconnected.map((bottleId) => `Bottle ${bottleId}`).join(", ")} sent no data.
+        Disconnected at {formatDate(presence.latestSample)}: chambers {presence.disconnected.map((bottleId) => `Chamber ${bottleId}`).join(", ")} sent no data.
       </div>}
 
       <section className="metrics">
@@ -215,7 +215,7 @@ function Dashboard({
       </section>
 
       {!loading && !error && bottleReadings.length === 0 && <div className="notice">
-        No readings are available for this bottle{presence.latestSample ? "; it did not report at the latest sample" : ""}.
+        No readings are available for this chamber{presence.latestSample ? "; it did not report at the latest sample" : ""}.
       </div>}
 
       <section className="panel">
@@ -235,7 +235,7 @@ function Dashboard({
         </div>
       </section>
 
-      <footer><span>Data source: Supabase</span><span>-</span><span>Bottle readings across experiments</span></footer>
+      <footer><span>Data source: Supabase</span><span>-</span><span>Chamber readings across experiments</span></footer>
     </> : <ExperimentHistoryView experiments={experiments} loading={loading} error={error} sessionToken={sessionToken} />}
   </main>;
 }
@@ -303,7 +303,7 @@ function ExperimentHistoryView({
           onClick={() => setSelectedExperimentId(experiment.experiment_id)}
         >
           <strong>{formatExperimentId(experiment.experiment_id)}</strong>
-          <span>{experiment.reading_count} bottle readings{isTestingExperiment(experiment.experiment_id) ? " | Testing experiment" : ""}</span>
+          <span>{experiment.reading_count} chamber readings{isTestingExperiment(experiment.experiment_id) ? " | Testing experiment" : ""}</span>
           <small>{experiment.concluded ? "Concluded" : "Live"} | Last sample {formatDate(experiment.last_timestamp)}</small>
         </button>)}
       </div>
@@ -321,15 +321,15 @@ function ExperimentHistoryView({
           >
             Download CSV
           </button>
-          <button className="history-tab" onClick={() => setHistoryPanel("readings")} aria-pressed={historyPanel === "readings"}>Bottle Readings</button>
+          <button className="history-tab" onClick={() => setHistoryPanel("readings")} aria-pressed={historyPanel === "readings"}>Chamber Readings</button>
           <button className="history-tab" onClick={() => setHistoryPanel("results")} aria-pressed={historyPanel === "results"}>Results</button>
         </div>
       </section>
 
       <section className="panel history-summary">
-        <p className="eyebrow">{historyPanel === "readings" ? "Bottle readings" : "Experiment results"}</p>
+        <p className="eyebrow">{historyPanel === "readings" ? "Chamber readings" : "Experiment results"}</p>
         <h2>{formatExperimentId(selectedExperiment.experiment_id)}</h2>
-        <p>{selectedExperiment.reading_count} bottle readings, sampled between {formatDate(selectedExperiment.first_timestamp)} and {formatDate(selectedExperiment.last_timestamp)}.</p>
+        <p>{selectedExperiment.reading_count} chamber readings, sampled between {formatDate(selectedExperiment.first_timestamp)} and {formatDate(selectedExperiment.last_timestamp)}.</p>
         <span className="history-dates">{selectedExperiment.concluded ? "No recent samples, so this experiment is treated as concluded." : "Recent samples are present, so this experiment is treated as live."}</span>
       </section>
 
@@ -370,23 +370,23 @@ function ExperimentResultsView({
     <section className="metrics results-overview">
       <article className="metric"><p>Experiment</p><strong>{formatExperimentId(experiment.experiment_id)}</strong><span className="unit">{isTestingExperiment(experiment.experiment_id) ? "Testing experiment" : "Regular experiment"}</span></article>
       <article className="metric"><p>Status</p><strong>{experiment.concluded ? "Concluded" : "Live"}</strong></article>
-      <article className="metric"><p>Bottles</p><strong>{bottleStats.length}</strong></article>
+      <article className="metric"><p>Chambers</p><strong>{bottleStats.length}</strong></article>
       <article className="metric"><p>Readings</p><strong>{experiment.reading_count}</strong></article>
     </section>
 
     <section className="panel">
-      <div className="panel-heading"><div><p className="eyebrow">Across bottles</p><h2>Parameter summary</h2></div><span className="tag">{bottleStats.length} bottles</span></div>
+      <div className="panel-heading"><div><p className="eyebrow">Across chambers</p><h2>Parameter summary</h2></div><span className="tag">{bottleStats.length} chambers</span></div>
       <div className="result-metrics">
         {parameters.map(({ name, stats }) => <div className="result-metric" key={name}><strong>{parameterLabel(name)}</strong><span>{stats ? <>Min {formatValue(stats.min, name)} | Avg {formatValue(stats.average, name)} | Max {formatValue(stats.max, name)}</> : "No readings"}</span></div>)}
       </div>
     </section>
 
     <section className="panel">
-      <div className="panel-heading"><div><p className="eyebrow">Per bottle</p><h2>Bottle results</h2></div></div>
+      <div className="panel-heading"><div><p className="eyebrow">Per chamber</p><h2>Chamber results</h2></div></div>
       <div className="result-list">
         {bottleStats.map(({ bottle_id, reading }) => <article className="result-card" key={bottle_id}>
           <div className="result-heading">
-            <div><strong>Bottle {bottle_id}</strong><span>{formatDate(reading.timestamp)}</span></div>
+            <div><strong>Chamber {bottle_id}</strong><span>{formatDate(reading.timestamp)}</span></div>
             <span className="tag">Sample</span>
           </div>
           <div className="result-metrics">
@@ -445,7 +445,7 @@ function Chart({ rows, parameter }: { rows: Reading[]; parameter: ParameterName 
 
 function BottleChart({ readings, parameter }: { readings: Reading[]; parameter: ParameterName }) {
   return <section className="panel telemetry-chart-panel">
-    <div className="panel-heading"><div><p className="eyebrow">Across bottles</p><h2>{parameterLabel(parameter)}</h2></div><span className="tag">{readings.length} bottles</span></div>
+    <div className="panel-heading"><div><p className="eyebrow">Across chambers</p><h2>{parameterLabel(parameter)}</h2></div><span className="tag">{readings.length} chambers</span></div>
     <div className="chart"><Chart rows={readings} parameter={parameter} /></div>
   </section>;
 }

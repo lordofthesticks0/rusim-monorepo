@@ -150,6 +150,13 @@ static const char kPageHead[] =
     "background:#55c7e8;color:#0b0e14;font-size:16px;font-weight:600}"
     "#out{margin-top:24px;padding:16px;border-radius:8px;background:#131a29;"
     "border:1px solid #2a3350;font-size:14px;white-space:pre-wrap;display:none}"
+    "#out.err{background:#3a1520;border-color:#7a2233;color:#ffb4c1}"
+    "#out.ok{background:#12301f;border-color:#1f6b3f;color:#9be8b8}"
+    "a.btn{display:block;margin-top:16px;padding:14px;border-radius:8px;"
+    "background:#55c7e8;color:#0b0e14;font-size:16px;font-weight:600;"
+    "text-align:center;text-decoration:none}"
+    "p.err{background:#3a1520;border:1px solid #7a2233;color:#ffb4c1;"
+    "padding:12px;border-radius:8px;font-size:14px;margin:0 0 16px}"
     "</style></head><body><main>";
 
 static const char kPageTail[] = "</main></body></html>";
@@ -166,6 +173,14 @@ static void send_form() {
   page += "<h1>Portal login</h1>";
   page += "<p class=sub>Sent to the WT32 over Modbus, then to the campus "
           "portal. Held in memory only.</p>";
+  // The wrong-password verdict is visible on the page the user returns to, not
+  // only on the panel: RESULT=2 stays set in the slave until the next pair is
+  // staged, and creds_ready covers a retry that is already in flight, so the
+  // banner cannot sit over a fresh attempt.
+  if (link_modbus_result() == LINK_RESULT_FAIL && !link_modbus_creds_ready()) {
+    page += "<p class=err>Wrong username or password. The WT32 rejected the "
+            "last attempt. Try again below.</p>";
+  }
   page += "<form method=POST action=/creds>";
   page += "<input type=hidden name=t value=\"";
   page += s_token;
@@ -185,20 +200,38 @@ static void send_result_page() {
   String page;
   page.reserve(1600);
   page += kPageHead;
-  page += "<h1>Sending to WT32</h1>";
+  page += "<h1 id=head>Sending to WT32</h1>";
   page += "<p class=sub>Leave this page open. The WT32 is logging in to the "
           "campus portal now.</p>";
   page += "<div id=out>Waiting for the WT32 to report back...</div>";
+  page += "<a class=btn id=retry href='/' style='display:none'>Enter them "
+          "again</a>";
+  // /status leads with a state token (see handle_status). The page stops or
+  // retries on the token, so re-wording a message cannot change the behaviour.
+  // A reject gets the error treatment and a link back to the form; the retry
+  // it starts pulses the poll-request line, so the WT32 reads the new pair at
+  // once rather than on its next 5 s cycle.
   page += "<script>"
-          "const o=document.getElementById('out');"
+          "const o=document.getElementById('out'),"
+          "h=document.getElementById('head'),"
+          "retry=document.getElementById('retry');"
           "o.style.display='block';"
           "async function poll(){try{"
           "const r=await fetch('/status',{cache:'no-store'});"
-          "const t=await r.text();o.textContent=t;"
-          "if(t.indexOf('Waiting')<0)return;}"
-          "catch(e){o.textContent='Lost contact with the display. Is the "
-          "access point still in range?';return;}"
-          "setTimeout(poll,1500);}poll();</script>";
+          "const t=await r.text();"
+          "const i=t.indexOf(':');"
+          "const st=i<0?'':t.slice(0,i);"
+          "o.textContent=i<0?t:t.slice(i+1).trim();"
+          "if(st==='waiting'){setTimeout(poll,1500);return;}"
+          "if(st==='success'){o.className='ok';h.textContent='Login "
+          "succeeded';return;}"
+          "if(st==='fail'){o.className='err';"
+          "h.textContent='Wrong username or password';"
+          "retry.style.display='block';return;}"
+          "o.className='err';}"
+          "catch(e){o.className='err';o.textContent='Lost contact with the "
+          "display. Is the access point still in range?';}}"
+          "poll();</script>";
   page += kPageTail;
   srv()->send(200, "text/html", page);
 }
@@ -223,16 +256,20 @@ static void handle_status() {
   int res = link_modbus_result();
 
   String out;
+  // First token is machine-readable: "waiting" | "success" | "fail". The rest
+  // is what the phone prints. Keying the stop/retry decision off a token rather
+  // than off a substring of the message means editing a message cannot strand
+  // the page mid-poll.
   if (res == LINK_RESULT_SUCCESS) {
-    out = "Login succeeded. The port is authenticated.";
+    out = "success: Login succeeded. The port is authenticated.";
   } else if (res == LINK_RESULT_FAIL) {
-    out = "The WT32 rejected these credentials. Check the username and "
-          "password, then send again.";
+    out = "fail: Wrong username or password. The WT32 rejected the last "
+          "attempt.";
   } else if (link_modbus_creds_ready()) {
-    out = "Credentials received by the display. Waiting for the WT32 login to "
-          "finish...";
+    out = "waiting: Credentials received by the display. The WT32 is logging "
+          "in now...";
   } else {
-    out = "Waiting for credentials...";
+    out = "waiting: Waiting for credentials...";
   }
   srv()->send(200, "text/plain", out);
 }

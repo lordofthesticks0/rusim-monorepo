@@ -86,7 +86,7 @@ static void hold_attach(HoldCtx &ctx, lv_obj_t *parent, int y, const char *label
   ctx.flag = flag;
   ctx.wt32cmd = wt32cmd;
   ctx.name = label;
-  ui_mk_label(parent, label, 16, y, 200, UI_COL_WHITE, &lv_font_montserrat_14);
+  ui_mk_label(parent, label, 16, y, 200, UI_COL_TEXT, &lv_font_montserrat_14);
   ctx.sw = lv_switch_create(parent);
   lv_obj_set_pos(ctx.sw, 220, y - 4);
   lv_obj_set_size(ctx.sw, 72, 36);
@@ -248,41 +248,32 @@ static lv_obj_t *mk_spin(lv_obj_t *parent, int x, int y, int min, int max,
   return s;
 }
 
-// Test interrupt line to WT32 (backlog #10 bring-up).
-// Display IO11 -> WT32 IO14 via makeshift JST + common GND. IO14 is
-// non-strapping, so no boot-order constraint.
-#define INT_TEST_PIN 11
-#define INT_TEST_PULSE_MS 200
-
-void int_test_init() {
-  pinMode(INT_TEST_PIN, OUTPUT);
-  digitalWrite(INT_TEST_PIN, LOW);
-}
-
+// Poll-request line to the WT32 (Display IO11 -> WT32 IO14). link_modbus owns
+// the pin and pulses it from link_modbus_set_credentials(), which is what makes
+// a corrected password take effect on the next poll instead of up to 5 s later.
+// This button stays so the line can be exercised by hand from the bench.
 static lv_obj_t *s_intTestHint = nullptr;
 
 static void on_int_test(lv_event_t *e) {
   (void)e;
-  digitalWrite(INT_TEST_PIN, HIGH);
-  delay(INT_TEST_PULSE_MS);
-  digitalWrite(INT_TEST_PIN, LOW);
-  Serial.println("[INT-TEST] pulsed IO11 HIGH 200ms -> WT32 IO14");
+  link_notify_pulse();
+  Serial.println("[INT] poll request -> WT32 IO14 (watch the WT32 serial)");
   if (s_intTestHint != nullptr) {
-    lv_label_set_text(s_intTestHint, "pulsed IO11 -> IO14 (check WT32 serial)");
+    lv_label_set_text(s_intTestHint, "asked WT32 to poll now");
   }
 }
 
 void screen_control_show(lv_obj_t *parent) {
-  ui_mk_label(parent, "/control (cmds -> WT32, fake)", 16, 8, 500, UI_COL_WHITE,
+  ui_mk_label(parent, "/control (cmds -> WT32, fake)", 16, 8, 500, UI_COL_TEXT,
               &lv_font_montserrat_20);
   lv_obj_t *back = ui_mk_button(parent, "< Home", 648, 4, 140, 36, UI_COL_CARD);
   lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, nullptr);
 
-  ui_mk_label(parent, "Temp setpoint 35.0-40.0C, 0.1 steps:", 16, 52, 420, UI_COL_WHITE,
+  ui_mk_label(parent, "Temp setpoint 35.0-40.0C, 0.1 steps:", 16, 52, 420, UI_COL_TEXT,
               &lv_font_montserrat_14);
   lv_obj_t *minus = ui_mk_button(parent, "-", 16, 84, 64, 48, UI_COL_CARD);
   lv_obj_add_event_cb(minus, on_temp_minus, LV_EVENT_CLICKED, nullptr);
-  s_setpointLabel = ui_mk_label(parent, "", 96, 92, 200, UI_COL_WHITE, &lv_font_montserrat_20);
+  s_setpointLabel = ui_mk_label(parent, "", 96, 92, 200, UI_COL_TEXT, &lv_font_montserrat_20);
   setpoint_show();
   lv_obj_t *plus = ui_mk_button(parent, "+", 300, 84, 64, 48, UI_COL_CARD);
   lv_obj_add_event_cb(plus, on_temp_plus, LV_EVENT_CLICKED, nullptr);
@@ -296,7 +287,7 @@ void screen_control_show(lv_obj_t *parent) {
   hold_attach(s_runCtx, parent, 252, "Run experiment (hold 500ms)", &g.experimentRunning,
               "RUN");
 
-  ui_mk_label(parent, "Duration:", 16, 316, 100, UI_COL_WHITE,
+  ui_mk_label(parent, "Duration:", 16, 316, 100, UI_COL_TEXT,
               &lv_font_montserrat_14);
   s_durSpin = mk_spin(parent, 120, 310, UI_DURATION_MIN_H, UI_DURATION_MAX_H, 2,
                       g.durationH);
@@ -308,7 +299,7 @@ void screen_control_show(lv_obj_t *parent) {
   ui_mk_label(parent, "hours 1-99", 366, 318, 120, UI_COL_DIM,
               &lv_font_montserrat_14);
 
-  ui_mk_label(parent, "Exp number:", 16, 378, 100, UI_COL_WHITE,
+  ui_mk_label(parent, "Exp number:", 16, 378, 100, UI_COL_TEXT,
               &lv_font_montserrat_14);
   s_expSpin = mk_spin(parent, 120, 372, UI_EXP_NUM_MIN, UI_EXP_NUM_MAX, 4,
                       g.expNum);
@@ -321,7 +312,7 @@ void screen_control_show(lv_obj_t *parent) {
                          UI_COL_DIM, &lv_font_montserrat_14);
   db_refresh_warn();
 
-  ui_mk_label(parent, "INT test (IO11 -> WT32 IO14):", 16, 424, 260, UI_COL_WHITE,
+  ui_mk_label(parent, "INT test (IO11 -> WT32 IO14):", 16, 424, 260, UI_COL_TEXT,
               &lv_font_montserrat_14);
   lv_obj_t *tBtn = ui_mk_button(parent, "PULSE INT", 280, 418, 140, 42, UI_COL_CARD);
   lv_obj_add_event_cb(tBtn, on_int_test, LV_EVENT_CLICKED, nullptr);

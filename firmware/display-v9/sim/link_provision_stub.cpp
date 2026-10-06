@@ -21,6 +21,7 @@ static char s_ip[LINK_IP_MAX];
 
 void link_modbus_init() {}
 void link_modbus_poll() {}
+void link_notify_pulse() {}
 bool link_modbus_take_login_request() { return false; }
 
 void link_modbus_set_credentials(const char *user, const char *pass) {

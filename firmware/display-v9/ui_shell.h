@@ -20,6 +20,9 @@ void ui_show_info();
 // the run starts only after the WT32 reports RESULT=success.
 void ui_show_setup();
 bool ui_is_setup();
+// True while the diagnostic route is up. The network QR there raises the same
+// SoftAP as /setup, so the teardown in screen_setup_poll() consults this.
+bool ui_is_info();
 
 // Re-render the current route in place (called after fake pushes / serial).
 void ui_refresh_current();

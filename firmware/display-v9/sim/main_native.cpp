@@ -10,6 +10,7 @@
 #include "link_modbus.h"
 #include "serial_cmd.h"
 #include "screen_control.h"
+#include "screen_info.h"
 #include "screen_setup.h"
 #include "screen_sleep.h"
 #include "ui_config.h"
@@ -20,7 +21,6 @@ int main(int argc, char **argv) {
   (void)argv;
 
   link_modbus_init();
-  int_test_init();
   setvbuf(stdout, nullptr, _IONBF, 0);
 
   if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -46,6 +46,7 @@ int main(int argc, char **argv) {
     link_modbus_poll();
     screen_setup_poll();
     screen_control_poll();
+    screen_info_poll();
     sleep_tick();
     lv_timer_handler();
     SDL_Delay(5);
