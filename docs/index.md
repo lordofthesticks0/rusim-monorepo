@@ -25,7 +25,7 @@ document is the source of truth for anything measured on real hardware.
 
 | Directory | Board | Document |
 |---|---|---|
-| `firmware/display-v9/` | ESP32-S3 DevKitC-1 | `display-docs.md`, `migration-notes.md`, `display-wt32-link.md`, `display-provisioning-ap.md` |
+| `firmware/display-v9/` | ESP32-S3 DevKitC-1 | `display-docs.md`, `migration-notes.md`, `display-wt32-link.md`, `display-provisioning-ap.md`, `display-sim.md`, `display-debug-flag.md` |
 | `firmware/wt32-eth01_ping-test/` | WT32-ETH01 | `wt32-eth01-ping-test.md`, `wt32-eth01.md` |
 | `firmware/wt32-eth01_captive-recon/` | WT32-ETH01 | `wt32-eth01-captive-recon.md` |
 | `firmware/network-master/` | WT32-ETH01 | `network-master.md` (production), `display-wt32-link.md` |
@@ -51,6 +51,8 @@ document is the source of truth for anything measured on real hardware.
 | `display-wt32-link.md` | The single Modbus RTU line: wiring, framing, register map, flows |
 | `db-sync-experiment-ntp.md` | Supabase latest-experiment sync, mismatch warn, NTP (backlog #1/#9/#12) |
 | `display-provisioning-ap.md` | SoftAP credential form on the display: phone login instead of on-screen typing |
+| `display-sim.md` | `[env:display-sim]`: native PC/SDL build of the display-v9 UI |
+| `display-debug-flag.md` | `IS_DEBUG`: compile-time debug gate (login bypass on `/setup`) |
 | `flash-factory-tool.md` | `scripts-hardware/flash-factory.ts` and the factory image |
 | `captive-portal-workaround.md` | Plan for headless captive portal authentication on the WT32-ETH01 |
 

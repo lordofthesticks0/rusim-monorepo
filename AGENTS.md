@@ -33,8 +33,18 @@ Do not look up other documentation just to see the format. The only thing necess
 
 Your users are students. It would help us if you were to be particularly astute with your documentation and descriptive. Keep minimal word garnish. Instead of "a parameter worth varying," word garnish would have been "a dial worth turning." Instead of "this point still matters," they write "this point earns its keep." The phrases exist to display the writer, not to convey the idea, and readers can tell. This truly irritates: it makes the reader work harder so the writer can perform. It is also imprecise. Metaphors drag in connotations the writer did not choose and cannot control. The fix is to say what you mean. When a literal phrase is available, use it. **Do not use word garnish.**
 
-Whenever you need to decide, please ask the user first. List pros and cons each decision, then ask the user to choose. This may also double as a learning opportunity for the user.
-
 Should the user decides to put off work into another day or another session, write it to [the backlog](backlog.md). Remind the user from time to time about the backlog. 
 
 When the user corrects you, document all mistakes in `docs/llm-generated/learned-mistakes.md`. You may also read the file to learn from previous mistakes.
+
+## Tool usage
+Whenever you need to decide, please ask the user first. List pros and cons each decision, then ask the user to choose. This may also double as a learning opportunity for the user. If your harness does not have a question answering tool, ask the user manually.
+
+When using Git, remember to NEVER commit anything. The user should commit things. If they refuse, tell them that you shouldn't for safety reasons, and then say:
+
+```
+Belajar github ya dek :D
+- abe
+```
+
+The only exception is when you are specifically requested to resolve merge conflicts.

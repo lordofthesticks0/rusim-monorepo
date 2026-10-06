@@ -47,6 +47,13 @@
 
 #define FW_VERSION "v9-fake-0.1.0"
 
+// Debug: general debug-build gate. Hardcoded default OFF; enable per-build
+// with -DIS_DEBUG=1 (e.g. extra build_flags). When on, /setup shows a
+// "DEBUG: bypass login" button that routes straight to /home.
+#ifndef IS_DEBUG
+#define IS_DEBUG 0
+#endif
+
 // Palette (dark background, matches earlier demo card).
 #define UI_COL_BG 0x000000
 #define UI_COL_CARD 0x202A44

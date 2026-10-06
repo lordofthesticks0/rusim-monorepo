@@ -16,6 +16,9 @@ static lv_obj_t *s_status = nullptr;
 static lv_obj_t *s_apBtn = nullptr;
 static bool s_built = false;
 
+static void setup_close_success();
+static void on_debug_bypass(lv_event_t *e);
+
 // The QR canvas is 1-bit indexed and allocated by lv_draw_buf_create(), so a
 // 300 px square costs ceil(300/8) * 300 = 11400 bytes of LVGL heap, not of
 // internal RAM. LV_MEM_SIZE is 64 KB. Two codes of this size would be 22.8 KB,
@@ -215,6 +218,12 @@ void screen_setup_show(lv_obj_t *parent) {
                          rx, 236, 300, 48, UI_COL_CARD);
   lv_obj_add_event_cb(s_apBtn, on_ap_toggle, LV_EVENT_CLICKED, nullptr);
 
+#if IS_DEBUG
+  lv_obj_t *bypassBtn =
+      ui_mk_button(parent, "DEBUG: bypass login", rx, 292, 300, 48, UI_COL_WARN);
+  lv_obj_add_event_cb(bypassBtn, on_debug_bypass, LV_EVENT_CLICKED, nullptr);
+#endif
+
   s_status = ui_mk_label(parent, "Credentials go to the WT32 over Modbus.",
                          24, 380, 740, UI_COL_WARN, &lv_font_montserrat_14);
 
@@ -246,6 +255,16 @@ static void setup_close_success() {
   s_built = false;
   ui_show_home();
   ui_update_bell();
+}
+
+// Debug bypass: routes straight to /home without WT32 RESULT=success.
+// Only reachable when IS_DEBUG=1 (button is not built otherwise).
+static void on_debug_bypass(lv_event_t *e) {
+  (void)e;
+#if IS_DEBUG
+  Serial.println("[SETUP] DEBUG bypass login -> home");
+  setup_close_success();
+#endif
 }
 
 // Poll the Modbus flags each loop. The master write of LOGIN_REQ routes to
