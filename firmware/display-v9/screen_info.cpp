@@ -42,6 +42,15 @@ void screen_info_show(lv_obj_t *parent) {
   snprintf(row, sizeof(row), "Latest HTTP reply: %s", g.lastHttp);
   ui_mk_label(parent, row, 16, 180, 760, UI_COL_WHITE, &lv_font_montserrat_14);
 
+  int dbLatest = link_modbus_get_db_latest();
+  if (dbLatest == -2) {
+    snprintf(row, sizeof(row), "DB latest exp: waiting for master sync...");
+  } else {
+    snprintf(row, sizeof(row), "DB latest exp: %d (next %d)%s", dbLatest, dbLatest + 1,
+             link_modbus_time_ok() ? " NTP OK" : " NTP no sync");
+  }
+  ui_mk_label(parent, row, 16, 200, 760, UI_COL_WHITE, &lv_font_montserrat_14);
+
   snprintf(row, sizeof(row), "Firmware version: %s", FW_VERSION);
   ui_mk_label(parent, row, 16, 220, 760, UI_COL_WHITE, &lv_font_montserrat_14);
 

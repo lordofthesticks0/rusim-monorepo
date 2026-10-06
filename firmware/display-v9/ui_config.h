@@ -16,6 +16,13 @@
 #define UI_DURATION_MAX_H 99
 #define UI_DURATION_DEFAULT_H 24
 
+// Experiment number range (matches the dashboard's integer experiment_id:
+// 0 is the testing experiment, 1+ are regular). Editable on /control; later
+// the master derives it from the database (latest + 1).
+#define UI_EXP_NUM_MIN 0
+#define UI_EXP_NUM_MAX 9999
+#define UI_EXP_NUM_DEFAULT 0
+
 // Temp setpoint range/step shown on /control (command goes to WT32; fake here).
 #define UI_TEMP_MIN_C 35.0f
 #define UI_TEMP_MAX_C 40.0f

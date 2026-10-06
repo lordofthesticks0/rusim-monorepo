@@ -55,9 +55,11 @@ Must match `firmware/display-v9/link_modbus.h`.
 | `0x0000` | LOGIN_REQ | master WR | `1` = show the login gate |
 | `0x0001` | CREDS_READY | slave sets, master writes `0` to ack | `1` = staged creds ready to read |
 | `0x0002` | RESULT | master WR | `0` none, `1` success, `2` fail |
+| `0x0003` | EXP_RUNNING | slave RD (poll) | `1` = experiment under way |
+| `0x0004` | EXP_NUM | slave RD (poll) | current experiment number |
 | `0x0010-0x002F` | USERNAME | master RD (32 regs) | 64 bytes ASCII, big-endian, NUL-padded |
 | `0x0030-0x004F` | PASSWORD | master RD (32 regs) | same encoding as username |
-| `0x0060` | DURATION_H | master RD (1 reg) | 1-99, clamped |
+| `0x0060` | DURATION_H | master RD (1 reg, quick poll) | 1-99, clamped |
 | `0x0070-0x0077` | IP_ADDR | master WR (8 regs) | 16 bytes ASCII NUL-padded, pushed every cycle for /info |
 | `0x0078` | PING_MS | master WR | avg ping to 1.1.1.1 in ms, `0xFFFF` = no data / failed |
 | `0x0079` | NET_UP | master WR | `1` = holds DHCP IP, `0` = link down |
@@ -82,13 +84,15 @@ WAIT_IP -> NEED_CREDS -> LOGIN -> RUN
   `[ETH] Waiting for IP address (DHCP)...` every 2 s.
 - `NEED_CREDS`: the network loop pauses. Every 5 s it writes
   `LOGIN_REQ=1`, reads `CREDS_READY`, and when `1` reads USERNAME (32),
-  PASSWORD (32), DURATION (1). Empty username or password is ignored until
+  PASSWORD (32). Empty username or password is ignored until
   the user taps Confirm on the display. A captured pair moves to LOGIN.
+  Each poll also quick-reads DURATION/EXP_NUM/EXP_RUNNING.
 - `LOGIN`: runs `doLogin()` (§5) with the RAM-only credentials, writes
   RESULT (`1`/`2`), writes `CREDS_READY=0`, and on success also
   `LOGIN_REQ=0`. Credentials are overwritten and released before leaving.
   Success moves to RUN; failure returns to NEED_CREDS for re-poll in 5 s.
-- `RUN`: prints the IP, pings `1.1.1.1` 3x, fetches the data URL. The fetch
+- `RUN`: prints the IP, pings `1.1.1.1` 3x, fetches the data URL, and
+  quick-reads DURATION/EXP_NUM/EXP_RUNNING (logged on change). The fetch
   verdict decides: genuine content stays in RUN, a WALLED body (portal
   interception page) returns to NEED_CREDS for re-auth. A ping failure alone
   does not trigger re-auth.

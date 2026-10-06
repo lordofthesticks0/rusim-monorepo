@@ -1,3 +1,18 @@
+### 2026-10-06
+- Shipped network-master DB/NTP code without compiling: a debug `q1` variable
+  was declared inside the `if (at >= 0)` block but referenced after it, so the
+  build failed (`'q1' was not declared in this scope`). Fix was to delete the
+  variable. Lesson: run `pio run -e network-master` (and `-e display-v9` when
+  the display changes) before reporting done. The project builds from the repo
+  root `platformio.ini`, not from inside `firmware/`.
+- Proposed WT32 IO2 as an interrupt input before stating it is a strapping pin
+  (must be low/floating at boot). User wired it, then had to move the signal
+  to IO14. Fix: lead with the boot constraint, propose a non-strapping pin
+  (IO14/IO32/IO33) first, offer IO2/IO4/IO5/IO12/IO15 only with the warning
+  attached. Lesson: check strapping + peripheral collisions (ETH RMII, UART,
+  touch I2C, USB) before naming any GPIO, and put the safest option first.
+  (network-master INT test, display IO11 -> WT32 IO14, LED IO2)
+
 ### 2026-10-05
 - LVGL: `lv_obj_set_pos()` is an offset relative to the object's current
   alignment, not absolute screen coordinates. `lv_keyboard_create()` aligns

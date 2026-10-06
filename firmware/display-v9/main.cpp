@@ -12,6 +12,7 @@
 #include "fake_data.h"
 #include "link_modbus.h"
 #include "provision_ap.h"
+#include "screen_control.h"
 #include "screen_setup.h"
 #include "screen_sleep.h"
 #include "serial_cmd.h"
@@ -99,6 +100,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Display UI v9 (fake-data pass). Send HELP for serial cmds.");
   link_modbus_init();
+  int_test_init();
 
   // Init Display
   lcd->begin();
@@ -138,6 +140,7 @@ void setup() {
     lv_indev_set_read_cb(indev, my_touchpad_read);
 
     fake_init();
+    link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
     ui_init();
 
     Serial.println("Setup done");
@@ -148,6 +151,7 @@ void loop() {
   serial_cmd_poll(); /* human-typeable fake-data protocol; see serial_cmd.h */
   link_modbus_poll(); /* WT32 Modbus slave on Serial1; raises setup */
   screen_setup_poll(); /* LOGIN_REQ -> setup route, RESULT -> home/retry */
+  screen_control_poll(); /* late DB sync -> /control warn label */
   provision_ap_poll(); /* SoftAP credential form, while it is running */
   sleep_tick();      /* 30 s idle -> backlight off */
   lv_timer_handler(); /* let the GUI do its work */

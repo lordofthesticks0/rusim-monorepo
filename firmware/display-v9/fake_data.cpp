@@ -23,7 +23,9 @@ static void fake_bottle_seed(BottleFake &b, float tempBase) {
 
 void fake_init() {
   randomSeed(analogRead(0) + millis());
+  g.loggedIn = false;
   g.experimentRunning = false;
+  g.expNum = 0;
   g.durationH = UI_DURATION_DEFAULT_H;
   g.tempSetpointC = UI_TEMP_DEFAULT_C;
   g.stirrerOn = false;

@@ -34,7 +34,7 @@ hold-to-confirm 500 ms on binary toggles, no local log storage, 41 °C warn /
 | `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_modbus_init()` + `ui_init()`; `loop()` = USB serial poll → Modbus slave poll → boot-gate poll → sleep tick → `lv_timer_handler()` |
 | `lv_conf.h` | Enables vs stock: `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART, BUTTONMATRIX, QRCODE (+CANVAS, required by qrcode)` = 1; fonts +12/+20/+28. `KEYBOARD` is now 0 (credential entry moved to QR, §12). **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
 | `link_modbus.h/.cpp` | Modbus RTU slave ID 1 on `Serial1` (RX 18 / TX 17, 9600 8N1). FC 0x03/0x06/0x10 + CRC16. Register map in §10. `Serial` stays USB debug only |
-| `screen_setup.h/.cpp` | `/setup` first-class route: 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + duration spinbox 1–99 h + Start/Stop button. Shown first on boot and on WT32 `LOGIN_REQ`; routes home only on `RESULT=success`. No keyboard (§12) |
+| `screen_setup.h/.cpp` | `/setup` first-class route: 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + Start/Stop button. Shown first on boot and on WT32 `LOGIN_REQ`; routes home only on `RESULT=success`. No keyboard (§12); duration/exp number/run live on `/control` |
 | `touch.h` | Unchanged GT911 glue |
 | `ui_config.h` | Counts (6 clusters × 4 bottles, 2 online), ranges, 500 ms / 30 s / 5 min timings, thresholds, pins, palette, `FW_VERSION` |
 | `fake_data.h/.cpp` | `AppState g`: experiment, setpoint, stirrer, POST, chamber temp, 6×4 bottles × 5 sensors + NULL flags + temp trend ring; `fake_init()` seeds 2 online / 4 offline; `fake_wt32_push()` jitters online values every 5 min (lv_timer) |
@@ -76,7 +76,9 @@ USB serial, 115200, newline-terminated, case-insensitive command word:
 HELP | STATUS | PUSH | LINK
 TEMP 38.3            chamber temp (drives 41/45 UI; TRY: TEMP 41.5, TEMP 45.2, TEMP 37.0)
 SETPOINT 37.5        35.0-40.0, mirrors the /control stepper
-DURATION 24          1-99 whole hours, mirrors the boot spinbox
+DURATION 24          1-99 whole hours, quick-polled by the master
+RUN ON|OFF           start/stop the experiment; each start increments EXP
+EXP 3                set the experiment number
 STIRRER ON|OFF       also logs [FAKE->WT32] like the on-screen toggle
 POST ON|OFF
 NODE <0-5> ON|OFF    OFF nulls the whole node; ON clears its NULLs
@@ -147,18 +149,21 @@ parse after 8 ms of line silence. CRC is standard Modbus CRC16.
 | `0x0000` | LOGIN_REQ | master | `1` = show the login gate |
 | `0x0001` | CREDS_READY | slave sets, master clears | `1` = staged creds ready |
 | `0x0002` | RESULT | master | `0` none, `1` success, `2` fail |
+| `0x0003` | EXP_RUNNING | read-only | `1` = experiment under way |
+| `0x0004` | EXP_NUM | read-only | current experiment number |
 | `0x0010-0x002F` | USERNAME | read-only | 64 B ASCII, big-endian, NUL-padded |
 | `0x0030-0x004F` | PASSWORD | read-only | same encoding as username |
-| `0x0060` | DURATION_H | read-only | 1-99 |
+| `0x0060` | DURATION_H | read-only | 1-99, quick-polled by the master |
 | `0x0070-0x0077` | IP_ADDR | master | 16 B ASCII, shown live in /info |
 | `0x0078` | PING_MS | master | ms to 1.1.1.1, `0xFFFF` = none, shown live in /info |
 | `0x0079` | NET_UP | master | `1` = WT32 holds IP |
 
 `LOGIN_REQ=1` from the master routes to `/setup`. Confirm stages the
 strings, sets `CREDS_READY=1`, and shows "waiting for WT32". `RESULT=1`
-routes home and starts the run; `RESULT=2` stays in setup with "login
-failed, retry". The master writes `CREDS_READY=0` after each read;
-`LOGIN_REQ=0` only on success.
+routes home but does NOT start the run; `RESULT=2` stays in setup with
+"login failed, retry". The master writes `CREDS_READY=0` after each read;
+`LOGIN_REQ=0` only on success. The run starts from `/control`
+(hold-to-confirm), which flips `EXP_RUNNING` and increments `EXP_NUM`.
 
 ## 11. Setup route
 
@@ -167,8 +172,9 @@ skips route 6, so the 5-minute fake push never disturbs it.
 
 The route was originally a two-textarea form with an `lv_keyboard`. That is
 gone; §12 describes what replaced it. What survives: the route is raised by
-`LOGIN_REQ` and lowered to `/home` on `RESULT=success`, and the duration
-spinbox still writes `g.durationH`.
+`LOGIN_REQ` and lowered to `/home` on `RESULT=success`. The duration
+spinbox moved to `/control`, so experiment duration and number can be
+changed after login without re-authing.
 
 Verify: `pio run -e display-v9`; on device send `LINK` over USB serial to
 print `req/ready/result/user/dur`. Short RX to TX on the display alone to
@@ -192,13 +198,11 @@ a cloaked SSID, and serves a form at `http://192.168.4.1/`. `/setup` shows a
 present when the SSID is cloaked. One constant (`kHidden`) drives both the radio
 and the payload's `H:` field, so they cannot disagree.
 
-Controls sit in a right-hand column: the SSID, the passphrase, the duration
-spinbox, and the Start/Stop button. The passphrase is there for a phone that
+Controls sit in a right-hand column: the SSID, the passphrase, and the
+Start/Stop button. The passphrase is there for a phone that
 scans the join code and does nothing — Settings → Other network, then type what
-the panel shows. The spinbox writes `g.durationH` on
-`LV_EVENT_VALUE_CHANGED`, so duration applies whether credentials arrive by QR
-or by serial. The Confirm button is gone; there is nothing on the panel to
-confirm.
+the panel shows. The duration spinbox moved to `/control`; the Confirm button
+is gone; there is nothing on the panel to confirm.
 
 Build flags: `PROVISION_AP_HIDDEN=0` broadcasts the SSID,
 `PROVISION_AP_PASSWORD="secret"` (8–63 chars) replaces the MAC-derived

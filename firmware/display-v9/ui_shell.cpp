@@ -134,9 +134,9 @@ void ui_update_bell() {
   int n = fake_null_count();
   char exp[48];
   if (g.experimentRunning) {
-    snprintf(exp, sizeof(exp), "exp %dh (fake)", g.durationH);
+    snprintf(exp, sizeof(exp), "exp #%d %dh (fake)", g.expNum, g.durationH);
   } else {
-    snprintf(exp, sizeof(exp), "exp --h (fake)");
+    snprintf(exp, sizeof(exp), "exp #%d --h (fake)", g.expNum);
   }
   lv_label_set_text(s_expLabel, exp);
   lv_label_set_text(s_postLabel, g.postEnabled ? "POST ON" : "POST OFF");
@@ -254,7 +254,7 @@ void ui_show_setup() {
 bool ui_is_setup() { return s_route == 6; }
 
 void ui_refresh_current() {
-  if (!g.experimentRunning) return;  // setup still up
+  if (!g.loggedIn) return;  // setup still up
   if (s_route == 6) return;          // never wipe typed login text
   render_current();
   ui_update_bell();
@@ -269,7 +269,7 @@ static void on_warn41_ack() {}
 static void on_trip45_ack() {}
 
 void ui_eval_overheat() {
-  if (!g.experimentRunning) return;
+  if (!g.loggedIn) return;
   float t = g.chamberTempC;
   if (t >= UI_OVERHEAT_TRIP_C) {
     if (!s_trip45Shown) {

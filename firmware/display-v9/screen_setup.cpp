@@ -13,7 +13,6 @@ static lv_obj_t *s_stepLabel = nullptr;
 static lv_obj_t *s_ssidLabel = nullptr;
 static lv_obj_t *s_passLabel = nullptr;
 static lv_obj_t *s_status = nullptr;
-static lv_obj_t *s_spin = nullptr;
 static lv_obj_t *s_apBtn = nullptr;
 static bool s_built = false;
 
@@ -127,15 +126,6 @@ static void qr_refresh() {
   }
 }
 
-static void on_spin_plus(lv_event_t *e) {
-  (void)e;
-  lv_spinbox_increment(s_spin);
-}
-static void on_spin_minus(lv_event_t *e) {
-  (void)e;
-  lv_spinbox_decrement(s_spin);
-}
-
 // Raises or tears down the SoftAP the phone form is served from. The AP is
 // off by default and dies on the idle timeout in provision_ap_poll(), so
 // this is a deliberate act rather than a mode the device sits in.
@@ -180,14 +170,6 @@ static void on_ap_toggle(lv_event_t *e) {
   }
 }
 
-static void on_spin_changed(lv_event_t *e) {
-  (void)e;
-  int32_t v = lv_spinbox_get_value(s_spin);
-  if (v < UI_DURATION_MIN_H) v = UI_DURATION_MIN_H;
-  if (v > UI_DURATION_MAX_H) v = UI_DURATION_MAX_H;
-  g.durationH = (int)v;
-}
-
 void screen_setup_show(lv_obj_t *parent) {
   ui_mk_label(parent, "Setup: network login", 16, 6, 500, UI_COL_WHITE,
               &lv_font_montserrat_20);
@@ -228,34 +210,6 @@ void screen_setup_show(lv_obj_t *parent) {
   s_passLabel = ui_mk_label(parent, "-", rx + 80, 116, 260, UI_COL_ACCENT,
                             &lv_font_montserrat_14);
 
-  ui_mk_label(parent, "Duration:", rx, 150, 90, UI_COL_WHITE,
-              &lv_font_montserrat_14);
-  s_spin = lv_spinbox_create(parent);
-  lv_obj_set_pos(s_spin, rx, 172);
-  lv_obj_set_size(s_spin, 120, 42);
-  lv_spinbox_set_range(s_spin, UI_DURATION_MIN_H, UI_DURATION_MAX_H);
-  lv_spinbox_set_digit_format(s_spin, 2, 0);
-  lv_spinbox_set_step(s_spin, 1);
-  lv_spinbox_set_value(s_spin, g.durationH >= UI_DURATION_MIN_H &&
-                                  g.durationH <= UI_DURATION_MAX_H
-                              ? g.durationH
-                              : UI_DURATION_DEFAULT_H);
-  lv_obj_set_style_bg_color(s_spin, lv_color_white(), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(s_spin, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_text_color(s_spin, lv_color_black(), LV_PART_MAIN);
-  lv_obj_set_style_border_color(s_spin, lv_color_hex(UI_COL_ACCENT), LV_PART_MAIN);
-  lv_obj_set_style_border_width(s_spin, 1, LV_PART_MAIN);
-  lv_obj_set_style_radius(s_spin, 4, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_spin, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_add_event_cb(s_spin, on_spin_changed, LV_EVENT_VALUE_CHANGED, nullptr);
-
-  lv_obj_t *minus = ui_mk_button(parent, "-", rx + 130, 172, 48, 42, UI_COL_CARD);
-  lv_obj_add_event_cb(minus, on_spin_minus, LV_EVENT_CLICKED, nullptr);
-  lv_obj_t *plus = ui_mk_button(parent, "+", rx + 184, 172, 48, 42, UI_COL_CARD);
-  lv_obj_add_event_cb(plus, on_spin_plus, LV_EVENT_CLICKED, nullptr);
-  ui_mk_label(parent, "hours 1-99", rx + 244, 180, 120, UI_COL_DIM,
-              &lv_font_montserrat_14);
-
   s_apBtn = ui_mk_button(parent,
                          provision_ap_active() ? "Stop" : "Start phone login",
                          rx, 236, 300, 48, UI_COL_CARD);
@@ -270,9 +224,10 @@ void screen_setup_show(lv_obj_t *parent) {
 }
 
 static void setup_close_success() {
-  g.experimentRunning = true;
-  Serial.printf("[SETUP] WT32 auth OK, experiment started, duration=%dh\n",
-                g.durationH);
+  g.loggedIn = true;
+  g.experimentRunning = false;
+  Serial.println("[SETUP] WT32 auth OK, logged in; start the run from /control");
+  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
   // Never leave the credential form reachable once the run has started.
   provision_ap_end();
 
@@ -285,7 +240,6 @@ static void setup_close_success() {
   s_stepLabel = nullptr;
   s_ssidLabel = nullptr;
   s_passLabel = nullptr;
-  s_spin = nullptr;
   s_status = nullptr;
   s_apBtn = nullptr;
   s_qrShown[0] = '\0';

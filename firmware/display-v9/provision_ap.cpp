@@ -174,10 +174,6 @@ static void send_form() {
           "autocapitalize=none spellcheck=false required>";
   page += "<label>Password</label><input name=pass type=password "
           "autocomplete=current-password required>";
-  page += "<label>Duration (hours, 1-99)</label>";
-  page += "<input name=dur type=number min=1 max=99 value=\"";
-  page += String(UI_DURATION_DEFAULT_H);
-  page += "\">";
   page += "<button type=submit>Send to WT32</button>";
   page += "</form>";
   page += "<div id=out></div>";
@@ -271,19 +267,13 @@ static void handle_creds() {
     return;
   }
 
-  int dur = UI_DURATION_DEFAULT_H;
-  if (srv()->hasArg("dur")) {
-    dur = srv()->arg("dur").toInt();
-  }
-  if (dur < UI_DURATION_MIN_H) dur = UI_DURATION_MIN_H;
-  if (dur > UI_DURATION_MAX_H) dur = UI_DURATION_MAX_H;
-
   // The password is never logged. link_modbus_set_credentials() holds the
   // strings in display RAM until the WT32 reads them; the WT32 overwrites its
-  // own copy after login. Nothing reaches flash.
-  Serial.printf("[AP] staged user='%s' dur=%dh over the air\n", user.c_str(), dur);
+  // own copy after login. Nothing reaches flash. Duration and experiment
+  // settings live on /control, not in the login form.
+  Serial.printf("[AP] staged user='%s' over the air\n", user.c_str());
 
-  link_modbus_set_credentials(user.c_str(), pass.c_str(), dur);
+  link_modbus_set_credentials(user.c_str(), pass.c_str());
 
   // The plaintext String buffers hold the password in heap. Drop them now.
   pass = String();

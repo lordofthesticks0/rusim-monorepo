@@ -49,6 +49,7 @@ document is the source of truth for anything measured on real hardware.
 | `wt32-eth01-captive-recon.md` | Captive portal recon firmware |
 | `network-master.md` | Production WT32 firmware: portal login via display Modbus |
 | `display-wt32-link.md` | The single Modbus RTU line: wiring, framing, register map, flows |
+| `db-sync-experiment-ntp.md` | Supabase latest-experiment sync, mismatch warn, NTP (backlog #1/#9/#12) |
 | `display-provisioning-ap.md` | SoftAP credential form on the display: phone login instead of on-screen typing |
 | `flash-factory-tool.md` | `scripts-hardware/flash-factory.ts` and the factory image |
 | `captive-portal-workaround.md` | Plan for headless captive portal authentication on the WT32-ETH01 |

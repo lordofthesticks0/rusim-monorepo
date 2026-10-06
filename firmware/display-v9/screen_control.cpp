@@ -1,6 +1,7 @@
 #include "screen_control.h"
 
 #include "fake_data.h"
+#include "link_modbus.h"
 #include "ui_config.h"
 #include "ui_shell.h"
 
@@ -17,6 +18,7 @@ struct HoldCtx {
   bool *flag = nullptr;
   const char *name = "";
   const char *wt32cmd = "";
+  void (*after)() = nullptr;  // optional hook run after a confirmed toggle
 };
 
 static void hold_progress(lv_timer_t *t) {
@@ -60,6 +62,7 @@ static void on_hold_event(lv_event_t *e) {
     if (ctx->armed && el >= UI_HOLD_TO_CONFIRM_MS) {
       *(ctx->flag) = nowOn;
       Serial.printf("[FAKE->WT32] %s %s\n", ctx->wt32cmd, nowOn ? "ON" : "OFF");
+      if (ctx->after != nullptr) ctx->after();
       lv_label_set_text(ctx->hint, "sent to WT32 (fake).");
       hold_reset(ctx);
       ui_update_bell();
@@ -129,30 +132,199 @@ static void on_back(lv_event_t *e) {
 
 static HoldCtx s_stirrerCtx;
 static HoldCtx s_postCtx;
+static HoldCtx s_runCtx;
+
+static lv_obj_t *s_durSpin = nullptr;
+static lv_obj_t *s_expSpin = nullptr;
+static lv_obj_t *s_dbWarn = nullptr;
+static bool s_dbSuggested = false;
+
+static void exp_mirror_link() {
+  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+}
+
+// DB latest -> next suggestion + mismatch warn (backlog #9).
+// Called on show, on edit, and from screen_control_poll() in the main loop
+// so a late master sync still updates the open screen.
+static void db_refresh_warn() {
+  if (s_dbWarn == nullptr) return;
+  int latest = link_modbus_get_db_latest();
+  if (latest == -2) {
+    lv_label_set_text(s_dbWarn, "DB: waiting for master sync...");
+    return;
+  }
+  if (!s_dbSuggested) {
+    s_dbSuggested = true;
+    int next = latest + 1;
+    if (next < UI_EXP_NUM_MIN) next = UI_EXP_NUM_MIN;
+    if (next > UI_EXP_NUM_MAX) next = UI_EXP_NUM_MAX;
+    if (g.expNum != next && s_expSpin != nullptr) {
+      g.expNum = next;
+      lv_spinbox_set_value(s_expSpin, next);
+      exp_mirror_link();
+      ui_update_bell();
+      Serial.printf("[DB] auto-suggest exp=%d (latest=%d)\n", next, latest);
+    }
+  }
+  if (g.expNum <= latest) {
+    char t[96];
+    snprintf(t, sizeof(t), "WARN: exp %d already in DB (latest %d). Use %d.",
+             g.expNum, latest, latest + 1);
+    lv_label_set_text(s_dbWarn, t);
+    lv_obj_set_style_text_color(s_dbWarn, lv_color_hex(UI_COL_WARN), LV_PART_MAIN);
+    Serial.printf("[DB] mismatch: local=%d latest=%d\n", g.expNum, latest);
+  } else {
+    char t[64];
+    snprintf(t, sizeof(t), "DB latest %d, next %d OK.", latest, latest + 1);
+    lv_label_set_text(s_dbWarn, t);
+    lv_obj_set_style_text_color(s_dbWarn, lv_color_hex(UI_COL_OK), LV_PART_MAIN);
+  }
+}
+
+void screen_control_poll() { db_refresh_warn(); }
+
+// RUN switch confirmed ON: each stopped->running edge starts a new
+// experiment number. Mirror everything to the link either way.
+static void on_run_toggled() {
+  if (g.experimentRunning) g.expNum++;
+  exp_mirror_link();
+}
+
+static void on_dur_changed(lv_event_t *e) {
+  (void)e;
+  int32_t v = lv_spinbox_get_value(s_durSpin);
+  if (v < UI_DURATION_MIN_H) v = UI_DURATION_MIN_H;
+  if (v > UI_DURATION_MAX_H) v = UI_DURATION_MAX_H;
+  g.durationH = (int)v;
+  exp_mirror_link();
+  ui_update_bell();
+}
+
+static void on_dur_plus(lv_event_t *e) {
+  (void)e;
+  lv_spinbox_increment(s_durSpin);
+}
+static void on_dur_minus(lv_event_t *e) {
+  (void)e;
+  lv_spinbox_decrement(s_durSpin);
+}
+
+static void on_exp_changed(lv_event_t *e) {
+  (void)e;
+  int32_t v = lv_spinbox_get_value(s_expSpin);
+  if (v < UI_EXP_NUM_MIN) v = UI_EXP_NUM_MIN;
+  if (v > UI_EXP_NUM_MAX) v = UI_EXP_NUM_MAX;
+  g.expNum = (int)v;
+  exp_mirror_link();
+  ui_update_bell();
+  db_refresh_warn();
+}
+
+static void on_exp_plus(lv_event_t *e) {
+  (void)e;
+  lv_spinbox_increment(s_expSpin);
+}
+static void on_exp_minus(lv_event_t *e) {
+  (void)e;
+  lv_spinbox_decrement(s_expSpin);
+}
+
+static lv_obj_t *mk_spin(lv_obj_t *parent, int x, int y, int min, int max,
+                          int digits, int value) {
+  lv_obj_t *s = lv_spinbox_create(parent);
+  lv_obj_set_pos(s, x, y);
+  lv_obj_set_size(s, 120, 42);
+  lv_spinbox_set_range(s, min, max);
+  lv_spinbox_set_digit_format(s, digits, 0);
+  lv_spinbox_set_step(s, 1);
+  lv_spinbox_set_value(s, value >= min && value <= max ? value : min);
+  lv_obj_set_style_bg_color(s, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(s, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_text_color(s, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_border_color(s, lv_color_hex(UI_COL_ACCENT), LV_PART_MAIN);
+  lv_obj_set_style_border_width(s, 1, LV_PART_MAIN);
+  lv_obj_set_style_radius(s, 4, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s, &lv_font_montserrat_14, LV_PART_MAIN);
+  return s;
+}
+
+// Test interrupt line to WT32 (backlog #10 bring-up).
+// Display IO11 -> WT32 IO14 via makeshift JST + common GND. IO14 is
+// non-strapping, so no boot-order constraint.
+#define INT_TEST_PIN 11
+#define INT_TEST_PULSE_MS 200
+
+void int_test_init() {
+  pinMode(INT_TEST_PIN, OUTPUT);
+  digitalWrite(INT_TEST_PIN, LOW);
+}
+
+static lv_obj_t *s_intTestHint = nullptr;
+
+static void on_int_test(lv_event_t *e) {
+  (void)e;
+  digitalWrite(INT_TEST_PIN, HIGH);
+  delay(INT_TEST_PULSE_MS);
+  digitalWrite(INT_TEST_PIN, LOW);
+  Serial.println("[INT-TEST] pulsed IO11 HIGH 200ms -> WT32 IO14");
+  if (s_intTestHint != nullptr) {
+    lv_label_set_text(s_intTestHint, "pulsed IO11 -> IO14 (check WT32 serial)");
+  }
+}
 
 void screen_control_show(lv_obj_t *parent) {
   ui_mk_label(parent, "/control (cmds -> WT32, fake)", 16, 8, 500, UI_COL_WHITE,
               &lv_font_montserrat_20);
-
-  ui_mk_label(parent, "Temp setpoint 35.0-40.0C, 0.1 steps:", 16, 56, 420, UI_COL_WHITE,
-              &lv_font_montserrat_14);
-  lv_obj_t *minus = ui_mk_button(parent, "-", 16, 88, 64, 56, UI_COL_CARD);
-  lv_obj_add_event_cb(minus, on_temp_minus, LV_EVENT_CLICKED, nullptr);
-  s_setpointLabel = ui_mk_label(parent, "", 96, 96, 200, UI_COL_WHITE, &lv_font_montserrat_20);
-  setpoint_show();
-  lv_obj_t *plus = ui_mk_button(parent, "+", 300, 88, 64, 56, UI_COL_CARD);
-  lv_obj_add_event_cb(plus, on_temp_plus, LV_EVENT_CLICKED, nullptr);
-  ui_mk_label(parent, "each step logs [FAKE->WT32] SETPOINT", 390, 100, 380, UI_COL_DIM,
-              &lv_font_montserrat_14);
-
-  hold_attach(s_stirrerCtx, parent, 180, "Stirrer (hold 500ms)", &g.stirrerOn,
-              "STIRRER");
-  hold_attach(s_postCtx, parent, 240, "POST enable (hold 500ms)", &g.postEnabled, "POST");
-
-  char ch[64];
-  snprintf(ch, sizeof(ch), "Chamber now %.1fC (fake, set via serial TEMP x)", g.chamberTempC);
-  ui_mk_label(parent, ch, 16, 300, 700, UI_COL_DIM, &lv_font_montserrat_14);
-
-  lv_obj_t *back = ui_mk_button(parent, "< Home", 16, 360, 140, 48, UI_COL_CARD);
+  lv_obj_t *back = ui_mk_button(parent, "< Home", 648, 4, 140, 36, UI_COL_CARD);
   lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, nullptr);
+
+  ui_mk_label(parent, "Temp setpoint 35.0-40.0C, 0.1 steps:", 16, 52, 420, UI_COL_WHITE,
+              &lv_font_montserrat_14);
+  lv_obj_t *minus = ui_mk_button(parent, "-", 16, 84, 64, 48, UI_COL_CARD);
+  lv_obj_add_event_cb(minus, on_temp_minus, LV_EVENT_CLICKED, nullptr);
+  s_setpointLabel = ui_mk_label(parent, "", 96, 92, 200, UI_COL_WHITE, &lv_font_montserrat_20);
+  setpoint_show();
+  lv_obj_t *plus = ui_mk_button(parent, "+", 300, 84, 64, 48, UI_COL_CARD);
+  lv_obj_add_event_cb(plus, on_temp_plus, LV_EVENT_CLICKED, nullptr);
+  ui_mk_label(parent, "each step logs [FAKE->WT32] SETPOINT", 390, 96, 380, UI_COL_DIM,
+              &lv_font_montserrat_14);
+
+  hold_attach(s_stirrerCtx, parent, 160, "Stirrer (hold 500ms)", &g.stirrerOn,
+              "STIRRER");
+  hold_attach(s_postCtx, parent, 206, "POST enable (hold 500ms)", &g.postEnabled, "POST");
+  s_runCtx.after = on_run_toggled;
+  hold_attach(s_runCtx, parent, 252, "Run experiment (hold 500ms)", &g.experimentRunning,
+              "RUN");
+
+  ui_mk_label(parent, "Duration:", 16, 316, 100, UI_COL_WHITE,
+              &lv_font_montserrat_14);
+  s_durSpin = mk_spin(parent, 120, 310, UI_DURATION_MIN_H, UI_DURATION_MAX_H, 2,
+                      g.durationH);
+  lv_obj_add_event_cb(s_durSpin, on_dur_changed, LV_EVENT_VALUE_CHANGED, nullptr);
+  lv_obj_t *dMinus = ui_mk_button(parent, "-", 250, 310, 48, 42, UI_COL_CARD);
+  lv_obj_add_event_cb(dMinus, on_dur_minus, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *dPlus = ui_mk_button(parent, "+", 306, 310, 48, 42, UI_COL_CARD);
+  lv_obj_add_event_cb(dPlus, on_dur_plus, LV_EVENT_CLICKED, nullptr);
+  ui_mk_label(parent, "hours 1-99", 366, 318, 120, UI_COL_DIM,
+              &lv_font_montserrat_14);
+
+  ui_mk_label(parent, "Exp number:", 16, 378, 100, UI_COL_WHITE,
+              &lv_font_montserrat_14);
+  s_expSpin = mk_spin(parent, 120, 372, UI_EXP_NUM_MIN, UI_EXP_NUM_MAX, 4,
+                      g.expNum);
+  lv_obj_add_event_cb(s_expSpin, on_exp_changed, LV_EVENT_VALUE_CHANGED, nullptr);
+  lv_obj_t *eMinus = ui_mk_button(parent, "-", 250, 372, 48, 42, UI_COL_CARD);
+  lv_obj_add_event_cb(eMinus, on_exp_minus, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *ePlus = ui_mk_button(parent, "+", 306, 372, 48, 42, UI_COL_CARD);
+  lv_obj_add_event_cb(ePlus, on_exp_plus, LV_EVENT_CLICKED, nullptr);
+  s_dbWarn = ui_mk_label(parent, "DB: waiting for master sync...", 366, 372, 420,
+                         UI_COL_DIM, &lv_font_montserrat_14);
+  db_refresh_warn();
+
+  ui_mk_label(parent, "INT test (IO11 -> WT32 IO14):", 16, 424, 260, UI_COL_WHITE,
+              &lv_font_montserrat_14);
+  lv_obj_t *tBtn = ui_mk_button(parent, "PULSE INT", 280, 418, 140, 42, UI_COL_CARD);
+  lv_obj_add_event_cb(tBtn, on_int_test, LV_EVENT_CLICKED, nullptr);
+  s_intTestHint = ui_mk_label(parent, "", 430, 428, 350, UI_COL_DIM,
+                              &lv_font_montserrat_14);
 }

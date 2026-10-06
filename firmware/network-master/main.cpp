@@ -3,6 +3,7 @@
 #include <ESPping.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <time.h>
 
 // network-master: production WT32-ETH01 firmware.
 //
@@ -14,11 +15,13 @@
 //   Display IO18 (RX) <- WT32 IO17 (TX), plus common GND.
 //   Serial (USB-UART debug header, TX0/RX0) is debug only and never
 //   carries Modbus frames.
-// - Gets the captive portal username/password/duration from the display
-//   instead of the serial console. While credentials are missing the
-//   main loop pauses its network work and polls the display every 5 s.
-//   Each poll writes LOGIN_REQ=1, which raises the combined
-//   login+duration gate on the display.
+// - Gets the captive portal username/password from the display instead of
+//   the serial console. While credentials are missing the main loop pauses
+//   its network work and polls the display every 5 s. Each poll writes
+//   LOGIN_REQ=1, which raises the login gate on the display.
+// - Experiment state (duration, experiment number, running flag) is NOT
+//   captured at login; the master quick-polls 0x0060/0x0003/0x0004 so
+//   post-login edits on /control take effect without re-login.
 // - Runs the proven ping-test portal login (trigger -> login page scan
 //   -> POST -> data-fetch verify), then loops ping of 1.1.1.1 plus an
 //   HTTPS fetch. A WALLED fetch in RUN falls back to NEED_CREDS for
@@ -29,9 +32,13 @@
 //   0x0000 LOGIN_REQ   master WR  1 = show the login gate
 //   0x0001 CREDS_READY slave set  master WR 0 to ack after reading
 //   0x0002 RESULT      master WR  0=none 1=success 2=fail
+//   0x0003 EXP_RUNNING slave RD  1 = experiment under way
+//   0x0004 EXP_NUM     slave RD  current experiment number
 //   0x0010-0x002F USERNAME 32 regs = 64 bytes ASCII NUL-padded
 //   0x0030-0x004F PASSWORD 32 regs = 64 bytes ASCII NUL-padded
 //   0x0060 DURATION_H 1 reg, 1-99
+//   0x0005 DB_LATEST  master WR. Latest experiment_id in DB, 0xFFFF = unknown
+//   0x0006 TIME_OK    master WR. 1 = NTP synced, 0 = no valid time yet
 //   0x0070-0x0077 IP_ADDR 8 regs = 16 bytes ASCII NUL-padded, master WR
 //   0x0078 PING_MS 1 reg, master WR. Avg ping to 1.1.1.1 in ms,
 //                        0xFFFF = no data / ping failed
@@ -44,14 +51,28 @@
 #define LINK_BAUD 9600
 #define LINK_SLAVE_ID 1
 
+// Test interrupt line from display (backlog #10 bring-up).
+// Display IO11 -> WT32 IO14 + common GND. IO14 is non-strapping, so the
+// display may pulse HIGH even across a WT32 reboot. TEST_LED is an optional
+// external LED+1k to GND on IO2 (pulled low at boot, safe for strapping);
+// the onboard RX/TX LEDs (IO5/IO17) also blink on traffic.
+#define INT_TEST_PIN 14
+#define TEST_LED_PIN 2
+static volatile bool s_intTestHit = false;
+static void IRAM_ATTR onIntTest() { s_intTestHit = true; }
+
 #define LINK_REG_LOGIN_REQ 0x0000
 #define LINK_REG_CREDS_READY 0x0001
 #define LINK_REG_RESULT 0x0002
+#define LINK_REG_EXP_RUNNING 0x0003
+#define LINK_REG_EXP_NUM 0x0004
 #define LINK_REG_USER_BASE 0x0010
 #define LINK_REG_USER_REGS 32
 #define LINK_REG_PASS_BASE 0x0030
 #define LINK_REG_PASS_REGS 32
 #define LINK_REG_DURATION 0x0060
+#define LINK_REG_DB_LATEST 0x0005
+#define LINK_REG_TIME_OK 0x0006
 #define LINK_REG_IP_BASE 0x0070
 #define LINK_REG_IP_REGS 8
 #define LINK_REG_PING_MS 0x0078
@@ -65,6 +86,29 @@ static const char* kDataUrl = "https://unison.boidu.dev/lyrics?v=dQw4w9WgXcQ";
 // Captive-portal trigger: online networks answer 204 with an empty body;
 // walled networks answer 200 (interception page) or a 3xx redirect to login.
 static const char* kCaptiveProbeUrl = "http://connectivitycheck.gstatic.com/generate_204";
+
+// --- Supabase real-data fetch (backlog #1) + NTP (backlog #12) ---
+// Supplied as build flags, never committed:
+//   -DSUPABASE_URL="https://xyz.supabase.co" -DSUPABASE_ANON_KEY="..." -DDEVICE_TOKEN="..." 
+#ifndef SUPABASE_URL
+#define SUPABASE_URL ""
+#endif
+#ifndef SUPABASE_ANON_KEY
+#define SUPABASE_ANON_KEY ""
+#endif
+#ifndef DEVICE_TOKEN
+#define DEVICE_TOKEN ""
+#endif
+#ifndef RUSIM_DEVICE_ID
+#define RUSIM_DEVICE_ID 0
+#endif
+static const char* kNtp1 = "pool.ntp.org";
+static const char* kNtp2 = "time.google.com";
+static bool ntpSynced = false;
+static String dbSession;
+static int dbLatest = -2;  // -2 unknown, -1 none yet, >=0 latest experiment_id
+static uint32_t lastDbPollMs = 0;
+static const uint32_t kDbPollMs = 30000;
 
 static const size_t kMaxBody = 4096;
 static const uint32_t kCredPollMs = 5000;
@@ -80,7 +124,14 @@ static Stage stage = STAGE_WAIT_IP;
 static String username;
 static String password;
 static int durationH = 24;
+static int expNum = 0;
+static bool expRunning = false;
 static uint32_t lastCredPollMs = 0;
+// Last values reported by the display's quick poll, so changes are logged
+// once instead of every cycle.
+static int lastDurH = -1;
+static int lastExpNum = -1;
+static int lastExpRunning = -1;
 
 static volatile bool eth_connected = false;
 
@@ -243,17 +294,12 @@ static bool pollDisplayCreds() {
   }
   uint16_t uregs[LINK_REG_USER_REGS];
   uint16_t pregs[LINK_REG_PASS_REGS];
-  uint16_t dreg = 0;
   if (!mbReadHolding(LINK_REG_USER_BASE, LINK_REG_USER_REGS, uregs)) {
     Serial.println("[MB] USERNAME read failed");
     return false;
   }
   if (!mbReadHolding(LINK_REG_PASS_BASE, LINK_REG_PASS_REGS, pregs)) {
     Serial.println("[MB] PASSWORD read failed");
-    return false;
-  }
-  if (!mbReadHolding(LINK_REG_DURATION, 1, &dreg)) {
-    Serial.println("[MB] DURATION read failed");
     return false;
   }
   String u = regsToString(uregs, LINK_REG_USER_REGS);
@@ -265,12 +311,41 @@ static bool pollDisplayCreds() {
   }
   username = u;
   password = p;
-  durationH = dreg;
+  Serial.printf("[MB] captured creds user='%s'\n", username.c_str());
+  return true;
+}
+
+// Quick poll of the experiment state registers. Duration, experiment number
+// and the running flag change on the display without a login round-trip, so
+// the master re-reads them instead of capturing them once at credential
+// pickup. Logs only when something actually changed.
+static void pollExpState() {
+  uint16_t d = 0, n = 0, r = 0;
+  if (!mbReadHolding(LINK_REG_DURATION, 1, &d)) {
+    Serial.println("[MB] DURATION read failed");
+    return;
+  }
+  if (!mbReadHolding(LINK_REG_EXP_NUM, 1, &n)) {
+    Serial.println("[MB] EXP_NUM read failed");
+    return;
+  }
+  if (!mbReadHolding(LINK_REG_EXP_RUNNING, 1, &r)) {
+    Serial.println("[MB] EXP_RUNNING read failed");
+    return;
+  }
+  durationH = (int)d;
   if (durationH < 1) durationH = 1;
   if (durationH > 99) durationH = 99;
-  Serial.printf("[MB] captured creds user='%s' dur=%dh\n", username.c_str(),
-                durationH);
-  return true;
+  expNum = (int)n;
+  expRunning = (r != 0);
+  if (durationH != lastDurH || expNum != lastExpNum ||
+      (int)expRunning != lastExpRunning) {
+    Serial.printf("[MB] exp state: run=%d exp=%d dur=%dh\n", expRunning ? 1 : 0,
+                  expNum, durationH);
+    lastDurH = durationH;
+    lastExpNum = expNum;
+    lastExpRunning = expRunning ? 1 : 0;
+  }
 }
 
 static void consumeDisplayCreds(int result) {
@@ -643,11 +718,156 @@ static void clearCreds() {
   username = "";
 }
 
+// --- NTP (backlog #12): UTC via pool.ntp.org. Call after DHCP. ---
+static void ensureNtpSync() {
+  if (ntpSynced) return;
+  if (String(SUPABASE_URL).length() == 0) {
+    // Still sync time even without Supabase config; portal checks need it less,
+    // but DB timestamps are meaningless on a 1970 clock.
+  }
+  configTime(0, 0, kNtp1, kNtp2);
+  Serial.println("[NTP] syncing UTC via pool.ntp.org...");
+  for (int i = 0; i < 10; i++) {
+    time_t now = time(nullptr);
+    if (now > 1700000000) {
+      ntpSynced = true;
+      struct tm tmv;
+      gmtime_r(&now, &tmv);
+      Serial.printf("[NTP] synced: %04d-%02d-%02d %02d:%02d:%02d UTC\n",
+                    tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                    tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+      mbWriteSingle(LINK_REG_TIME_OK, 1);
+      return;
+    }
+    delay(1000);
+  }
+  Serial.println("[NTP] sync failed, will retry next cycle");
+  mbWriteSingle(LINK_REG_TIME_OK, 0);
+}
+
+// --- Supabase real-data fetch (backlog #1) via device token (devices.token_hash) ---
+static bool sbAuthenticate() {
+  if (String(SUPABASE_URL).length() == 0 || String(SUPABASE_ANON_KEY).length() == 0 ||
+      String(DEVICE_TOKEN).length() == 0) {
+    Serial.println("[DB] Supabase not configured (SUPABASE_URL/ANON_KEY/DEVICE_TOKEN empty)");
+    return false;
+  }
+  String url = String(SUPABASE_URL) + "/rest/v1/rpc/authenticate";
+  String body = String("{\"p_token\":\"") + DEVICE_TOKEN + "\"}";
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.begin(client, url);
+  http.setTimeout(10000);
+  http.addHeader("apikey", SUPABASE_ANON_KEY);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Accept", "application/json");
+  int code = http.POST(body);
+  bool ok = false;
+  if (code == 200) {
+    String resp = http.getString();
+    int at = resp.indexOf("session_token");
+    if (at >= 0) {
+      // Value may be quoted; find the 64-hex run directly.
+      int hexStart = -1;
+      for (int i = at; i + 64 <= (int)resp.length(); i++) {
+        bool hex = true;
+        for (int j = 0; j < 64; j++) {
+          char c = resp[i + j];
+          if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) { hex = false; break; }
+        }
+        if (hex) { hexStart = i; break; }
+      }
+      if (hexStart >= 0) {
+        dbSession = resp.substring(hexStart, hexStart + 64);
+        Serial.println("[DB] authenticated, session cached (RAM only)");
+        ok = true;
+      }
+    }
+    if (!ok) Serial.println("[DB] authenticate: no session_token in reply (wrong token?)");
+  } else {
+    Serial.printf("[DB] authenticate HTTP %d\n", code);
+  }
+  http.end();
+  return ok;
+}
+
+static int sbParseLatestExp(const String& resp) {
+  int at = resp.indexOf("experiment_id");
+  if (at < 0) return -1;  // empty array = no experiments yet
+  int colon = resp.indexOf(':', at);
+  if (colon < 0) return -1;
+  return resp.substring(colon + 1).toInt();
+}
+
+// Returns latest experiment_id, -1 when none, -2 on failure.
+static int sbFetchLatestExp() {
+  if (dbSession.length() == 0 && !sbAuthenticate()) return -2;
+  String url = String(SUPABASE_URL) +
+               "/rest/v1/readings?select=experiment_id&order=experiment_id.desc&limit=1";
+  for (int attempt = 0; attempt < 2; attempt++) {
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.begin(client, url);
+    http.setTimeout(10000);
+    http.addHeader("apikey", SUPABASE_ANON_KEY);
+    http.addHeader("x-device-session", dbSession);
+    http.addHeader("Accept", "application/json");
+    int code = http.GET();
+    if (code == 200) {
+      String resp = http.getString();
+      http.end();
+      int latest = sbParseLatestExp(resp);
+      Serial.printf("[DB] latest experiment_id=%d (raw %d chars)\n", latest, resp.length());
+      return latest;
+    }
+    Serial.printf("[DB] readings HTTP %d (attempt %d)\n", code, attempt);
+    http.end();
+    if (code == 401 || code == 403) {
+      dbSession = "";  // session expired, re-login once
+      if (!sbAuthenticate()) return -2;
+    } else {
+      return -2;
+    }
+  }
+  return -2;
+}
+
+// Pushes DB latest + time state to the display (backlog #9).
+static void pushDbState() {
+  uint16_t latestReg = (dbLatest >= 0) ? (uint16_t)dbLatest : (dbLatest == -1 ? 0 : 0xFFFF);
+  // -1 (no rows yet) reports 0 so the display suggests 1; unknown stays 0xFFFF.
+  if (dbLatest == -2) latestReg = 0xFFFF;
+  if (!mbWriteSingle(LINK_REG_DB_LATEST, latestReg)) {
+    Serial.println("[MB] DB_LATEST write failed");
+  }
+  if (!mbWriteSingle(LINK_REG_TIME_OK, ntpSynced ? 1 : 0)) {
+    Serial.println("[MB] TIME_OK write failed");
+  }
+}
+
+static void syncDbLatest(bool force) {
+  if (millis() - lastDbPollMs < kDbPollMs && !force) return;
+  lastDbPollMs = millis();
+  ensureNtpSync();
+  int latest = sbFetchLatestExp();
+  if (latest != -2) {
+    if (latest != dbLatest) {
+      Serial.printf("[DB] latest %d -> %d, next=%d\n", dbLatest, latest, latest + 1);
+    }
+    dbLatest = latest;
+  } else {
+    Serial.println("[DB] fetch failed, keeping last known value");
+  }
+  pushDbState();
+}
+
 // Returns true on authenticated, false otherwise. Reports the verdict to
 // the display and consumes the staged credentials.
 bool doLogin() {
-  Serial.printf("[LOGIN] user='%s' dur=%dh from display (password in RAM only)\n",
-                username.c_str(), durationH);
+  Serial.printf("[LOGIN] user='%s' from display (password in RAM only)\n",
+                username.c_str());
 
   String portalUrl = fetchPortalUrl();
   if (portalUrl.length() == 0) {
@@ -709,6 +929,12 @@ void setup() {
   Serial.printf("[MB] master on Serial1 RX=%d TX=%d %d 8N1 slave=%d\n", LINK_RX_PIN,
                 LINK_TX_PIN, LINK_BAUD, LINK_SLAVE_ID);
 
+  pinMode(TEST_LED_PIN, OUTPUT);
+  digitalWrite(TEST_LED_PIN, LOW);
+  pinMode(INT_TEST_PIN, INPUT_PULLDOWN);
+  attachInterrupt(digitalPinToInterrupt(INT_TEST_PIN), onIntTest, RISING);
+  Serial.println("[INT-TEST] waiting for RISING on IO14 (display IO11 pulse)");
+
   WiFi.onEvent(onEthEvent);
 
   // Explicit WT32-ETH01 RMII pins (same as variant defaults in pins_arduino.h):
@@ -722,6 +948,11 @@ void setup() {
 }
 
 void loop() {
+  if (s_intTestHit) {
+    s_intTestHit = false;
+    digitalWrite(TEST_LED_PIN, HIGH);  // latch on; reboot to clear
+    Serial.println("[INT-TEST] HIT on IO14 -> LED IO2 ON");
+  }
   switch (stage) {
     case STAGE_WAIT_IP:
       if (eth_connected) {
@@ -761,6 +992,8 @@ void loop() {
         }
         // Keep /info live while waiting: real IP now, ping comes in RUN.
         pushNetStatus(-1, true);
+        pollExpState();
+        syncDbLatest(false);
       } else {
         delay(100);
       }
@@ -769,6 +1002,7 @@ void loop() {
 
     case STAGE_LOGIN:
       if (doLogin()) {
+        syncDbLatest(true);
         stage = STAGE_RUN;
       } else {
         Serial.println("[LOGIN] will re-poll display in 5 s");
@@ -800,6 +1034,8 @@ void loop() {
       }
       // Push the fresh verdict every cycle so /info stays live.
       pushNetStatus(pingMs, true);
+      pollExpState();
+      syncDbLatest(false);
 
       // The data fetch is the portal verdict: WALLED means the session
       // expired, so pause the loop and re-auth via the display.
@@ -809,7 +1045,8 @@ void loop() {
         stage = STAGE_NEED_CREDS;
         break;
       }
-      Serial.printf("[RUN] experiment duration %dh (from display)\n", durationH);
+      Serial.printf("[RUN] exp=%d duration=%dh running=%d dbLatest=%d ntp=%d (quick-polled)\n",
+                    expNum, durationH, expRunning ? 1 : 0, dbLatest, ntpSynced ? 1 : 0);
       delay(kIntervalMs);
       break;
     }

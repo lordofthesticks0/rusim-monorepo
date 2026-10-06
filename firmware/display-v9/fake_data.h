@@ -33,7 +33,9 @@ struct ClusterFake {
 };
 
 struct AppState {
+  bool loggedIn;  // portal auth succeeded; gates /control etc. before any run
   bool experimentRunning;
+  int expNum;
   int durationH;
   float tempSetpointC;
   bool stirrerOn;

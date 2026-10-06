@@ -15,17 +15,17 @@ static size_t s_len = 0;
 
 static void print_help() {
   Serial.println("CMDS: TEMP <f> | SETPOINT <f> | DURATION <1-99> | STIRRER ON|OFF |");
-  Serial.println("      POST ON|OFF | NODE <0-5> ON|OFF | NULL <c> <b> <s> |");
-  Serial.println("      UNNULL <c> <b> <s> | PUSH | STATUS | LINK | HELP");
+  Serial.println("      POST ON|OFF | RUN ON|OFF | EXP <n> | NODE <0-5> ON|OFF |");
+  Serial.println("      NULL <c> <b> <s> | UNNULL <c> <b> <s> | PUSH | STATUS | LINK | HELP");
   Serial.println("      (s = 0 CO2,1 CH4,2 Press,3 pH,4 Temp)");
   Serial.println("CREDS <user> <pass>   stage portal credentials for the WT32");
   Serial.println("AP                    toggle the cloaked SoftAP credential form");
 }
 
 static void print_status() {
-  Serial.printf("run=%d dur=%dh set=%.1f stir=%d post=%d chamber=%.1f nulls=%d\n",
-                g.experimentRunning, g.durationH, g.tempSetpointC, g.stirrerOn,
-                g.postEnabled, g.chamberTempC, fake_null_count());
+  Serial.printf("run=%d exp=%d dur=%dh set=%.1f stir=%d post=%d chamber=%.1f nulls=%d\n",
+                g.experimentRunning, g.expNum, g.durationH, g.tempSetpointC,
+                g.stirrerOn, g.postEnabled, g.chamberTempC, fake_null_count());
   for (int c = 0; c < UI_CLUSTERS; c++) {
     Serial.printf("node %d: %s\n", c, g.cluster[c].online ? "ONLINE" : "OFFLINE");
   }
@@ -47,9 +47,9 @@ static void handle_creds(char *args) {
   if (dur < UI_DURATION_MIN_H) dur = UI_DURATION_MIN_H;
   if (dur > UI_DURATION_MAX_H) dur = UI_DURATION_MAX_H;
   g.durationH = dur;
-  link_modbus_set_credentials(user, pass, dur);
-  Serial.printf("[SETUP] creds staged from serial user='%s' dur=%dh\n", user,
-                dur);
+  link_modbus_set_credentials(user, pass);
+  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  Serial.printf("[SETUP] creds staged from serial user='%s'\n", user);
 }
 
 static bool parse_onoff(const char *t, bool &out) {
@@ -142,12 +142,40 @@ static void handle_line(char *line) {
       int v = atoi(a);
       if (v >= UI_DURATION_MIN_H && v <= UI_DURATION_MAX_H) {
         g.durationH = v;
+        link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
         mutated = true;
       } else {
         Serial.println("range 1-99");
       }
     } else {
       Serial.println("usage: DURATION 24");
+    }
+  } else if (strcmp(cmd, "EXP") == 0) {
+    char *a = strtok(nullptr, " \t");
+    if (a != nullptr) {
+      int v = atoi(a);
+      if (v >= UI_EXP_NUM_MIN && v <= UI_EXP_NUM_MAX) {
+        g.expNum = v;
+        link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+        mutated = true;
+      } else {
+        Serial.printf("range %d-%d\n", UI_EXP_NUM_MIN, UI_EXP_NUM_MAX);
+      }
+    } else {
+      Serial.println("usage: EXP 3");
+    }
+  } else if (strcmp(cmd, "RUN") == 0) {
+    char *a = strtok(nullptr, " \t");
+    bool v = false;
+    if (a != nullptr && parse_onoff(a, v)) {
+      // Each transition from stopped to running is a new experiment number.
+      if (v && !g.experimentRunning) g.expNum++;
+      g.experimentRunning = v;
+      link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+      Serial.printf("[FAKE->WT32] RUN %s exp=%d\n", v ? "ON" : "OFF", g.expNum);
+      mutated = true;
+    } else {
+      Serial.println("usage: RUN ON|OFF");
     }
   } else if (strcmp(cmd, "STIRRER") == 0) {
     char *a = strtok(nullptr, " \t");

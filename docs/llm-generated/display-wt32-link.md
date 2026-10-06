@@ -61,9 +61,11 @@ first), NUL-padded. Defined twice, kept identical:
 | `0x0000` | LOGIN_REQ | master | `1` = show the login gate |
 | `0x0001` | CREDS_READY | slave sets, master clears | `1` = staged creds ready to read |
 | `0x0002` | RESULT | master | `0` none, `1` success, `2` fail |
+| `0x0003` | EXP_RUNNING | display only | `1` = experiment under way |
+| `0x0004` | EXP_NUM | display only | current experiment number |
 | `0x0010-0x002F` | USERNAME | display only | 32 regs = 64 bytes |
 | `0x0030-0x004F` | PASSWORD | display only | 32 regs = 64 bytes |
-| `0x0060` | DURATION_H | display only | 1-99 |
+| `0x0060` | DURATION_H | display only | 1-99, quick-polled by the master |
 | `0x0070-0x0077` | IP_ADDR | master | 8 regs = 16 bytes (`"192.168.1.10"`) |
 | `0x0078` | PING_MS | master | avg ping to 1.1.1.1 in ms, `0xFFFF` = no data / failed |
 | `0x0079` | NET_UP | master | `1` = WT32 holds a DHCP IP, `0` = link down |
@@ -84,11 +86,18 @@ WT32 NEED_CREDS, every 5 s          Display
   -- FC 0x03 CREDS_READY -----------> 0 = not yet, 1 = user tapped Confirm
   -- FC 0x03 USERNAME x32 --------->
   -- FC 0x03 PASSWORD x32 --------->
-  -- FC 0x03 DURATION ------------->
+  -- FC 0x03 DURATION / EXP_NUM /
+     EXP_RUNNING ------------------> quick poll, every cycle, both stages
   -- FC 0x06 RESULT=1/2 -----------> 1 routes home, 2 stays with retry text
   -- FC 0x06 CREDS_READY=0 --------->
   -- FC 0x06 LOGIN_REQ=0 -----------> only on success
 ```
+
+Duration, experiment number and the running flag are display-owned and
+quick-polled by the master (every NEED_CREDS poll and every RUN cycle), so
+post-login edits on `/control` take effect without re-login. RESULT=1 routes
+home only; it does not start the run. The run starts from `/control`
+(hold-to-confirm), which sets EXP_RUNNING=1 and auto-increments EXP_NUM.
 
 Empty username or password is ignored until Confirm. Credentials live in
 WT32 RAM only between capture and login and are overwritten before release.

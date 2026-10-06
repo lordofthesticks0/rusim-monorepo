@@ -12,6 +12,8 @@ static uint32_t s_lastByteMs = 0;
 static char s_user[LINK_USER_MAX + 1];
 static char s_pass[LINK_PASS_MAX + 1];
 static int s_durationH = 24;
+static bool s_expRunning = false;
+static int s_expNum = 0;
 static bool s_loginReq = false;
 static bool s_loginReqPending = false;
 static bool s_credsReady = false;
@@ -23,6 +25,10 @@ static char s_ip[LINK_IP_MAX + 1] = "";
 static uint16_t s_pingMs = LINK_PING_NONE;
 static bool s_netUp = false;
 static uint32_t s_netStampMs = 0;
+
+// WT32-pushed DB state (backlog #9): -2 unknown, -1 none, >=0 latest id.
+static int s_dbLatest = -2;
+static bool s_timeOk = false;
 
 static uint16_t regCount() { return 0x007A; }
 
@@ -39,6 +45,10 @@ static uint16_t reg_read(uint16_t addr) {
   if (addr == LINK_REG_LOGIN_REQ) return s_loginReq ? 1 : 0;
   if (addr == LINK_REG_CREDS_READY) return s_credsReady ? 1 : 0;
   if (addr == LINK_REG_RESULT) return (uint16_t)s_result;
+  if (addr == LINK_REG_EXP_RUNNING) return s_expRunning ? 1 : 0;
+  if (addr == LINK_REG_EXP_NUM) return (uint16_t)s_expNum;
+  if (addr == LINK_REG_DB_LATEST) return s_dbLatest < 0 ? 0xFFFF : (uint16_t)s_dbLatest;
+  if (addr == LINK_REG_TIME_OK) return s_timeOk ? 1 : 0;
   if (addr >= LINK_REG_USER_BASE && addr < LINK_REG_USER_BASE + LINK_REG_USER_REGS) {
     uint16_t v = 0;
     regs_get(s_user, LINK_REG_USER_BASE, addr - LINK_REG_USER_BASE, v);
@@ -62,6 +72,8 @@ static uint16_t reg_read(uint16_t addr) {
 
 static bool reg_addr_valid(uint16_t addr) {
   if (addr <= LINK_REG_RESULT) return true;
+  if (addr == LINK_REG_EXP_RUNNING || addr == LINK_REG_EXP_NUM) return true;
+  if (addr == LINK_REG_DB_LATEST || addr == LINK_REG_TIME_OK) return true;
   if (addr >= LINK_REG_USER_BASE && addr < LINK_REG_USER_BASE + LINK_REG_USER_REGS) return true;
   if (addr >= LINK_REG_PASS_BASE && addr < LINK_REG_PASS_BASE + LINK_REG_PASS_REGS) return true;
   if (addr == LINK_REG_DURATION) return true;
@@ -109,6 +121,18 @@ static bool reg_write(uint16_t addr, uint16_t value) {
   }
   if (addr == LINK_REG_PING_MS) {
     s_pingMs = value;
+    return true;
+  }
+  if (addr == LINK_REG_DB_LATEST) {
+    if (value == 0xFFFF) {
+      s_dbLatest = -2;
+    } else {
+      s_dbLatest = (int)value;
+    }
+    return true;
+  }
+  if (addr == LINK_REG_TIME_OK) {
+    s_timeOk = (value != 0);
     return true;
   }
   if (addr == LINK_REG_NET_UP) {
@@ -232,13 +256,15 @@ static void handle_frame(const uint8_t *f, size_t n) {
     }
     // Validate all writes before committing any.
     // Writable by master: LOGIN_REQ, CREDS_READY (ack), RESULT, plus the
-    // WT32-pushed network status (IP_ADDR, PING_MS, NET_UP). Credential
-    // and duration blocks stay read-only: the display owns them.
+    // WT32-pushed network status (IP_ADDR, PING_MS, NET_UP) and DB state
+    // (DB_LATEST, TIME_OK). Credential and duration blocks stay read-only:
+    // the display owns them.
     for (uint16_t i = 0; i < cnt; i++) {
       uint16_t a = addr + i;
       if (a == LINK_REG_LOGIN_REQ || a == LINK_REG_CREDS_READY ||
           a == LINK_REG_RESULT || a == LINK_REG_PING_MS ||
-          a == LINK_REG_NET_UP ||
+          a == LINK_REG_NET_UP || a == LINK_REG_DB_LATEST ||
+          a == LINK_REG_TIME_OK ||
           (a >= LINK_REG_IP_BASE && a < LINK_REG_IP_BASE + LINK_REG_IP_REGS))
         continue;
       send_exception(fn, 0x02);
@@ -309,17 +335,24 @@ bool link_modbus_take_login_request() {
   return v;
 }
 
-void link_modbus_set_credentials(const char *user, const char *pass, int durationH) {
+void link_modbus_set_credentials(const char *user, const char *pass) {
   strncpy(s_user, user ? user : "", sizeof(s_user) - 1);
   s_user[sizeof(s_user) - 1] = '\0';
   strncpy(s_pass, pass ? pass : "", sizeof(s_pass) - 1);
   s_pass[sizeof(s_pass) - 1] = '\0';
+  s_credsReady = true;
+  s_result = LINK_RESULT_NONE;
+  Serial.printf("[LINK] creds staged user='%s' ready=1\n", s_user);
+}
+
+void link_modbus_set_exp_state(bool running, int expNum, int durationH) {
+  s_expRunning = running;
+  if (expNum < 0) expNum = 0;
+  if (expNum > 65535) expNum = 65535;
+  s_expNum = expNum;
   if (durationH < 1) durationH = 1;
   if (durationH > 99) durationH = 99;
   s_durationH = durationH;
-  s_credsReady = true;
-  s_result = LINK_RESULT_NONE;
-  Serial.printf("[LINK] creds staged user='%s' dur=%dh ready=1\n", s_user, s_durationH);
 }
 
 bool link_modbus_creds_ready() { return s_credsReady; }
@@ -336,9 +369,10 @@ bool link_modbus_take_result(int &out) {
 void link_modbus_debug_print() {
   char ip[LINK_IP_MAX + 1];
   link_modbus_get_ip(ip, sizeof(ip));
-  Serial.printf("[LINK] req=%d ready=%d result=%d user='%s' dur=%d ip='%s' ping=%d up=%d\n",
-                s_loginReq, s_credsReady, s_result, s_user, s_durationH, ip,
-                link_modbus_get_ping_ms(), s_netUp);
+  Serial.printf("[LINK] req=%d ready=%d result=%d user='%s' exp=%d run=%d dur=%d ip='%s' ping=%d up=%d db=%d tok=%d\n",
+                s_loginReq, s_credsReady, s_result, s_user, s_expNum,
+                s_expRunning ? 1 : 0, s_durationH, ip,
+                link_modbus_get_ping_ms(), s_netUp, s_dbLatest, s_timeOk ? 1 : 0);
 }
 
 void link_modbus_get_ip(char *out, size_t n) {
@@ -353,6 +387,10 @@ int link_modbus_get_ping_ms() {
 }
 
 bool link_modbus_net_up() { return s_netUp; }
+
+int link_modbus_get_db_latest() { return s_dbLatest; }
+
+bool link_modbus_time_ok() { return s_timeOk; }
 
 uint32_t link_modbus_net_age_ms() {
   if (s_netStampMs == 0) return 0;

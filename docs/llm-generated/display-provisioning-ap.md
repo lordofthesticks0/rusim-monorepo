@@ -229,12 +229,10 @@ Field handling on `POST /creds`:
   the Modbus registers hold. Over-long input is refused rather than silently
   truncated, because a truncated password fails at the portal with no useful
   diagnostic.
-- `dur` defaults to `UI_DURATION_DEFAULT_H` and is clamped to
-  `UI_DURATION_MIN_H`..`UI_DURATION_MAX_H`. The form's default reflects the
-  spinbox value at render time, so a duration set on the panel before scanning
-  carries over.
 - On success the handler calls `link_modbus_set_credentials()` and replies with
-  a page that polls `/status` every 1500 ms.
+  a page that polls `/status` every 1500 ms. Duration and experiment number
+  are no longer part of the login form; they live on `/control` and are
+  quick-polled by the master.
 
 `/status` reports one of four states:
 
@@ -340,10 +338,10 @@ then type what the panel shows. Only the SSID is a problem in the common case
 is a single field. `join_details_refresh()` keeps both current, since they have
 to follow the AP up and down rather than being read once at build time.
 
-The duration spinbox moved to the right column and now writes `g.durationH`
-through its own `LV_EVENT_VALUE_CHANGED` handler, so the value applies whether
-the credentials arrive by QR or by serial. The on-screen Confirm button is
-gone; there is nothing on the panel to confirm.
+The duration spinbox has moved to `/control` (together with the experiment
+number and the run switch), so the same value applies whether credentials
+arrive by QR or by serial. The on-screen Confirm button is gone; there is
+nothing on the panel to confirm.
 
 `LV_USE_QRCODE` and `LV_USE_CANVAS` were `0` in `lv_conf.h` and are now `1`;
 the widget is a `lv_canvas` subclass and will not build without the canvas.

@@ -11,6 +11,8 @@ As an AI agent, your job scope will be limited to a small subset of this repo. T
 ### 1. Firmware engineer
 If the task at hand mentions firmware, you should ignore any thought of the dashboard. Your focus will be mainly C++ code available at `firmware/`. It is absolutely essential to look at the [hardware documentation](docs/hardware.md) first. DO NOT edit this documentation because it relies on human testing and input. At times, there might be references to the dashboard. Refer to its documentation too if necessary.
 
+If you feel this documentation is outdated or unclear, inform the user.
+
 ### 2. Full-stack web developer
 If the task at hand mentions the dashboard, you should ignore any thought of firmware. Your focus will be mainly TypeScript code available at `dashboard/`. References to the database should be looked up to [the documentation](docs/llm-generated/database.md). You are free to edit this documentation. 
 
