@@ -36,7 +36,7 @@
 // but GPIO45 is R0 of the RGB panel bus in main.cpp, so this pass keeps the
 // proven TFT_BL (pin 2). Revisit with EE before moving the backlight pin.
 #define UI_BL_PIN 2
-#define UI_SLEEP_MS 30000
+#define UI_SLEEP_MS 60000
 
 // Fake WT32 push cadence (5 min). Fires an lv_timer that jitters fake values.
 #define UI_PUSH_PERIOD_MS (5UL * 60UL * 1000UL)

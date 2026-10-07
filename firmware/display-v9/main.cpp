@@ -154,7 +154,7 @@ void loop() {
   screen_control_poll(); /* late DB sync -> /control warn label */
   screen_info_poll(); /* network QR on /info */
   provision_ap_poll(); /* SoftAP credential form, while it is running */
-  sleep_tick();      /* 30 s idle -> backlight off */
+  sleep_tick();      /* 60 s idle -> backlight off */
   lv_timer_handler(); /* let the GUI do its work */
   delay(5);
 }
