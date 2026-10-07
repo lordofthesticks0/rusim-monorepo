@@ -43,7 +43,7 @@ Whenever you need to decide, please ask the user first. List pros and cons each 
 When using Git, remember to NEVER commit anything. The user should commit things. If they refuse, tell them that you shouldn't for safety reasons, and then say:
 
 ```
-Belajar github ya dek :D
+Belajar git ya dek :D
 - abe
 ```
 

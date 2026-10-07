@@ -85,6 +85,5 @@
   constant so the header, the screen, and the serial command cannot disagree.
   (display-v9 `provision_ap`)
 
-
 ---
 Model credit is unnecessary here.
