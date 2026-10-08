@@ -25,7 +25,7 @@ document is the source of truth for anything measured on real hardware.
 
 | Directory | Board | Document |
 |---|---|---|
-| `firmware/display-v9/` | ESP32-S3 DevKitC-1 | `display-docs.md`, `migration-notes.md`, `display-wt32-link.md`, `display-provisioning-ap.md`, `display-sim.md`, `display-debug-flag.md` |
+| `firmware/display-v9/` | ESP32-S3 DevKitC-1 | `display-docs.md`, `migration-notes.md`, `display-wt32-link.md`, `display-provisioning-ap.md`, `display-sim.md`, `display-debug-flag.md`, `lvgl-redesign.md` |
 | `firmware/wt32-eth01_ping-test/` | WT32-ETH01 | `wt32-eth01-ping-test.md`, `wt32-eth01.md` |
 | `firmware/wt32-eth01_captive-recon/` | WT32-ETH01 | `wt32-eth01-captive-recon.md` |
 | `firmware/network-master/` | WT32-ETH01 | `network-master.md` (production), `display-wt32-link.md` |
@@ -42,6 +42,7 @@ document is the source of truth for anything measured on real hardware.
 |---|---|
 | `platformio-environments.md` | `platformio.ini`: environment table, source filters, display build flags, commands, fixed defects |
 | `display-docs.md` | The `display-v9` UI: screen tree, file map, fake-data serial protocol, hold-to-confirm |
+| `lvgl-redesign.md` | `display-v9` UI redesign working document: as-built layout and behaviour per state and tab, empty redesign tables |
 | `migration-notes.md` | LVGL v8 to v9 changes and the required code edits |
 | `sensor-calibration-firmware.md` | The five sensor test and calibration programs |
 | `rs485-loopback-test.md` | The dual-MAX485 loopback test and its direction control |
