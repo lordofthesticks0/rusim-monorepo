@@ -46,7 +46,7 @@ static void qr_show(const char *payload) {
   if (strcmp(s_qrShown, payload) == 0) return;
   Serial.printf("[SETUP] QR show len=%d payload='%s'\n", (int)strlen(payload),
                 payload);
-  lv_obj_clear_flag(s_qr, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(s_qr, false);
   if (lv_qrcode_update(s_qr, payload, strlen(payload)) != LV_RESULT_OK) {
     Serial.println("[SETUP] QR encode failed");
   }
@@ -80,7 +80,7 @@ static void qr_refresh() {
   if (!provision_ap_active()) {
     // Hide instead of painting a decoy: a scannable " " code reads as a
     // broken QR. Clearing s_qrShown forces a fresh encode on next Start.
-    if (s_qr != nullptr) lv_obj_add_flag(s_qr, LV_OBJ_FLAG_HIDDEN);
+    if (s_qr != nullptr) lv_obj_set_hidden(s_qr, true);
     s_qrShown[0] = '\0';
     // Re-arm the popup: the next association after a Start is a new arrival.
     s_phoneSeen = false;
@@ -197,7 +197,7 @@ void screen_setup_show(lv_obj_t *parent) {
   // The label is a new object, but it is built with the same string the AP-down
   // branch uses, so the cache has to be cleared or that first paint is skipped.
   s_stepShown[0] = '\0';
-  lv_obj_add_flag(s_qr, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(s_qr, true);
 
   const int rx = 356;
   ui_mk_label(parent, "Network:", rx, 64, 130, UI_COL_TEXT,

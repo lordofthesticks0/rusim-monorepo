@@ -53,6 +53,7 @@ document is the source of truth for anything measured on real hardware.
 | `display-provisioning-ap.md` | SoftAP credential form on the display: phone login instead of on-screen typing |
 | `display-sim.md` | `[env:display-sim]`: native PC/SDL build of the display-v9 UI |
 | `display-debug-flag.md` | `IS_DEBUG`: compile-time debug gate (login bypass on `/setup`) |
+| `display-lvgl-9-6-port.md` | LVGL 9.3.0 -> 9.6.0 port: config + deprecated-API changes |
 | `flash-factory-tool.md` | `scripts-hardware/flash-factory.ts` and the factory image |
 | `captive-portal-workaround.md` | Plan for headless captive portal authentication on the WT32-ETH01 |
 

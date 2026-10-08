@@ -32,7 +32,7 @@ static void hold_progress(lv_timer_t *t) {
 static void hold_reset(HoldCtx *ctx) {
   ctx->armed = false;
   if (ctx->timer != nullptr) {
-    lv_timer_del(ctx->timer);
+    lv_timer_delete(ctx->timer);
     ctx->timer = nullptr;
   }
   lv_bar_set_value(ctx->bar, 0, LV_ANIM_OFF);
@@ -57,7 +57,7 @@ static void on_hold_event(lv_event_t *e) {
     }
   } else if (code == LV_EVENT_VALUE_CHANGED) {
     if (ctx->reverting) return;
-    bool nowOn = lv_obj_has_state(ctx->sw, LV_STATE_CHECKED);
+    bool nowOn = lv_obj_is_checked(ctx->sw);
     uint32_t el = millis() - ctx->t0;
     if (ctx->armed && el >= UI_HOLD_TO_CONFIRM_MS) {
       *(ctx->flag) = nowOn;
@@ -70,9 +70,9 @@ static void on_hold_event(lv_event_t *e) {
       // Too short: revert to committed state.
       ctx->reverting = true;
       if (*(ctx->flag)) {
-        lv_obj_add_state(ctx->sw, LV_STATE_CHECKED);
+        lv_obj_set_checked(ctx->sw, true);
       } else {
-        lv_obj_remove_state(ctx->sw, LV_STATE_CHECKED);
+        lv_obj_set_checked(ctx->sw, false);
       }
       ctx->reverting = false;
       lv_label_set_text(ctx->hint, "too short: hold 500ms.");
@@ -90,7 +90,7 @@ static void hold_attach(HoldCtx &ctx, lv_obj_t *parent, int y, const char *label
   ctx.sw = lv_switch_create(parent);
   lv_obj_set_pos(ctx.sw, 220, y - 4);
   lv_obj_set_size(ctx.sw, 72, 36);
-  if (*flag) lv_obj_add_state(ctx.sw, LV_STATE_CHECKED);
+  if (*flag) lv_obj_set_checked(ctx.sw, true);
   ctx.bar = lv_bar_create(parent);
   lv_obj_set_pos(ctx.bar, 310, y + 4);
   lv_obj_set_size(ctx.bar, 160, 16);

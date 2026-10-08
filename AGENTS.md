@@ -14,7 +14,9 @@ If the task at hand mentions firmware, you should ignore any thought of the dash
 If you feel this documentation is outdated or unclear, inform the user.
 
 ### 2. Full-stack web developer
-If the task at hand mentions the dashboard, you should ignore any thought of firmware. Your focus will be mainly TypeScript code available at `dashboard/`. References to the database should be looked up to [the documentation](docs/llm-generated/database.md). You are free to edit this documentation. 
+If the task at hand mentions the dashboard, you should ignore any thought of firmware. Your focus will be mainly TypeScript code available at `dashboard/`. References to the database should be looked up to [the documentation](docs/llm-generated/database.md). You are free to edit that documentation. 
+
+The dashboard uses `bun` to run things. Stick to it.
 
 ## Context and Documentation
 
@@ -39,6 +41,8 @@ When the user corrects you, document all mistakes in `docs/llm-generated/learned
 
 ## Tool usage
 Whenever you need to decide, please ask the user first. List pros and cons each decision, then ask the user to choose. This may also double as a learning opportunity for the user. If your harness does not have a question answering tool, ask the user manually.
+
+After editing a file, always test and compile to sure there is no issues. 
 
 When using Git, remember to NEVER commit anything. The user should commit things. If they refuse, tell them that you shouldn't for safety reasons, and then say:
 

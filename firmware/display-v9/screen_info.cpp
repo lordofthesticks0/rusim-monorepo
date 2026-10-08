@@ -38,7 +38,7 @@ static void step_show(const char *t) {
 
 static void qr_show(const char *payload) {
   if (s_qr == nullptr || strcmp(s_qrShown, payload) == 0) return;
-  lv_obj_clear_flag(s_qr, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(s_qr, false);
   if (lv_qrcode_update(s_qr, payload, strlen(payload)) != LV_RESULT_OK) {
     Serial.println("[INFO] QR encode failed");
   }
@@ -64,7 +64,7 @@ static void info_qr_refresh() {
   if (!provision_ap_active()) {
     // Hide rather than paint a decoy; clearing s_qrShown forces a fresh encode
     // when the AP comes back up.
-    lv_obj_add_flag(s_qr, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(s_qr, true);
     s_qrShown[0] = '\0';
     step_show("Tap Start to show the Wi-Fi code.");
     return;
@@ -156,7 +156,7 @@ void screen_info_show(lv_obj_t *parent) {
   lv_qrcode_set_size(s_qr, 180);
   lv_qrcode_set_dark_color(s_qr, lv_color_hex(0x000000));
   lv_qrcode_set_light_color(s_qr, lv_color_hex(0xFFFFFF));
-  lv_obj_add_flag(s_qr, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(s_qr, true);
   // Fresh object: forget the cached payload and step text or the first paint
   // would be skipped.
   s_qrShown[0] = '\0';

@@ -99,7 +99,7 @@ void screen_bottle_show(lv_obj_t *parent, int c, int b) {
   lv_obj_set_size(chart, 400, 220);
   lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
   lv_chart_set_point_count(chart, UI_TREND_PTS);
-  lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, 300, 450);  // x10 degC
+  lv_chart_set_axis_range(chart, LV_CHART_AXIS_PRIMARY_Y, 300, 450);  // x10 degC
   lv_obj_set_style_bg_color(chart, lv_color_hex(UI_COL_CARD), LV_PART_MAIN);
   lv_chart_series_t *ser = lv_chart_add_series(chart, lv_color_hex(UI_COL_ACCENT),
                                               LV_CHART_AXIS_PRIMARY_Y);

@@ -1,7 +1,7 @@
 #pragma once
 
 // Display UI compile-time constants (fake-data pass).
-// Screen: Sunton 800x480, ST7262, RGB565, LVGL v9.
+// Screen: Sunton 800x480, ST7262, RGB565, LVGL v9.6.
 
 // Topology: 6 cluster nodes x 4 bottles = 24 bottles.
 // Only the first 2 nodes are online; the rest are "not connected" (fake).
@@ -45,7 +45,7 @@
 #define UI_OVERHEAT_WARN_C 41.0f
 #define UI_OVERHEAT_TRIP_C 45.0f
 
-#define FW_VERSION "v9-fake-0.1.0"
+#define FW_VERSION "v9.6-fake-0.2.0"
 
 // Debug: general debug-build gate. Hardcoded default OFF; enable per-build
 // with -DIS_DEBUG=1 (e.g. extra build_flags). When on, /setup shows a

@@ -1,9 +1,9 @@
 
 /*******************************************************************************
- * Display UI (LVGL v9, fake-data pass)
+ * Display UI (LVGL v9.6, fake-data pass)
  * Sunton 800x480 ST7262 + GT911 touch. See docs/llm-summary/display-docs.md.
  *
- * LVGL v9 uses firmware/display-v9/lv_conf.h. Rendering and the display
+ * LVGL v9.6 uses firmware/display-v9/lv_conf.h. Rendering and the display
  * flush callback are configured explicitly for RGB565 below.
  ******************************************************************************/
 #include <Arduino.h>

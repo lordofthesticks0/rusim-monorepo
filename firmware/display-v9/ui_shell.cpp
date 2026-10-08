@@ -42,7 +42,7 @@ lv_obj_t *ui_mk_label(lv_obj_t *parent, const char *text, int x, int y, int w,
   lv_label_set_text(l, text);
   lv_obj_set_pos(l, x, y);
   lv_obj_set_size(l, w, LV_SIZE_CONTENT);
-  lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
   lv_obj_set_style_text_color(l, lv_color_hex(color), LV_PART_MAIN);
   if (font != nullptr) lv_obj_set_style_text_font(l, font, LV_PART_MAIN);
   return l;
@@ -118,7 +118,7 @@ static void build_status_bar(lv_obj_t *scr) {
   lv_obj_set_pos(bar, 0, 0);
   lv_obj_set_size(bar, 800, 44);
   style_plain(bar, UI_COL_BAR);
-  lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(bar, false);
 
   ui_mk_label(bar, "NET OK(fake)", 10, 12, 150, UI_COL_OK, &lv_font_montserrat_14);
   s_postLabel = ui_mk_label(bar, "POST ON", 170, 12, 110, UI_COL_TEXT, &lv_font_montserrat_14);
@@ -174,7 +174,7 @@ void ui_modal_show(const char *title, const char *body, const char *ackLabel, Ui
   lv_obj_set_style_bg_opa(s_modal, LV_OPA_70, LV_PART_MAIN);
   lv_obj_set_style_border_width(s_modal, 0, LV_PART_MAIN);
   lv_obj_set_style_radius(s_modal, 0, LV_PART_MAIN);
-  lv_obj_remove_flag(s_modal, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollable(s_modal, false);
 
   lv_obj_t *card = ui_mk_card(s_modal, 150, 70, 500, 340);
   ui_mk_label(card, title, 12, 8, 460, UI_COL_TEXT, &lv_font_montserrat_20);
@@ -189,7 +189,7 @@ void ui_modal_show(const char *title, const char *body, const char *ackLabel, Ui
 
 void ui_modal_hide() {
   if (s_modal != nullptr) {
-    lv_obj_del(s_modal);
+    lv_obj_delete(s_modal);
     s_modal = nullptr;
     s_modalAck = nullptr;
   }

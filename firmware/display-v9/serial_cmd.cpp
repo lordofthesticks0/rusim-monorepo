@@ -1,5 +1,7 @@
 #include "serial_cmd.h"
 
+#include <ctype.h>
+
 #include "fake_data.h"
 #include "link_modbus.h"
 #include "provision_ap.h"
