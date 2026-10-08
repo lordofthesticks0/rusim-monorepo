@@ -1,3 +1,16 @@
+### 2026-10-08
+- `display-v9` / `network-master` are PlatformIO environments and
+  `firmware/` directories, not git branches. `git branch -a` shows only
+  `master`; the mapping lives in `platformio.ini` (`[env:display-v9]`,
+  `[env:network-master]`) and `firmware/display-v9/`,
+  `firmware/network-master/`. Lesson: check `platformio.ini` + `firmware/`
+  before assuming a name is a branch. (memory-safety audit entry)
+- ESP32 Arduino toolchain defaults to C++11: `std::make_unique` does not
+  exist (`'make_unique' is not a member of 'std'`, only available from C++14
+  onwards). Fix: `std::unique_ptr<T>(new T(...))`. Lesson: use the
+  `new`-wrapping form in firmware, or set `build_flags -std=c++14` first.
+  (display-v9 RAII, provision_ap RAII)
+
 ### 2026-10-06
 - Shipped network-master DB/NTP code without compiling: a debug `q1` variable
   was declared inside the `if (at >= 0)` block but referenced after it, so the

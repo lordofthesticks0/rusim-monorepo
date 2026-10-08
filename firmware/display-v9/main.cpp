@@ -9,6 +9,8 @@
 #include <Arduino.h>
 #include <lvgl.h>
 
+#include <memory>
+
 #include "fake_data.h"
 #include "link_modbus.h"
 #include "provision_ap.h"
@@ -32,7 +34,9 @@ static uint32_t lvgl_tick_get(void) {
 
 /* More dev device declaration: https://github.com/moononournation/Arduino_GFX/wiki/Dev-Device-Declaration */
 #if defined(DISPLAY_DEV_KIT)
-Arduino_GFX *gfx = create_default_Arduino_GFX();
+// Boot-lifetime display object. Owned by a unique_ptr (RAII) so ownership is
+// explicit; it lives until reboot and is never transferred.
+static std::unique_ptr<Arduino_GFX> gfx;
 #else /* !defined(DISPLAY_DEV_KIT) */
 
 /* More data bus class: https://github.com/moononournation/Arduino_GFX/wiki/Data-Bus-Class */
@@ -41,20 +45,10 @@ Arduino_GFX *gfx = create_default_Arduino_GFX();
 /* More display class: https://github.com/moononournation/Arduino_GFX/wiki/Display-Class */
 // Arduino_GFX *gfx = new Arduino_ILI9341(bus, DF_GFX_RST, 0 /* rotation */, false /* IPS */);
 
-Arduino_ESP32RGBPanel *bus = new Arduino_ESP32RGBPanel(
-    GFX_NOT_DEFINED /* CS */, GFX_NOT_DEFINED /* SCK */, GFX_NOT_DEFINED /* SDA */,
-    40 /* DE */, 41 /* VSYNC */, 39 /* HSYNC */, 42 /* PCLK */,
-    45 /* R0 */, 48 /* R1 */, 47 /* R2 */, 21 /* R3 */, 14 /* R4 */,
-    5 /* G0 */, 6 /* G1 */, 7 /* G2 */, 15 /* G3 */, 16 /* G4 */, 4 /* G5 */,
-    8 /* B0 */, 3 /* B1 */, 46 /* B2 */, 9 /* B3 */, 1 /* B4 */);
-// option 1:
-// ST7262 IPS LCD 800x480
-Arduino_RPi_DPI_RGBPanel *lcd = new Arduino_RPi_DPI_RGBPanel(
-    bus, 800 /* width */, 0 /* hsync_polarity */, 8 /* hsync_front_porch */,
-    4 /* hsync_pulse_width */, 8 /* hsync_back_porch */, 480 /* height */,
-    0 /* vsync_polarity */, 8 /* vsync_front_porch */, 4 /* vsync_pulse_width */,
-    8 /* vsync_back_porch */, 1 /* pclk_active_neg */, 16000000 /* prefer_speed */,
-    true /* auto_flush */);
+// Boot-lifetime panel objects. unique_ptr makes single ownership explicit;
+// they are created in setup() (after the heap is ready) and live until reboot.
+static std::unique_ptr<Arduino_ESP32RGBPanel> bus;
+static std::unique_ptr<Arduino_RPi_DPI_RGBPanel> lcd;
 #endif /* !defined(DISPLAY_DEV_KIT) */
 /*******************************************************************************
  * End of Arduino_GFX setting
@@ -69,14 +63,28 @@ Arduino_RPi_DPI_RGBPanel *lcd = new Arduino_RPi_DPI_RGBPanel(
 static uint32_t screenWidth;
 static uint32_t screenHeight;
 static lv_display_t *display;
-static uint8_t *disp_draw_buf;
+// Draw buffer: boot-lifetime, RAII-owned. heap_caps_free on ESP32, free elsewhere.
+struct DispBufDeleter {
+  void operator()(uint8_t *p) const {
+#ifdef ESP32
+    if (p) heap_caps_free(p);
+#else
+    if (p) free(p);
+#endif
+  }
+};
+static std::unique_ptr<uint8_t[], DispBufDeleter> disp_draw_buf;
 
 /* Display flushing */
 static void my_disp_flush(lv_display_t *display, const lv_area_t *area, uint8_t *px_map) {
   const uint32_t w = area->x2 - area->x1 + 1;
   const uint32_t h = area->y2 - area->y1 + 1;
 
+#if defined(DISPLAY_DEV_KIT)
+  gfx->draw16bitRGBBitmap(area->x1, area->y1, reinterpret_cast<uint16_t *>(px_map), w, h);
+#else
   lcd->draw16bitRGBBitmap(area->x1, area->y1, reinterpret_cast<uint16_t *>(px_map), w, h);
+#endif
   lv_display_flush_ready(display);
 }
 
@@ -102,28 +110,68 @@ void setup() {
   Serial.println("Display UI v9 (fake-data pass). Send HELP for serial cmds.");
   link_modbus_init();
 
+#if defined(DISPLAY_DEV_KIT)
+  gfx = std::unique_ptr<Arduino_GFX>(create_default_Arduino_GFX());
+  if (!gfx) {
+    Serial.println("GFX allocate failed!");
+    return;
+  }
+#else
+  bus = std::unique_ptr<Arduino_ESP32RGBPanel>(new Arduino_ESP32RGBPanel(
+      GFX_NOT_DEFINED /* CS */, GFX_NOT_DEFINED /* SCK */, GFX_NOT_DEFINED /* SDA */,
+      40 /* DE */, 41 /* VSYNC */, 39 /* HSYNC */, 42 /* PCLK */,
+      45 /* R0 */, 48 /* R1 */, 47 /* R2 */, 21 /* R3 */, 14 /* R4 */,
+      5 /* G0 */, 6 /* G1 */, 7 /* G2 */, 15 /* G3 */, 16 /* G4 */, 4 /* G5 */,
+      8 /* B0 */, 3 /* B1 */, 46 /* B2 */, 9 /* B3 */, 1 /* B4 */));
+  // option 1:
+  // ST7262 IPS LCD 800x480
+  lcd = std::unique_ptr<Arduino_RPi_DPI_RGBPanel>(new Arduino_RPi_DPI_RGBPanel(
+      bus.get(), 800 /* width */, 0 /* hsync_polarity */, 8 /* hsync_front_porch */,
+      4 /* hsync_pulse_width */, 8 /* hsync_back_porch */, 480 /* height */,
+      0 /* vsync_polarity */, 8 /* vsync_front_porch */, 4 /* vsync_pulse_width */,
+      8 /* vsync_back_porch */, 1 /* pclk_active_neg */, 16000000 /* prefer_speed */,
+      true /* auto_flush */));
+  if (!bus || !lcd) {
+    Serial.println("Display panel allocate failed!");
+    return;
+  }
+#endif
+
   // Init Display
+#if defined(DISPLAY_DEV_KIT)
+  gfx->begin();
+#else
   lcd->begin();
+#endif
 #ifdef TFT_BL
   static_assert(TFT_BL == UI_BL_PIN, "backlight pin moved; update UI_BL_PIN");
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
 #endif
+#if defined(DISPLAY_DEV_KIT)
+  gfx->fillScreen(BLACK);
+#else
   lcd->fillScreen(BLACK);
+#endif
   delay(200);
   lv_init();
   lv_tick_set_cb(lvgl_tick_get);
   delay(10);
   touch_init();
+#if defined(DISPLAY_DEV_KIT)
+  screenWidth = gfx->width();
+  screenHeight = gfx->height();
+#else
   screenWidth = lcd->width();
   screenHeight = lcd->height();
+#endif
 #ifdef ESP32
   const uint32_t draw_buf_size = screenWidth * screenHeight / 4 * 2;
-  disp_draw_buf =
-      static_cast<uint8_t *>(heap_caps_malloc(draw_buf_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  disp_draw_buf.reset(static_cast<uint8_t *>(
+      heap_caps_malloc(draw_buf_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
 #else
   const uint32_t draw_buf_size = screenWidth * screenHeight / 4 * 2;
-  disp_draw_buf = static_cast<uint8_t *>(malloc(draw_buf_size));
+  disp_draw_buf.reset(static_cast<uint8_t *>(malloc(draw_buf_size)));
 #endif
   if (!disp_draw_buf) {
     Serial.println("LVGL disp_draw_buf allocate failed!");
@@ -131,7 +179,7 @@ void setup() {
     display = lv_display_create(screenWidth, screenHeight);
     lv_display_set_flush_cb(display, my_disp_flush);
     lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
-    lv_display_set_buffers(display, disp_draw_buf, NULL, draw_buf_size,
+    lv_display_set_buffers(display, disp_draw_buf.get(), NULL, draw_buf_size,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
     /* Initialize the pointer input device */

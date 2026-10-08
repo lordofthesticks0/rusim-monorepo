@@ -5,6 +5,9 @@
 #include <WiFiClientSecure.h>
 #include <time.h>
 
+#include <atomic>
+#include <cstring>
+
 // network-master: production WT32-ETH01 firmware.
 //
 // - Brings up the LAN8720 over RMII (variant defaults: ADDR 1, PWR 16,
@@ -68,9 +71,12 @@
 #define POLL_REQ_PIN 14
 #define TEST_LED_PIN 2
 #define TEST_LED_MS 300
-static volatile bool s_pollRequest = false;
+// Atomic flag: set in the ISR, peeked for the bench LED, consumed in
+// STAGE_NEED_CREDS. Atomic store/load/exchange removes the data race of the
+// previous volatile bool (set in ISR, cleared in loop).
+static std::atomic<bool> s_pollRequest{false};
 static uint32_t s_ledOffMs = 0;
-static void IRAM_ATTR onPollRequest() { s_pollRequest = true; }
+static void IRAM_ATTR onPollRequest() { s_pollRequest.store(true); }
 
 #define LINK_REG_LOGIN_REQ 0x0000
 #define LINK_REG_CREDS_READY 0x0001
@@ -132,8 +138,12 @@ static uint32_t lastAuthProbeMs = (uint32_t)-30000;
 
 enum Stage { STAGE_WAIT_IP, STAGE_NEED_CREDS, STAGE_LOGIN, STAGE_RUN };
 static Stage stage = STAGE_WAIT_IP;
-static String username;
-static String password;
+// Fixed-size credential buffers (32 regs * 2 bytes = 64 chars + NUL).
+// No Arduino String here: avoids heap fragmentation from repeated
+// concat/realloc, and the password can be zeroed deterministically.
+static const size_t kCredCap = LINK_REG_USER_REGS * 2 + 1;
+static char username[kCredCap];
+static char password[kCredCap];
 static int durationH = 24;
 static int expNum = 0;
 static bool expRunning = false;
@@ -273,17 +283,20 @@ static bool mbWriteMultiple(uint16_t addr, uint16_t count, const uint16_t* value
   return echoAddr == addr && echoCnt == count;
 }
 
-static String regsToString(const uint16_t* regs, uint16_t count) {
-  String s;
+static void regsToString(const uint16_t* regs, uint16_t count, char* out, size_t cap) {
+  if (out == nullptr || cap == 0) return;
+  size_t pos = 0;
   for (uint16_t i = 0; i < count; i++) {
     char hi = (char)(regs[i] >> 8);
     char lo = (char)(regs[i] & 0xFF);
     if (hi == '\0') break;
-    s += hi;
+    if (pos + 1 >= cap) break;
+    out[pos++] = hi;
     if (lo == '\0') break;
-    s += lo;
+    if (pos + 1 >= cap) break;
+    out[pos++] = lo;
   }
-  return s;
+  out[pos] = '\0';
 }
 
 // One credential poll: request the gate, then read staged credentials.
@@ -313,16 +326,37 @@ static bool pollDisplayCreds() {
     Serial.println("[MB] PASSWORD read failed");
     return false;
   }
-  String u = regsToString(uregs, LINK_REG_USER_REGS);
-  String p = regsToString(pregs, LINK_REG_PASS_REGS);
-  u.trim();
-  if (u.length() == 0 || p.length() == 0) {
+  char u[kCredCap];
+  char p[kCredCap];
+  regsToString(uregs, LINK_REG_USER_REGS, u, sizeof(u));
+  regsToString(pregs, LINK_REG_PASS_REGS, p, sizeof(p));
+  // Trim leading/trailing ASCII whitespace without a String temp.
+  auto trimInPlace = [](char* s) {
+    if (!s) return;
+    size_t len = strlen(s);
+    size_t start = 0;
+    while (start < len && (s[start] == ' ' || s[start] == '\t' ||
+                           s[start] == '\r' || s[start] == '\n'))
+      start++;
+    while (len > start && (s[len - 1] == ' ' || s[len - 1] == '\t' ||
+                           s[len - 1] == '\r' || s[len - 1] == '\n'))
+      len--;
+    if (start > 0) memmove(s, s + start, len - start);
+    s[len - start] = '\0';
+  };
+  trimInPlace(u);
+  if (u[0] == '\0' || p[0] == '\0') {
     Serial.println("[MB] staged credentials are empty, waiting for Confirm");
     return false;
   }
-  username = u;
-  password = p;
-  Serial.printf("[MB] captured creds user='%s'\n", username.c_str());
+  strncpy(username, u, sizeof(username) - 1);
+  username[sizeof(username) - 1] = '\0';
+  strncpy(password, p, sizeof(password) - 1);
+  password[sizeof(password) - 1] = '\0';
+  // Wipe stack copies immediately; the RAM copy is cleared after login.
+  memset(u, 0, sizeof(u));
+  memset(p, 0, sizeof(p));
+  Serial.printf("[MB] captured creds user='%s'\n", username);
   return true;
 }
 
@@ -429,20 +463,38 @@ void onEthEvent(WiFiEvent_t event) {
   }
 }
 
-// Reads the response into a String, capped at kMaxBody characters.
-String readBody(HTTPClient& http) {
-  String body;
+// Reads the response into a caller buffer, capped at kMaxBody characters.
+// Fixed-buffer hot path: no incremental String concat, so no heap
+// fragmentation from repeated realloc. Returns bytes stored (excl. NUL).
+static size_t readBodyFixed(HTTPClient& http, char* out, size_t cap) {
+  if (out == nullptr || cap == 0) return 0;
   WiFiClient* stream = http.getStreamPtr();
-  if (!stream) return body;
+  if (!stream) {
+    out[0] = '\0';
+    return 0;
+  }
+  size_t limit = kMaxBody;
+  if (limit > cap - 1) limit = cap - 1;
+  size_t total = 0;
   uint8_t buf[256];
-  while (http.connected() && body.length() < kMaxBody) {
+  while (http.connected() && total < limit) {
     int n = stream->readBytes(reinterpret_cast<char*>(buf), sizeof(buf));
     if (n <= 0) break;
-    // Appends exactly n bytes. The buffer is NOT NUL-terminated, so the
-    // plain `+=` operator would over-read into stale stack memory.
-    body.concat(reinterpret_cast<const char*>(buf), n);
+    size_t room = limit - total;
+    size_t take = (size_t)n < room ? (size_t)n : room;
+    memcpy(out + total, buf, take);
+    total += take;
   }
-  return body;
+  out[total] = '\0';
+  return total;
+}
+
+// One-shot wrapper for callers that need a String once. Single allocation
+// from the fixed buffer, not per-chunk concat.
+String readBody(HTTPClient& http) {
+  static char tmp[kMaxBody + 1];
+  size_t n = readBodyFixed(http, tmp, sizeof(tmp));
+  return String(tmp);
 }
 
 // The interception page is a JS redirect, not an HTTP one:
@@ -459,26 +511,33 @@ String extractWindowLocation(const String& html) {
 
 // What a login page scan recovers. The login page is roughly 8 KB of inline
 // CSS before the form, so the body is scanned through a small rolling window
-// instead of being buffered.
+// instead of being buffered. Fixed char arrays: no String heap churn.
 struct PageScan {
   bool hasForm = false;
-  String formAction;
-  String redir;
-  String magic;
+  char formAction[256] = {0};
+  char redir[256] = {0};
+  char magic[128] = {0};
   bool hasUsernameField = false;
   size_t totalBytes = 0;
 };
 
-// Searches `win` for needle, then returns the value of the first
-// "value=\"" attribute at or after it, or "" when absent.
-String valueAfter(const String& win, const String& needle, size_t limit = 512) {
-  int at = win.indexOf(needle);
-  if (at < 0) return "";
-  int v = win.indexOf("value=\"", at + needle.length());
-  if (v < 0 || v - at > limit) return "";
-  int end = win.indexOf('"', v + 7);
-  if (end < 0) return "";
-  return win.substring(v + 7, end);
+// Searches NUL-terminated `win` for needle, then copies the first
+// value="..." at or after it into out. Returns true on success.
+static bool valueAfterFixed(const char* win, const char* needle, char* out, size_t cap,
+                            size_t limit = 512) {
+  if (!win || !needle || !out || cap == 0) return false;
+  const char* at = strstr(win, needle);
+  if (!at) return false;
+  const char* v = strstr(at + strlen(needle), "value=\"");
+  if (!v || (size_t)(v - at) > limit) return false;
+  v += 7;
+  const char* end = strchr(v, '"');
+  if (!end) return false;
+  size_t len = (size_t)(end - v);
+  if (len >= cap) len = cap - 1;
+  memcpy(out, v, len);
+  out[len] = '\0';
+  return len > 0;
 }
 
 void scanPage(HTTPClient& http, PageScan& out) {
@@ -486,36 +545,62 @@ void scanPage(HTTPClient& http, PageScan& out) {
   WiFiClient* stream = http.getStreamPtr();
   if (!stream) return;
 
-  String win;
+  // Rolling window as a fixed NUL-terminated buffer: no String concat in
+  // the hot loop, so no heap realloc churn while scanning ~8 KB pages.
+  char win[kWindow + 1] = {0};
+  size_t winLen = 0;
   uint8_t buf[256];
   while (http.connected()) {
     int n = stream->readBytes(reinterpret_cast<char*>(buf), sizeof(buf));
     if (n <= 0) break;
-    out.totalBytes += n;
-    win.concat(reinterpret_cast<const char*>(buf), n);
+    out.totalBytes += (size_t)n;
+    // Append chunk, keeping only the last kWindow bytes.
+    size_t chunk = (size_t)n;
+    if (chunk + winLen > kWindow) {
+      size_t drop = chunk + winLen - kWindow;
+      if (drop >= winLen) {
+        // Chunk alone fills the window; keep its tail.
+        size_t off = chunk - kWindow;
+        memcpy(win, buf + off, kWindow);
+        winLen = kWindow;
+      } else {
+        memmove(win, win + drop, winLen - drop);
+        winLen -= drop;
+        memcpy(win + winLen, buf, chunk);
+        winLen += chunk;
+      }
+    } else {
+      memcpy(win + winLen, buf, chunk);
+      winLen += chunk;
+    }
+    win[winLen] = '\0';
 
     if (!out.hasForm) {
-      int f = win.indexOf("<form");
-      if (f >= 0) {
+      const char* f = strstr(win, "<form");
+      if (f) {
         out.hasForm = true;
-        int a = win.indexOf("action=\"", f);
-        if (a >= 0) {
-          int e = win.indexOf('"', a + 8);
-          if (e > 0) out.formAction = win.substring(a + 8, e);
+        const char* a = strstr(f, "action=\"");
+        if (a) {
+          a += 8;
+          const char* e = strchr(a, '"');
+          if (e && e > a) {
+            size_t len = (size_t)(e - a);
+            if (len >= sizeof(out.formAction)) len = sizeof(out.formAction) - 1;
+            memcpy(out.formAction, a, len);
+            out.formAction[len] = '\0';
+          }
         }
       }
     }
-    if (out.magic.length() == 0) {
-      out.magic = valueAfter(win, "name=\"magic\"");
+    if (out.magic[0] == '\0') {
+      valueAfterFixed(win, "name=\"magic\"", out.magic, sizeof(out.magic));
     }
-    if (out.redir.length() == 0) {
-      out.redir = valueAfter(win, "name=\"4Tredir\"");
+    if (out.redir[0] == '\0') {
+      valueAfterFixed(win, "name=\"4Tredir\"", out.redir, sizeof(out.redir));
     }
-    if (!out.hasUsernameField && win.indexOf("name=\"username\"") >= 0) {
+    if (!out.hasUsernameField && strstr(win, "name=\"username\"") != nullptr) {
       out.hasUsernameField = true;
     }
-
-    if (win.length() > kWindow) win = win.substring(win.length() - kWindow);
   }
 }
 
@@ -628,10 +713,10 @@ bool fetchLoginPage(const String& portalUrl, PageScan& scan) {
   Serial.print("[LOGIN] form action: ");
   Serial.println(scan.hasForm ? scan.formAction : "(no form found)");
   Serial.print("[LOGIN] 4Tredir: ");
-  Serial.println(scan.redir.length() ? scan.redir : "(not found)");
+  Serial.println(scan.redir[0] ? scan.redir : "(not found)");
   Serial.print("[LOGIN] magic: ");
-  Serial.println(scan.magic.length() ? scan.magic : "(not found)");
-  return scan.hasForm && scan.magic.length() > 0;
+  Serial.println(scan.magic[0] ? scan.magic : "(not found)");
+  return scan.hasForm && scan.magic[0] != '\0';
 }
 
 // POSTs the credentials to the portal. Returns true when the response looks
@@ -723,10 +808,10 @@ bool fetchData() {
 }
 
 static void clearCreds() {
-  // Overwrite before releasing so the password never lingers in heap.
-  for (size_t i = 0; i < password.length(); i++) password[i] = 'x';
-  password = "";
-  username = "";
+  // Overwrite before clearing so the password never lingers in RAM.
+  memset(password, 'x', sizeof(password) - 1);
+  memset(password, 0, sizeof(password));
+  memset(username, 0, sizeof(username));
 }
 
 // --- NTP (backlog #12): UTC via pool.ntp.org. Call after DHCP. ---
@@ -878,7 +963,7 @@ static void syncDbLatest(bool force) {
 // the display and consumes the staged credentials.
 bool doLogin() {
   Serial.printf("[LOGIN] user='%s' from display (password in RAM only)\n",
-                username.c_str());
+                username);
 
   String portalUrl = fetchPortalUrl();
   if (portalUrl.length() == 0) {
@@ -961,8 +1046,9 @@ void setup() {
 
 void loop() {
   // Blink the bench LED on a request, and take it down when the window ends.
-  // The request flag itself is left for STAGE_NEED_CREDS to consume.
-  if (s_ledOffMs == 0 && s_pollRequest) {
+  // The request flag itself is left for STAGE_NEED_CREDS to consume (peek here,
+  // consume there).
+  if (s_ledOffMs == 0 && s_pollRequest.load()) {
     digitalWrite(TEST_LED_PIN, HIGH);
     s_ledOffMs = millis() + TEST_LED_MS;
   }
@@ -993,10 +1079,9 @@ void loop() {
       }
       // The display pulses the poll-request line when a pair is staged. Honour
       // it before the 5 s gate: a corrected password must not sit unread while
-      // the user watches the page. The flag is cleared here because this is the
+      // the user watches the page. The flag is consumed here because this is the
       // only stage that can use it.
-      if (s_pollRequest) {
-        s_pollRequest = false;
+      if (s_pollRequest.exchange(false)) {
         Serial.println("[INT] display staged new credentials; polling now");
         lastCredPollMs = 0;
       }

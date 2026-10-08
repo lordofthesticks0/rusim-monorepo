@@ -5,6 +5,7 @@
 #include <esp_efuse.h>
 #include <esp_system.h>
 
+#include <memory>
 #include <string.h>
 
 #include "link_modbus.h"
@@ -50,7 +51,9 @@ static const bool kHidden = PROVISION_AP_HIDDEN != 0;
 
 // --- state ----------------------------------------------------------------
 
-static WebServer *s_server = nullptr;
+// RAII-owned web server: single ownership is explicit, reset() on end frees
+// the heap while the AP is down instead of holding it all night.
+static std::unique_ptr<WebServer> s_server;
 static bool s_active = false;
 static uint32_t s_lastRequestMs = 0;
 static char s_ssid[32] = {0};
@@ -164,7 +167,7 @@ static const char kPageTail[] = "</main></body></html>";
 // The handlers below are handed to WebServer::on(), which takes
 // std::function<void()>. They reach the server through s_server instead of a
 // parameter.
-static WebServer *srv() { return s_server; }
+static WebServer *srv() { return s_server.get(); }
 
 static void send_form() {
   String page;
@@ -324,9 +327,9 @@ static void handle_creds() {
 void provision_ap_begin() {
   if (s_active) return;
 
-  if (s_server == nullptr) {
-    s_server = new WebServer(kApPort);
-    if (s_server == nullptr) {
+  if (!s_server) {
+    s_server = std::unique_ptr<WebServer>(new WebServer(kApPort));
+    if (!s_server) {
       Serial.println("[AP] ERROR: out of memory allocating the web server");
       return;
     }
@@ -372,8 +375,10 @@ void provision_ap_begin() {
 void provision_ap_end() {
   if (!s_active) return;
 
-  if (s_server != nullptr) {
+  if (s_server) {
     s_server->stop();
+    // Free the heap while the AP is down; begin() recreates it on demand.
+    s_server.reset();
   }
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_OFF);
@@ -388,7 +393,7 @@ void provision_ap_end() {
 }
 
 void provision_ap_poll() {
-  if (!s_active) return;
+  if (!s_active || !s_server) return;
 
   // handleClient() returns immediately when nothing is connected, so this
   // costs a few microseconds per loop() outside of an actual request.

@@ -9,14 +9,16 @@ Do not open any documentation files unless you think it is relevant. There is pl
 As an AI agent, your job scope will be limited to a small subset of this repo. This monorepo contains both firmware and the dashboard, as well as documentation. Your primary task will most likely fall to be one of the two:
 
 ### 1. Firmware engineer
-If the task at hand mentions firmware, you should ignore any thought of the dashboard. Your focus will be mainly C++ code available at `firmware/`. It is absolutely essential to look at the [hardware documentation](docs/hardware.md) first. DO NOT edit this documentation because it relies on human testing and input. At times, there might be references to the dashboard. Refer to its documentation too if necessary.
+If the task at hand mentions firmware, you should ignore any thought of the dashboard. Your focus will be mainly C++ code available at `firmware/`. It is absolutely essential to look at the [hardware documentation](docs/hardware.md) first. DO NOT edit this documentation because it relies on human testing and input. At times, there might be references to the dashboard. Refer to its documentation too if necessary. If you feel this documentation is outdated or unclear, inform the user.
 
-If you feel this documentation is outdated or unclear, inform the user.
+As a firmware engineer, you will be working on memory-unsafe C code. A memory safety instruction called a "skill" should be loaded in your context. Tell them that the skill is not installed install it by running `bunx skills add https://github.com/wshobson/agents --skill memory-safety-patterns`. Load it yourself if the user forgots to.
 
 ### 2. Full-stack web developer
 If the task at hand mentions the dashboard, you should ignore any thought of firmware. Your focus will be mainly TypeScript code available at `dashboard/`. References to the database should be looked up to [the documentation](docs/llm-generated/database.md). You are free to edit that documentation. 
 
 The dashboard uses `bun` to run things. Stick to it.
+
+**IMPORTANT**: Never ever, **EVER** read the raw `.env` file. Strictly off limits. The harness should disallow you but you should not test it regardless. Read `.env.example` instead if available.
 
 ## Context and Documentation
 

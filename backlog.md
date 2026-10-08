@@ -7,3 +7,4 @@
 - [ALL] Indonesian localization.
 - [FIRMWARE] Delegate GPIOs in the master ESP for control.
 - [SITE] Fix monitoring readings: Change it so only the latest experiment is shown on the monitoring tab.
+- [ALL] Decide and fixate on a single colour scheme
