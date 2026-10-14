@@ -1,13 +1,13 @@
 #include <Arduino.h>
 #include <HX711.h>
 
-const byte HX711_DOUT = 2;
-const byte HX711_SCK = 3;
+const byte HX711_DOUT = 4;
+const byte HX711_SCK = 7;
 const unsigned long SERIAL_BAUD = 115200;
 const unsigned long HX711_READY_TIMEOUT_MS = 5000;
 const unsigned long HX711_READY_POLL_MS = 10;
 
-const int SENSORID = 3; // Select the sensor calibration: 0, 1, 2, or 3.
+const int SENSORID = 0; // Select the sensor calibration: 0, 1, 2, or 3.
 const float CALIBRATION_FACTORS[4] = {
   581040.0f, // Sensor 0
   70802.7743f, // Sensor 1

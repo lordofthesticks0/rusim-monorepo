@@ -58,6 +58,7 @@ document is the source of truth for anything measured on real hardware.
 | `memory-safety-hardening.md` | RAII ownership on `display-v9`, bounded buffers + atomic ISR flag on `network-master` |
 | `flash-factory-tool.md` | `scripts-hardware/flash-factory.ts` and the factory image |
 | `captive-portal-workaround.md` | Plan for headless captive portal authentication on the WT32-ETH01 |
+| `captive-portal-login-script.md` | `scripts-hardware/captive-portal-login.sh`: the firmware login sequence as a one-shot bash script |
 
 ## 3. Dashboard
 
