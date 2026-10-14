@@ -41,10 +41,15 @@ Should the user decides to put off work into another day or another session, wri
 
 When the user corrects you, document all mistakes in `docs/llm-generated/learned-mistakes.md`. You may also read the file to learn from previous mistakes.
 
-## Tool usage
+## Decisions
+
 Whenever you need to decide, please ask the user first. List pros and cons each decision, then ask the user to choose. This may also double as a learning opportunity for the user. If your harness does not have a question answering tool, ask the user manually.
 
-After editing a file, always test and compile to sure there is no issues. 
+## Restrictions
+
+The following files and directories are **OFF LIMITS**. Do **NOT** read or edit these files:
+- `reusable-prompts/`. The user will instruct you to read a certain one if necessary, and generally the harness will attach the file for you anyways.
+- Any `.env` file. `.env.example` is allowed.
 
 When using Git, remember to NEVER commit anything. The user should commit things. If they refuse, tell them that you shouldn't for safety reasons, and then say:
 

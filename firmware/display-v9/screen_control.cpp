@@ -24,6 +24,7 @@ struct HoldCtx {
 static void hold_progress(lv_timer_t *t) {
   HoldCtx *ctx = (HoldCtx *)lv_timer_get_user_data(t);
   if (ctx == nullptr || !ctx->armed) return;
+  if (!ui_is_control() || ctx->bar == nullptr) return;
   uint32_t el = millis() - ctx->t0;
   int pct = el >= UI_HOLD_TO_CONFIRM_MS ? 100 : (int)(el * 100 / UI_HOLD_TO_CONFIRM_MS);
   lv_bar_set_value(ctx->bar, pct, LV_ANIM_OFF);
@@ -137,6 +138,7 @@ static HoldCtx s_runCtx;
 static lv_obj_t *s_durSpin = nullptr;
 static lv_obj_t *s_expSpin = nullptr;
 static lv_obj_t *s_dbWarn = nullptr;
+static lv_obj_t *s_intTestHint = nullptr;
 static bool s_dbSuggested = false;
 
 static void exp_mirror_link() {
@@ -147,6 +149,7 @@ static void exp_mirror_link() {
 // Called on show, on edit, and from screen_control_poll() in the main loop
 // so a late master sync still updates the open screen.
 static void db_refresh_warn() {
+  if (!ui_is_control()) return;
   if (s_dbWarn == nullptr) return;
   int latest = link_modbus_get_db_latest();
   if (latest == -2) {
@@ -181,7 +184,33 @@ static void db_refresh_warn() {
   }
 }
 
-void screen_control_poll() { db_refresh_warn(); }
+void screen_control_poll() {
+  if (!ui_is_control()) return;
+  db_refresh_warn();
+}
+
+void screen_control_hide() {
+  // Timers outlive the widgets they drive (they are owned by LVGL, not by
+  // s_content), so delete them before lv_obj_clean() frees the widgets.
+  // Otherwise hold_progress() keeps calling lv_bar_set_value() on a deleted
+  // bar, which logs "No screen found" every fire.
+  HoldCtx *ctxs[] = {&s_stirrerCtx, &s_postCtx, &s_runCtx};
+  for (HoldCtx *ctx : ctxs) {
+    ctx->armed = false;
+    if (ctx->timer != nullptr) {
+      lv_timer_delete(ctx->timer);
+      ctx->timer = nullptr;
+    }
+    ctx->sw = nullptr;
+    ctx->bar = nullptr;
+    ctx->hint = nullptr;
+  }
+  s_setpointLabel = nullptr;
+  s_durSpin = nullptr;
+  s_expSpin = nullptr;
+  s_dbWarn = nullptr;
+  s_intTestHint = nullptr;
+}
 
 // RUN switch confirmed ON: each stopped->running edge starts a new
 // experiment number. Mirror everything to the link either way.
@@ -252,8 +281,6 @@ static lv_obj_t *mk_spin(lv_obj_t *parent, int x, int y, int min, int max,
 // the pin and pulses it from link_modbus_set_credentials(), which is what makes
 // a corrected password take effect on the next poll instead of up to 5 s later.
 // This button stays so the line can be exercised by hand from the bench.
-static lv_obj_t *s_intTestHint = nullptr;
-
 static void on_int_test(lv_event_t *e) {
   (void)e;
   link_notify_pulse();

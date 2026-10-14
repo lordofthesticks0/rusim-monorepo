@@ -129,6 +129,63 @@ transition animation.
 - Display: `LV_DISPLAY_RENDER_MODE_PARTIAL`, RGB565, one draw buffer of
   800·480/4·2 ≈ 187.5 KB from internal RAM.
 
+### 2.7 Shared hold-to-confirm round button
+
+New files: `ui_hold_button.h`, `ui_hold_button.cpp`.
+
+Purpose: one round button replaces the `lv_switch` + `lv_bar` hold pairs and
+the `LV_EVENT_VALUE_CHANGED` dance in `screen_control.cpp`. While the button
+is held, its border fills slowly; releasing before the threshold cancels;
+holding past the threshold commits on release.
+
+`UI_HOLD_TO_CONFIRM_MS` in `ui_config.h` changes from 500 to 2000.
+
+Appearance:
+
+- Body: `lv_button`, radius `LV_RADIUS_CIRCLE`, no border. Fill `UI_COL_ALARM`
+  when off, `UI_COL_OK` when on.
+- Centre: `lv_label` with a `LV_SYMBOL_*` glyph, font 20, white.
+- Ring: `lv_arc` as a child of the button, size = button size + 16, centred,
+  `lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE)`,
+  `lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN)`,
+  `lv_obj_remove_style(arc, NULL, LV_PART_KNOB)`, 8 px line width, indicator
+  white. White reads on both the red and the green fill.
+
+Behaviour:
+
+- `LV_EVENT_PRESSED`: store `t0 = millis()`, start a 20 ms timer, set the ring
+  to `min(100, (millis() - t0) * 100 / UI_HOLD_TO_CONFIRM_MS)`.
+- `LV_EVENT_RELEASED` / `LV_EVENT_PRESS_LOST`: stop the timer. If
+  `millis() - t0 < UI_HOLD_TO_CONFIRM_MS`, cancel: ring back to 0, state
+  unchanged, callback not called. Otherwise commit: ring back to 0, state
+  flipped, callback called.
+- Commit happens on release, not when the ring reaches 100%. A press that
+  runs past 2 s commits when the finger lifts; a press that lifts early does
+  nothing. This avoids a toggle firing while the finger is still down.
+- `LV_EVENT_DELETE`: delete the timer, clear the user data. Needed because the
+  context is heap state that outlives the button otherwise.
+
+API:
+
+```c
+typedef void (*UiHoldFn)(void *user);
+
+lv_obj_t *ui_hold_button_create(lv_obj_t *parent, int x, int y, int size,
+                                const char *symbol, bool initial,
+                                UiHoldFn onCommit, void *user);
+void ui_hold_button_set_state(lv_obj_t *btn, bool on);
+void ui_hold_button_set_symbol(lv_obj_t *btn, const char *symbol);
+bool ui_hold_button_state(lv_obj_t *btn);
+```
+
+Internals: `struct HoldBtnCtx { lv_obj_t *arc; lv_obj_t *label; lv_timer_t *timer; uint32_t t0; bool state; UiHoldFn onCommit; void *user; };` attached with `lv_obj_set_user_data()`.
+
+Notes: `LV_USE_ARC` is already `1` in `lv_conf.h`, so no config change is
+needed. The widget is created on the heap by `lv_button_create`, so the
+context can be a plain `new`/`delete` pair, or a `static` block in
+`ui_hold_button.cpp` if only a handful of buttons exist at once (planned use:
+two, one on `/control` for stirrer, one shared for the experiment run toggle).
+
 ---
 
 ## 3. States
@@ -188,8 +245,207 @@ As built:
 
 | Problem | Redesign idea | Priority |
 |---|---|---|
-|  |  |  |
-|  |  |  |
+| Nav buttons are large and occupy the zone that should hold status data | Shrink to three small text-only buttons, centered near the top | High |
+| No run start/stop or duration adjust on home | Add a big run toggle and ±1 h duration buttons under the progress bar | High |
+| Chamber temp and setpoint are one text line with no direct control | Split into a card with large current temp and steppable target | High |
+| No bottle/node health summary on the hub | Add a second card showing online bottles and nodes | Medium |
+| No experiment progress visible | Add a large circular arc (lv_arc) for runtime and percent | High |
+| Status text ("fake", hints) clutters the hub | Drop serial/file tips and inline fake labels from this screen | Low |
+
+#### 3.2.1 Redesign plan — `/home`
+
+Decision: the home screen becomes the **run console**. Navigation moves to the
+persistent top bar (§3.8.1), so home keeps no navigation widgets. The three
+oversized nav buttons are replaced by two data cards, a large progress arc,
+and a run-control row. Home carries no header, no descriptive text, and no
+note strip: it is cards, arc, controls, nothing else.
+
+##### 3.2.1.1 Symbols
+
+This screen uses the standard LVGL `LV_SYMBOL_*` glyphs (from the supplied 9.6
+list) wherever a glyph reads faster than text. Each label is built as a
+concatenated literal, e.g. `LV_SYMBOL_PLAY " Start"` or
+`LV_SYMBOL_DOWN "1h"`. Plain words are kept only where no glyph in the list
+fits (`CHAMBER TEMP`, `Target setpoint`, numeric readouts).
+
+Assignments:
+
+- Targets: decrease `LV_SYMBOL_DOWN`, increase `LV_SYMBOL_UP`.
+- Durations: decrease `LV_SYMBOL_DOWN`, increase `LV_SYMBOL_UP`.
+- Run: the hold button shows `LV_SYMBOL_PLAY` when stopped and
+  `LV_SYMBOL_STOP` when running.
+- States: stirrer ON `LV_SYMBOL_OK` + `ON`, OFF `LV_SYMBOL_CLOSE` + `OFF`;
+  experiment Running `LV_SYMBOL_PLAY` + `Running`, Idle `LV_SYMBOL_STOP` + `Idle`;
+  invalid fields `LV_SYMBOL_WARNING`; all valid `LV_SYMBOL_OK`.
+- Navigation glyphs live in the top bar (§3.8.1), not on home.
+
+##### 3.2.1.2 Layout (content coordinates, panel 800x436)
+
+Zones, top to bottom:
+
+| Zone | y range | Height | Content |
+|---|---|---|---|
+| Cards | 8..168 | 160 | two big cards side by side |
+| Progress | 172..314 | 142 | title + arc + center readout |
+| Controls | 322..418 | 96 | duration adjust + run hold button |
+| bottom margin | 418..436 | 18 | (none) |
+
+Detailed coordinates (all x/y are inside the 800x436 content container).
+There is no nav row and no title: the top bar owns navigation and the active
+route highlight.
+
+Card A (current chamber temperature plus steppable target), 376x160 at (16,8):
+
+| Widget (relative to card) | x | y | w | h | Text / value | Notes |
+|---|---|---|---|---|---|---|
+| title | 12 | 8 | 352 | 20 | `CHAMBER TEMP` | `UI_COL_DIM`, font 14 |
+| `s_curTemp` | 12 | 28 | 352 | 26 | `%.1f C` from `g.chamberTempC` | `UI_COL_TEXT`, font 20 |
+| target label | 12 | 58 | 352 | 18 | `Target setpoint` | `UI_COL_DIM`, font 14 |
+| `s_btnTargetMinus` | 12 | 80 | 44 | 36 | `LV_SYMBOL_DOWN` | `UI_COL_CARD` |
+| `s_target` | 68 | 84 | 100 | 26 | `%.1f C` from `g.tempSetpointC` | `UI_COL_TEXT`, font 20, centered |
+| `s_btnTargetPlus` | 180 | 80 | 44 | 36 | `LV_SYMBOL_UP` | `UI_COL_CARD` |
+| hint | 236 | 88 | 128 | 16 | `0.1 C steps` | `UI_COL_DIM`, font 14 |
+| stirrer readout | 12 | 124 | 352 | 18 | `Stirrer ` + (`g.stirrerOn` ? `LV_SYMBOL_OK " ON"` : `LV_SYMBOL_CLOSE " OFF"`) | `UI_COL_TEXT`, font 14 |
+
+Card B (bottles online), 376x160 at (408,8):
+
+| Widget (relative to card) | x | y | w | h | Text / value | Notes |
+|---|---|---|---|---|---|---|
+| title | 12 | 8 | 352 | 18 | `BOTTLES ONLINE` | `UI_COL_DIM`, font 14 |
+| `s_bottleCount` | 12 | 28 | 352 | 32 | `%d / %d` (online bottles, total bottles) | `UI_COL_TEXT`, font 20 |
+| `s_nodeCount` | 12 | 64 | 352 | 18 | `%d / %d nodes online` | `UI_COL_TEXT`, font 14 |
+| `s_expNum` | 12 | 86 | 352 | 18 | `Experiment #%d` | `UI_COL_DIM`, font 14 |
+| `s_runState` | 12 | 108 | 352 | 18 | running `LV_SYMBOL_PLAY " Running"` / idle `LV_SYMBOL_STOP " Idle"` | colour `UI_COL_OK` when running else `UI_COL_DIM` |
+| `s_invalidCount` | 12 | 130 | 352 | 18 | if >0: `LV_SYMBOL_WARNING " %d invalid"` else `LV_SYMBOL_OK " All valid"` | `UI_COL_ALARM` if > 0 else `UI_COL_DIM` |
+
+Progress zone, arc centered at (400,254) inside content:
+
+| Widget | x | y | w | h | Text / value | Notes |
+|---|---|---|---|---|---|---|
+| `s_progTitle` | 240 | 172 | 320 | 18 | `Experiment runtime` | `UI_COL_DIM`, font 14, centered |
+| `s_arc` | 340 | 194 | 120 | 120 | arc, range 0..100, value percent | foreground `UI_COL_ACCENT`, background `UI_COL_BAR`; non-interactive |
+| `s_arcReadout` | 340 | 238 | 120 | 36 | running `%.1f / %d h` + newline + `%d%%`; idle `Idle` + newline + `%d h set` | `UI_COL_TEXT`, font 14 |
+
+Controls row, centred on x = 400, run hold button is the tall centre piece:
+
+| Widget | x | y | w | h | Text | Notes |
+|---|---|---|---|---|---|---|
+| `s_btnDurMinus` | 176 | 350 | 104 | 44 | `LV_SYMBOL_DOWN "1h"` | immediate, clamped |
+| `s_btnRun` | 352 | 322 | 96 | 96 | `LV_SYMBOL_PLAY` idle, `LV_SYMBOL_STOP` running | §2.7 hold button, state = `g.experimentRunning`, ring spans 346..454 |
+| `s_btnDurPlus` | 520 | 350 | 104 | 44 | `LV_SYMBOL_UP "1h"` | immediate, clamped |
+
+##### 3.2.1.3 State and data model changes needed
+
+1. Add `uint32_t experimentStartMs` to `AppState` in `fake_data.h`, default
+   `0` (not running). Set it on run start from any screen and clear on stop.
+   `fake_init()` initialises it to 0.
+2. `g.experimentRunning` stays the single source of run state; `expNum`,
+   `durationH`, `tempSetpointC` unchanged.
+3. `screen_home.cpp` handles the case `g.experimentRunning == true` and
+   `g.experimentStartMs == 0` on show: set `g.experimentStartMs = millis()`.
+   This covers runs started on `/control` before home was opened.
+4. `home_elapsed_hours()` returns `(millis() - g.experimentStartMs) / 3600000.0f`
+   clamped to `0 .. g.durationH`, or `0` when not running.
+
+##### 3.2.1.4 Functions to add / change
+
+Header `screen_home.h`:
+
+- `void screen_home_show(lv_obj_t *parent)` (reworked).
+- `void screen_home_poll()` (new): refreshes arc, readouts, card values, button
+  colour. No-op when `s_arc == nullptr`.
+
+Implementation statics in `screen_home.cpp`:
+
+- Static object pointers named as in the layout tables above, plus
+  `static uint32_t s_lastPollMs = 0`.
+
+Callback functions:
+
+- `on_target_minus`: decrements `g.tempSetpointC` by `UI_TEMP_STEP_C`, clamps to
+  `UI_TEMP_MIN_C`, logs `[FAKE->WT32] SETPOINT %.1f`, refreshes `s_target`,
+  calls `ui_update_bell()`.
+- `on_target_plus`: increments, clamps to `UI_TEMP_MAX_C`, same handling.
+- `bottles_online()`: returns sum of `UI_BOTTLES_PER_CLUSTER` for clusters where
+  `cluster[c].online` is true.
+- `home_render_status()`: writes text and colours into `s_curTemp`, `s_target`,
+  `s_bottleCount`, `s_nodeCount`, `s_expNum`, `s_runState`, `s_invalidCount`
+  from current `g`. Called from show and poll.
+- `home_render_run()`: sets the hold button symbol and state from
+  `g.experimentRunning` via `ui_hold_button_set_symbol()` and
+  `ui_hold_button_set_state()`, updates `s_arc` value and `s_arcReadout`.
+  Called from show and poll.
+- `on_duration_down`: `g.durationH = max(UI_DURATION_MIN_H, g.durationH - 1)`,
+  log `[HOME] duration %dh`, `link_modbus_set_exp_state(...)`,
+  `ui_update_bell()`, `home_render_run()`.
+- `on_duration_up`: same with +1 clamped to `UI_DURATION_MAX_H`.
+- `on_run_commit(void *user)`: the shared hold button callback (§2.7), same rule
+  as `/control`'s `on_run_commit()`: stop sets `g.experimentRunning = false`
+  and `g.experimentStartMs = 0`; start sets `g.experimentRunning = true`,
+  `g.experimentStartMs = millis()`, `g.expNum++`; both mirror to the link and
+  log. Finish with `ui_update_bell()` and `home_render_run()`. The rule lives in
+  one shared helper (`ui_experiment_toggle()` in `ui_shell.cpp`) so home and
+  `/control` cannot drift apart.
+- Show order: card A children, card B children, progress children, control
+  buttons, then `home_render_status()` and `home_render_run()`. No navigation
+  widgets and no title: the top bar owns both (§3.8.1).
+- Arc setup: `lv_arc_create(parent)`, `lv_arc_set_range(s_arc, 0, 100)`,
+  `lv_arc_set_value(s_arc, 0)`. `lv_obj_remove_flag(s_arc, LV_OBJ_FLAG_CLICKABLE)`.
+  Remove the knob part style so the arc reads as an indicator. No slider.
+
+##### 3.2.1.5 Polling
+
+Add `screen_home_poll()` to the `loop()` in `main.cpp` next to
+`screen_control_poll()`. Body:
+```
+if (s_arc == nullptr) return;
+uint32_t now = millis();
+if (now - s_lastPollMs < 1000) return;
+s_lastPollMs = now;
+home_render_status();
+home_render_run();
+```
+`home_render_run()` recomputes progress from `millis()`, so the arc advances
+once per second without a full route rebuild.
+
+##### 3.2.1.6 Integration with other screens
+
+- `/control` loses its `HoldCtx` run switch (§3.6.1) and uses the same hold
+  button, so the run toggle lives in one helper: `ui_experiment_toggle()` in
+  `ui_shell.cpp` flips `g.experimentRunning`, sets or clears
+  `g.experimentStartMs`, increments `g.expNum` on a start, mirrors the link, and
+  logs. Both screens call it, so the two cannot drift apart.
+- `on_push_timer()` rebuilds the route every 5 min; static start time survives
+  the rebuild, so the arc does not reset on a push.
+- The status bar is reworked separately (§3.8.1); it owns navigation, the
+  warning bell, and the clock.
+
+##### 3.2.1.7 Final text inventory (uses `LV_SYMBOL_*`, no fake labels)
+
+Card A: `CHAMBER TEMP`, `%.1f C`, `Target setpoint`,
+  `LV_SYMBOL_DOWN`, `LV_SYMBOL_UP`, `0.1 C steps`,
+  `Stirrer ` + (`ON` -> `LV_SYMBOL_OK " ON"`, `OFF` -> `LV_SYMBOL_CLOSE " OFF"`).
+Card B: `BOTTLES ONLINE`, `%d / %d`, `%d / %d nodes online`,
+  `Experiment #%d`,
+  running `LV_SYMBOL_PLAY " Running"` / idle `LV_SYMBOL_STOP " Idle"`,
+  invalid `LV_SYMBOL_WARNING " %d invalid"` or `LV_SYMBOL_OK " All valid"`.
+Progress: `Experiment runtime`,
+  running `%.1f / %d h` then `%d%%`,
+  idle `Idle` then `%d h set`.
+Controls: `LV_SYMBOL_DOWN "1h"`, `LV_SYMBOL_UP "1h"`,
+  run hold button glyph `LV_SYMBOL_PLAY` / `LV_SYMBOL_STOP`.
+
+##### 3.2.1.8 Out of scope for this screen (stays on /control)
+
+Setpoint range notes, POST enable, stirrer toggle, duration spinbox, exp
+number, DB warn, and INT test pin remain on `/control`. Home mirrors only
+start/stop and duration ±1 h.
+
+Removed from home in this redesign: the `Home (fake data)` header, the
+`Run %dh | nodes online | push every 5 min` summary line, the three nav
+buttons (moved to the top bar), the `Chamber / Setpoint / Stirrer` text line
+(replaced by card A), the USB serial tip, the session note, and every `(fake)`
+literal.
 
 ### 3.3 Route `/data` — node picker
 
@@ -208,8 +464,67 @@ As built:
 
 | Problem | Redesign idea | Priority |
 |---|---|---|
-|  |  |  |
-|  |  |  |
+| Header carries the route and a `(fake)` tag | Header becomes `NODES` | High |
+| Each node button reads `Node N` plus an `ONLINE` / `NOT CONNECTED` sentence | Show the number only, in a larger font | High |
+| Offline state needs a second line to be readable | Reuse the greyed fill that already exists; no status word | Medium |
+| `< Home` is a wide text button | Icon-only button with `LV_SYMBOL_NEW_LINE` | Medium |
+| Route is not visible in the shell | Data tab stays highlighted across routes 1, 2 and 3 (§3.8.1) | High |
+
+#### 3.3.1 Redesign plan — `/data` node picker
+
+Decision: the picker is a 3×2 grid of numbered tiles under a `NODES` header.
+Nothing else.
+
+##### 3.3.1.1 Removed content
+
+- The `/data nodes (fake)` header text.
+- The `Node %d` prefix and the `ONLINE` / `NOT CONNECTED` lines inside every
+  button.
+- The `< Home` label (the back button becomes an icon, see below).
+
+##### 3.3.1.2 Layout (content coordinates, panel 800x436)
+
+| Widget | x | y | w | h | Content | Notes |
+|---|---|---|---|---|---|---|
+| `s_nodesTitle` | 16 | 8 | 400 | 28 | `NODES` | font 20, `UI_COL_TEXT` |
+| `s_nodeBtn[0..5]` | 68, 300, 532 | 56, 216 | 200 | 140 | `%d` (node index) | `ui_mk_button()`; row = `c / 3`, col = `c % 3` |
+| `s_backBtn` | 364 | 372 | 72 | 48 | `LV_SYMBOL_NEW_LINE` | icon only |
+
+Grid maths: 3·200 + 2·32 = 664, so the block starts at (800 − 664) / 2 = 68.
+Rows are 140 tall with a 20 px gap: y = 56 and y = 216, ending at 356. The back
+button sits centred at y = 372, 48 tall, so the block ends at 420.
+
+Node tile styling:
+
+- Fill `UI_COL_CARD` when `g.cluster[c].online`, `UI_COL_CARD_OFF` when not.
+  This grey fill is the only offline signal.
+- Single label, child index 0, restyled after `ui_mk_button()`:
+  `lv_obj_set_style_text_font(label, &lv_font_montserrat_28, LV_PART_MAIN)`
+  and `lv_obj_set_style_text_color(label, lv_color_hex(g.cluster[c].online ?
+  UI_COL_TEXT : UI_COL_DIM), LV_PART_MAIN)`. `ui_mk_button()` centres the
+  child, so no positioning is needed.
+- `LV_FONT_MONTSERRAT_28` is already enabled in `lv_conf.h`.
+
+##### 3.3.1.3 Back button
+
+Every back button inside `/data` (this route, the cluster route, and the
+chamber-detail route in §3.5) becomes the same widget: 72×48 at x = 364,
+`LV_SYMBOL_NEW_LINE` and nothing else, no text label. Callbacks are unchanged:
+picker back goes to `ui_show_home()`, cluster back goes to
+`ui_show_data_picker()`, chamber-detail back goes to `ui_show_cluster(c)`.
+
+##### 3.3.1.4 Behaviour kept
+
+- Node order is still the array index, `0` to `5`. Flagged in §3.3.1.5.
+- An offline node is still tappable and still opens the cluster view.
+- `lv_obj_add_event_cb()` still carries the cluster index as user data.
+
+##### 3.3.1.5 Open item
+
+Nodes are numbered from 0, matching the array index and the `N%d/C%d` strings in
+the bell modal. If the dashboard numbers nodes 1 to 6, the picker should print
+`c + 1` while the rest of the code keeps the index. Not decided; worth checking
+against the database schema before implementation.
 
 ### 3.4 Route `/data/X` — cluster
 
@@ -228,8 +543,61 @@ As built:
 
 | Problem | Redesign idea | Priority |
 |---|---|---|
-|  |  |  |
-|  |  |  |
+| Header carries the route and a `(fake)` tag | Header becomes `NODE %d` | High |
+| Offline banner explains a condition the tiles can show themselves | Remove the banner; grey the tiles instead | Medium |
+| Each tile reads `Chamber N` plus the temperature inline | Big number, temperature as small flavour text below it | High |
+| Temperature line is the only summary; no unit is visible | Flavour text is the formatted value, `%.1f C` | Medium |
+| `< Nodes` is a wide text button | Icon-only button with `LV_SYMBOL_NEW_LINE` (§3.3.1.3) | Medium |
+
+#### 3.4.1 Redesign plan — `/data/X` cluster
+
+Decision: the cluster route is a 2×2 grid of numbered chamber tiles under a
+`NODE %d` header, each tile carrying its temperature as a small line below the
+number.
+
+##### 3.4.1.1 Removed content
+
+- The `/data/%d chambers (fake)` header text.
+- The `node offline (fake NULL fields)` banner row at (16, 40).
+- The `Chamber %d` prefix and the `node offline` sentence inside the tiles.
+- The `< Nodes` label (the back button becomes an icon).
+
+##### 3.4.1.2 Layout (content coordinates, panel 800x436)
+
+| Widget | x | y | w | h | Content | Notes |
+|---|---|---|---|---|---|---|
+| `s_nodeTitle` | 16 | 8 | 400 | 28 | `NODE %d` (cluster index) | font 20, `UI_COL_TEXT` |
+| `s_chamberBtn[0..3]` | 60, 420 | 56, 216 | 320 | 140 | number + flavour | `ui_mk_button()`; row = `b / 2`, col = `b % 2` |
+| `s_backBtn` | 364 | 372 | 72 | 48 | `LV_SYMBOL_NEW_LINE` | icon only, same as §3.3.1.3 |
+
+Grid maths: 2·320 + 40 = 680, so the block starts at (800 − 680) / 2 = 60, the
+columns are at x = 60 and x = 420, the rows at y = 56 and y = 216 (140 tall,
+20 px gap), ending at 356.
+
+##### 3.4.1.3 Tile contents
+
+`ui_mk_button()` centres one child label, so a second label is added and
+positioned with alignment instead of coordinates:
+
+- `s_chamberNum[b]`: `lv_label_create(btn)`, text `%d` (chamber index),
+  `lv_obj_align(num, LV_ALIGN_TOP_MID, 0, 22)`, font `lv_font_montserrat_28`,
+  colour `UI_COL_TEXT` (or `UI_COL_DIM` when the node is offline),
+  `lv_obj_set_width(num, 300)` with centred text.
+- `s_chamberTemp[b]`: `lv_label_create(btn)`, `lv_obj_align(temp,
+  LV_ALIGN_BOTTOM_MID, 0, -26)`, font `lv_font_montserrat_14`, colour
+  `UI_COL_DIM`, `lv_obj_set_width(temp, 300)` with centred text.
+- Temperature text: online `%.1f C` from `fake_sensor_text(c, b, S_TEMP, ...)`,
+  for example `37.4 C`. Offline node: `--`.
+- Tile fill: `UI_COL_CARD` when `g.cluster[c].online`, `UI_COL_CARD_OFF` when
+  not, the same rule the node picker uses.
+
+##### 3.4.1.4 Behaviour kept
+
+- Tapping a tile still opens the chamber detail with `(c << 8) | b` as user
+  data.
+- The back button still goes to the picker.
+- Only the temperature is summarised; the other four sensors still appear only
+  in the chamber detail (§3.5), which is unchanged.
 
 ### 3.5 Route `/data/X/bottle_Y` — chamber detail
 
@@ -294,8 +662,160 @@ As built, top to bottom:
 
 | Problem | Redesign idea | Priority |
 |---|---|---|
-|  |  |  |
-|  |  |  |
+| `< Home` button and the `/control` header duplicate the top bar | Remove both | High |
+| Setpoint hint text and the "each step logs" note add noise | Remove both; the stepper stands alone, centred | Medium |
+| Hold-to-confirm switches do not work reliably (switch state, bar, timer) | Replace with the shared round hold button (§2.7) | High |
+| Hold is 500 ms, long enough to trigger by accident | Raise to 2000 ms | High |
+| POST enable is on the panel and does nothing useful | Remove it entirely | High |
+| Run experiment is a switch labelled "hold 500ms" | Make it a round hold button that starts and stops, same widget as the stirrer | High |
+| Duration and experiment number use spinboxes styled with literals | Restyle as the same stepper row as the setpoint, with the description below the label | Medium |
+| `+` / `-` glyphs are typographic, thin, easy to miss | Use `LV_SYMBOL_UP` / `LV_SYMBOL_DOWN` everywhere | Medium |
+| INT test row overflows the container by 24 px | Move it into the free left column; keep the button and behaviour unchanged | Medium |
+
+#### 3.6.1 Redesign plan — `/control`
+
+Decision: `/control` becomes a vertical console. Header and back button go
+away, the setpoint stepper is centred at the top, the stirrer and the
+experiment run toggle become two round hold buttons stacked in the middle with
+their descriptions underneath, and duration plus experiment number sit side by
+side at the bottom in the same stepper style as the setpoint. The INT test
+stays, parked in the free left column.
+
+##### 3.6.1.1 Removed content
+
+- `< Home` button (top bar owns navigation, §3.8.1).
+- `/control (cmds -> WT32, fake)` header.
+- `Temp setpoint 35.0-40.0C, 0.1 steps:` label.
+- `each step logs [FAKE->WT32] SETPOINT` note.
+- POST enable row, entirely.
+- `HoldCtx`, `hold_attach()`, `on_hold_event()`, `hold_progress()`,
+  `hold_reset()` and the three `lv_switch` + `lv_bar` pairs in
+  `screen_control.cpp`, replaced by the shared widget in §2.7.
+- `mk_spin()` and both `lv_spinbox` instances, replaced by stepper rows.
+
+##### 3.6.1.2 Layout (content coordinates, panel 800x436)
+
+Setpoint row, group width 252, centred (left 274), 64×52 buttons:
+
+| Widget | x | y | w | h | Label | Notes |
+|---|---|---|---|---|---|---|
+| `s_btnTempDown` | 274 | 16 | 64 | 52 | `LV_SYMBOL_DOWN` | `UI_COL_CARD`, centred glyph `UI_COL_ACCENT` |
+| `s_setpoint` | 350 | 32 | 100 | 28 | `%.1f C` from `g.tempSetpointC` | font 20, `UI_COL_TEXT`, centred text |
+| `s_btnTempUp` | 462 | 16 | 64 | 52 | `LV_SYMBOL_UP` | `UI_COL_CARD` |
+
+Stirrer hold button and its description:
+
+| Widget | x | y | w | h | Label | Notes |
+|---|---|---|---|---|---|---|
+| `s_btnStirrer` | 352 | 76 | 96 | 96 | `LV_SYMBOL_POWER` | §2.7, state = `g.stirrerOn`, ring spans 346..454 |
+| stirrer desc | 200 | 182 | 400 | 16 | `Hold 2s to turn the stirrer on or off` | font 14, `UI_COL_DIM`, centred |
+
+Run hold button and its description:
+
+| Widget | x | y | w | h | Label | Notes |
+|---|---|---|---|---|---|---|
+| `s_btnRun` | 352 | 206 | 96 | 96 | `LV_SYMBOL_PLAY` idle, `LV_SYMBOL_STOP` running | §2.7, state = `g.experimentRunning` |
+| run desc | 200 | 312 | 400 | 16 | `Hold 2s to start or stop the experiment` | font 14, `UI_COL_DIM`, centred |
+
+Duration block, centred on x = 200:
+
+| Widget | x | y | w | h | Label | Notes |
+|---|---|---|---|---|---|---|
+| label | 100 | 340 | 200 | 18 | `Duration` | font 14, `UI_COL_TEXT`, centred |
+| `s_durDesc` | 100 | 358 | 200 | 16 | `hours 1-99` | font 14, `UI_COL_DIM`, centred |
+| `s_btnDurDown` | 116 | 376 | 48 | 40 | `LV_SYMBOL_DOWN` | `UI_COL_CARD` |
+| `s_durValue` | 172 | 384 | 56 | 24 | `%d` from `g.durationH` | font 20, centred |
+| `s_btnDurUp` | 236 | 376 | 48 | 40 | `LV_SYMBOL_UP` | `UI_COL_CARD` |
+
+Experiment number block, centred on x = 600:
+
+| Widget | x | y | w | h | Label | Notes |
+|---|---|---|---|---|---|---|
+| label | 500 | 340 | 200 | 18 | `Experiment number` | font 14, `UI_COL_TEXT`, centred |
+| `s_expDesc` | 500 | 358 | 200 | 16 | DB status, see §3.6.1.5 | font 14, centred, colour `UI_COL_OK` / `UI_COL_WARN` / `UI_COL_DIM` |
+| `s_btnExpDown` | 516 | 376 | 48 | 40 | `LV_SYMBOL_DOWN` | `UI_COL_CARD` |
+| `s_expValue` | 572 | 384 | 56 | 24 | `%d` from `g.expNum` | font 20, centred |
+| `s_btnExpUp` | 636 | 376 | 48 | 40 | `LV_SYMBOL_UP` | `UI_COL_CARD` |
+
+INT test, in the free left column beside the hold buttons:
+
+| Widget | x | y | w | h | Label | Notes |
+|---|---|---|---|---|---|---|
+| label | 16 | 96 | 180 | 32 | `INT test (IO11 -> WT32 IO14)` | font 14, wraps to two lines |
+| `s_intBtn` | 16 | 136 | 160 | 42 | `PULSE INT` | `UI_COL_CARD`, unchanged behaviour |
+| `s_intHint` | 16 | 184 | 180 | 32 | `asked WT32 to poll now` | font 14, `UI_COL_DIM`, wraps |
+
+The right column beside the hold buttons (x 600..790, y 76..330) stays empty in
+this pass.
+
+##### 3.6.1.3 Functions
+
+Header: `screen_control.h` keeps `screen_control_show()` and
+`screen_control_poll()`, and drops nothing else; `HoldCtx` was file-local.
+
+`screen_control.cpp` statics: `s_btnTempDown`, `s_btnTempUp`, `s_setpoint`,
+`s_btnStirrer`, `s_btnRun`, `s_btnDurDown`, `s_btnDurUp`, `s_durValue`,
+`s_btnExpDown`, `s_btnExpUp`, `s_expValue`, `s_expDesc`, `s_intBtn`,
+`s_intHint`.
+
+Callbacks:
+
+- `on_temp_down`: `g.tempSetpointC -= UI_TEMP_STEP_C`, clamp to
+  `UI_TEMP_MIN_C`, update `s_setpoint`, log `[FAKE->WT32] SETPOINT %.1f`.
+  (Same behaviour as the old minus button, new glyph.)
+- `on_temp_up`: increments, clamps to `UI_TEMP_MAX_C`, same handling.
+- `on_stirrer_commit(void *user)`: `g.stirrerOn = !g.stirrerOn`, log
+  `[FAKE->WT32] STIRRER %s`, call `ui_hold_button_set_state(s_btnStirrer,
+  g.stirrerOn)`.
+- `on_run_commit(void *user)`: calls the shared `ui_experiment_toggle()` in
+  `ui_shell.cpp`, which flips `g.experimentRunning`, sets or clears
+  `g.experimentStartMs = millis()`, increments `g.expNum` on a start edge (same
+  rule as the old `on_run_toggled()`), mirrors `link_modbus_set_exp_state()`,
+  and logs `[FAKE->WT32] RUN ON/OFF`. Then set the button with
+  `ui_hold_button_set_symbol()` (PLAY or STOP) and
+  `ui_hold_button_set_state()`, and call `ui_update_bell()`. The home run
+  button calls the same helper.
+- `on_dur_down` / `on_dur_up`: `g.durationH` clamped to
+  `UI_DURATION_MIN_H .. UI_DURATION_MAX_H`, update `s_durValue`, mirror to the
+  link, `ui_update_bell()`.
+- `on_exp_down` / `on_exp_up`: `g.expNum` clamped to
+  `UI_EXP_NUM_MIN .. UI_EXP_NUM_MAX`, update `s_expValue`, mirror to the link,
+  `ui_update_bell()`, `db_refresh_warn()`.
+- `on_int_test`: unchanged. Calls `link_notify_pulse()`, prints the same
+  serial line, writes `s_intHint`.
+- `db_refresh_warn()`: same behaviour as today, but it writes into
+  `s_expDesc` instead of a wide label, and the auto-suggest latch
+  `s_dbSuggested` is reset in `screen_control_show()` on every open.
+- `screen_control_show()` order: setpoint row, stirrer hold button + desc, run
+  hold button + desc, duration block, experiment block, INT test, then
+  `db_refresh_warn()` and the two `ui_hold_button_set_*()` calls so the buttons
+  start out matching `g`.
+
+##### 3.6.1.4 Constants
+
+- `UI_HOLD_TO_CONFIRM_MS` 500 -> 2000 in `ui_config.h`. Nothing else uses the
+  old value once `HoldCtx` is deleted.
+- Duration still steps by whole hours, `UI_DURATION_MIN_H` 1 to
+  `UI_DURATION_MAX_H` 99.
+- Experiment number still `UI_EXP_NUM_MIN` 0 to `UI_EXP_NUM_MAX` 9999.
+
+##### 3.6.1.5 DB status text (shortened to fit 200 px at font 14)
+
+| State | Text | Colour |
+|---|---|---|
+| no sync yet | `DB: waiting for sync` | `UI_COL_DIM` |
+| current number is the one to use | `DB latest %d, use %d` | `UI_COL_OK` |
+| number already in the DB | `exp %d exists, use %d` | `UI_COL_WARN` |
+
+The auto-suggest still raises `g.expNum` to `latest + 1` once per screen open,
+which normally makes the mismatch row unreachable after the first push.
+
+##### 3.6.1.6 Run button colours
+
+Decided: the run button follows the stirrer rule. Red (`UI_COL_ALARM`) while
+the experiment is stopped, green (`UI_COL_OK`) while it runs, on both `/control`
+and home. The glyph still switches `LV_SYMBOL_PLAY` / `LV_SYMBOL_STOP` so the
+state does not depend on colour alone.
 
 ### 3.7 Route `/info`
 
@@ -327,8 +847,189 @@ As built:
 
 | Problem | Redesign idea | Priority |
 |---|---|---|
-|  |  |  |
-|  |  |  |
+| Header and `< Home` duplicate the top bar | Remove both | High |
+| Rows sit at hand-picked y values, 20 px apart in places, so wrapped text collides | Lay the screen out with flex so every item is its own widget with one uniform gap | High |
+| Storage limit is a sentence, no number | Replace with an arc gauge: ring fill = percent, centre = percent, colour green to red | High |
+| IP address is a text row with flavour text | Square tile, large centred value, caption `IP Address` | High |
+| HTTP reply, firmware version, DB experiment are three different row styles | Reuse the same square tile | High |
+| HTTP reply text is a raw log line | Reduce it to a network state: `Blocked`, `Offline`, `Online` | Medium |
+| Heap and PSRAM share one sentence | Two arc gauges, fill = used percent, centre = free bytes | Medium |
+| Wi-Fi QR and its button take the right third of the screen | Remove them; `/setup` keeps the QR | High |
+| `Fetched at <ms>` stamp only changes on navigation | Remove it; values refresh in place | Medium |
+| Values are painted once when the route is built | `screen_info_poll()` repaints the tiles every second from live getters | Medium |
+
+#### 3.7.1 Redesign plan — `/info`
+
+Decision: `/info` becomes a uniform grid of seven tiles. Four square value
+tiles on the first row, three arc gauges on the second row. One gap everywhere
+(16 px), one caption style, one value style. Nothing else on the screen.
+
+##### 3.7.1.1 Removed content
+
+- `/info (fresh on open)` header.
+- `< Home` button (top bar owns navigation, §3.8.1).
+- Wi-Fi QR canvas, its step label, and the `Start phone login` / `Stop` button.
+  With them: `info_qr_refresh()`, `qr_show()`, `step_show()`, `on_ap_toggle()`,
+  the `s_qr` / `s_qrShown` / `s_step` / `s_stepShown` / `s_apBtn` / `s_apBtnShown`
+  statics, and the `ui_is_info()` guard in `screen_setup_poll()` that kept the
+  SoftAP alive while this route was up. `LV_USE_QRCODE` stays 1 for `/setup`.
+- `Ping 1.1.1.1` row and `link_modbus_get_ping_ms()`.
+- `Latest HTTP reply: <raw line>` row (replaced by the network-state tile).
+- `Storage limits: <sentence>` row and `g.storageNote` as a UI source.
+- `Fetched at <ms> (fake stamp)` row.
+- The `NTP OK` / `NTP no sync` suffix on the DB row; NTP state has no tile.
+
+##### 3.7.1.2 Layout
+
+The shell content container stays untouched (the router still clears it). The
+screen creates one child container with the flex layout and puts seven tiles in
+it, so the spacing is decided by the layout, not by hand-picked coordinates.
+
+Flex container: full 800×436, `LV_FLEX_FLOW_ROW_WRAP`,
+`lv_obj_set_style_pad_all(cont, 16, 0)`, `lv_obj_set_style_pad_row(cont, 16, 0)`,
+`lv_obj_set_style_pad_column(cont, 16, 0)`, `lv_obj_set_style_border_width(cont, 0, 0)`,
+`lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, 0)`, not scrollable.
+
+Tiles: 180×180 each. Four fit per row: 4·180 + 3·16 = 768, leaving 16 px on each
+side inside the 16 px padding. Two rows: 2·180 + 16 = 376, leaving 30 px above
+and below.
+
+| Row | Order | Tile | Caption | Value |
+|---|---|---|---|---|
+| 1 | 1 | `s_tileIp` | `IP Address` | `link_modbus_get_ip()` string, `--` when empty |
+| 1 | 2 | `s_tileNet` | `Network` | `Online` / `Offline` / `Blocked` |
+| 1 | 3 | `s_tileFw` | `Firmware` | `FW_VERSION` |
+| 1 | 4 | `s_tileDb` | `DB experiment` | `link_modbus_get_db_latest()` or `--` |
+| 2 | 1 | `s_gaugeStorage` | `Storage` | percent filled, centre text |
+| 2 | 2 | `s_gaugeHeap` | `Heap free` | used percent, centre text `123 KB` |
+| 2 | 3 | `s_gaugePsram` | `PSRAM free` | used percent, centre text `4.1 MB` |
+
+Value tile internals (180×180 cell):
+
+- Cell: `ui_mk_card()` sized 180×180, then `lv_obj_set_flex_grow(cell, 0)`.
+- Caption: `lv_label` at (8, 140), width 164, font 14, `UI_COL_DIM`, centred
+  text (`lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0)`).
+- Value: `lv_label` centred with `lv_obj_center()` and
+  `lv_obj_set_width(value, 164)`, font `LV_FONT_MONTSERRAT_28_COMPRESSED`,
+  `LV_LABEL_LONG_MODE_WRAP`, centred text, colour set per value.
+
+Gauge tile internals (180×180 cell):
+
+- Cell: `ui_mk_card()` sized 180×180.
+- Arc: `lv_arc` at (24, 8), 132×132, range 0..100, `lv_obj_remove_style(arc,
+  NULL, LV_PART_KNOB)`, `lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE)`,
+  background arc `UI_COL_BAR` at 40% opacity, indicator arc coloured per
+  §3.7.1.3, 10 px line width.
+- Centre text: `lv_label` at (44, 62), width 92, font 20, centred, two lines
+  allowed (`%d%%` and the short byte string for the memory gauges).
+- Caption: same as the value tile, at (8, 140).
+
+##### 3.7.1.3 Gauge colour
+
+Green at 0 percent, red at 100 percent, linear in between:
+
+```
+lv_color_t lo = lv_color_hex(UI_COL_OK);      // 0x1E8E4E
+lv_color_t hi = lv_color_hex(UI_COL_ALARM);   // 0xC0392B
+lv_color_t c  = lv_color_mix(lo, hi, pct);    // pct is 0..100, mix wants 0..255
+```
+
+`lv_color_mix(c1, c2, mix)` is the v9 helper; confirm the exact signature in
+the installed `lvgl/src/misc/lv_color.h` before writing, and scale `pct` to
+0..255 (`pct * 255 / 100`) if it takes a `uint32_t` ratio.
+
+Applied to `LV_PART_INDICATOR` of the arc with `lv_obj_set_style_arc_color()`.
+
+##### 3.7.1.4 Gauge fill rules
+
+| Gauge | Fill percent | Centre text | Notes |
+|---|---|---|---|
+| Storage | 100 while no real value exists | `100%` | decided: unknown reads as full, so it shows red until the WT32 sends a real limit. `info_storage_pct()` is the single place to change when that data arrives. |
+| Heap free | used percent | free bytes, e.g. `132 KB` | free = `ESP.getFreeHeap()`, total = `ESP.getHeapSize()` if the core exposes it, otherwise `heap_caps_get_total_size(MALLOC_CAP_INTERNAL)` |
+| PSRAM free | used percent | free bytes, e.g. `4.1 MB` | free = `ESP.getFreePsram()`, total = `ESP.getPsramSize()` (already used by the current row, which reports the total, not the free) |
+
+The as-built row reads `ESP.getPsramSize()` and labels it `PSRAM`, so it shows
+the total size today. That is the bug this replaces.
+
+##### 3.7.1.5 Network state tile
+
+Precedence, first match wins:
+
+| Condition | Text | Colour |
+|---|---|---|
+| `!g.loggedIn` | `Blocked` | `UI_COL_WARN` |
+| `link_modbus_get_ip()` is empty | `Offline` | `UI_COL_ALARM` |
+| otherwise | `Online` | `UI_COL_OK` |
+
+The raw `g.lastHttp` string stops being displayed. `link_modbus_get_ping_ms()`
+is no longer called from this route.
+
+##### 3.7.1.6 Font change
+
+`lv_conf.h` currently sets `LV_FONT_MONTSERRAT_28_COMPRESSED 0`. Change it to
+`1` and use `&lv_font_montserrat_28_compressed` for the tile values. Per the
+LVGL built-in font docs this is Montserrat at 3 bpp: it is the largest built-in
+font and the cheapest in flash, but it is still proportional, so the digits are
+not monospaced. `FW_VERSION` currently reads `v9.6-fake-0.2.0` (16 characters)
+and wraps inside the 164 px value area; drop the `-fake-` segment to
+`v9.6-0.2.0` so it fits on one line.
+
+##### 3.7.1.7 Functions
+
+Header: `screen_info_show(lv_obj_t *parent)` unchanged,
+`screen_info_poll()` reworked.
+
+New statics: `s_tileIp`, `s_tileNet`, `s_tileFw`, `s_tileDb`,
+`s_gaugeStorage`, `s_gaugeHeap`, `s_gaugePsram`, plus one label pointer per tile
+for value / centre / caption, and `static uint32_t s_lastPollMs = 0`.
+
+New helpers, all file-local:
+
+- `static lv_obj_t *mk_tile(lv_obj_t *parent, const char *caption, lv_obj_t **valueOut)`:
+  makes the 180×180 card, the caption, and the centred value label, returns the
+  card.
+- `static lv_obj_t *mk_gauge(lv_obj_t *parent, const char *caption, lv_obj_t **centreOut)`:
+  makes the card, the arc, the centre label, the caption, returns the card.
+- `static void gauge_set(lv_obj_t *arc, lv_obj_t *centre, int pct, const char *centreText)`:
+  `lv_arc_set_value`, `lv_obj_set_style_arc_color(... LV_PART_INDICATOR)` from
+  the mix in §3.7.1.3, `lv_label_set_text(centre, centreText)`.
+- `static int pct_used(uint32_t freeBytes, uint32_t totalBytes)`:
+  `100 - freeBytes * 100 / totalBytes`, guarded against `totalBytes == 0`.
+- `static void fmt_bytes(char *out, size_t n, uint32_t bytes)`: `0 B`,
+  `132 KB` under 1 MB, `%.1f MB` above.
+- `static int info_storage_pct()`: returns 100 today; the future WT32 value
+  goes here.
+- `static void info_render()`: writes all seven tiles from live getters.
+
+`screen_info_poll()`:
+
+```
+if (s_gaugeStorage == nullptr) return;
+uint32_t now = millis();
+if (now - s_lastPollMs < 1000) return;
+s_lastPollMs = now;
+info_render();
+```
+
+`screen_info_show()`: create the flex container, build the seven tiles in the
+order of the layout table, then call `info_render()` once.
+
+##### 3.7.1.8 Freshness
+
+The tiles read their getters on every poll, so nothing depends on a rebuild:
+the IP updates as soon as `link_modbus` has it, the DB number as soon as the
+master syncs, and the memory gauges every second. That is the limit of the
+current architecture: values that only arrive on the 5-minute push (chamber
+readings, storage limit) are as fresh as the push, and no new transport is
+introduced here.
+
+##### 3.7.1.9 Interaction notes
+
+- No tile is clickable; the screen is read-only.
+- The screen no longer raises the SoftAP, so `/info` becomes a safe place to
+  leave the device while a run is going.
+- Values that do not fit are wrapped inside their tile, not clipped, because
+  `LV_LABEL_LONG_MODE_WRAP` is set.
 
 ### 3.8 Persistent status bar
 
@@ -352,8 +1053,105 @@ As built:
 
 | Problem | Redesign idea | Priority |
 |---|---|---|
-|  |  |  |
-|  |  |  |
+| No way back to `/home` except by drilling up | Add a permanent Home tab at the far left | High |
+| Navigation buttons live inside each screen and duplicate per screen | Move all four tabs (Home, Data, Control, Info) into the top bar | High |
+| Active location is only visible on `/control` | Highlight the tab matching the current route | High |
+| `NET OK(fake)` is a fixed string that never changes | Remove it | Low |
+| `POST ON` / `POST OFF` is not actionable from the bar | Remove it; POST stays on `/control` | Low |
+| `exp #%d %dh` duplicates home card B | Remove it from the bar | Low |
+| Bell shows a count (`ALERT(%d)`) that is also in the modal body | Show a glyph only: `LV_SYMBOL_BELL`, switching to `LV_SYMBOL_WARNING` on alerts | High |
+| Bell fill (`UI_COL_DIM` / `UI_COL_OK` / `UI_COL_ALARM`) carries the meaning | Bell is white by default, red when alerts exist | Medium |
+| No clock anywhere | Put a centred clock in the bar | Medium |
+| x = 480–690 is empty in every state | Fill with the clock and the Info tab | Medium |
+
+#### 3.8.1 Redesign plan — top bar
+
+Decision: the bar becomes the navigation bar. It holds, from left to right:
+Home tab, Data tab, Control tab, a centred clock, then Info tab and the
+warning bell on the right. Nothing else.
+
+##### 3.8.1.1 Removed content
+
+`NET OK(fake)`, the POST label, and the `exp #%d %dh` label are deleted. The
+bar no longer carries data; POST stays on `/control`, the experiment number
+and duration live in home card B.
+
+##### 3.8.1.2 Layout (bar is 800×44, coordinates are bar-relative)
+
+| Widget | x | y | w | h | Label | Style |
+|---|---|---|---|---|---|---|
+| `s_tabHome` | 6 | 6 | 90 | 32 | `LV_SYMBOL_HOME` | tab style, see below |
+| `s_tabData` | 104 | 6 | 90 | 32 | `LV_SYMBOL_LIST` | tab style |
+| `s_tabControl` | 202 | 6 | 110 | 32 | `LV_SYMBOL_SETTINGS` | tab style |
+| `s_clock` | 300 | 10 | 200 | 24 | `--:--` (placeholder) | `UI_COL_TEXT`, font 20, centred text |
+| `s_tabInfo` | 560 | 6 | 100 | 32 | `LV_SYMBOL_FILE` | tab style |
+| `s_bellBtn` | 672 | 6 | 100 | 32 | `LV_SYMBOL_BELL` / `LV_SYMBOL_WARNING` | bell style |
+
+Tab style (this is the bordered look the current bell button already has, so
+`ui_mk_button()` is reused unchanged):
+
+- Fill `UI_COL_CARD` (white), 1 px `UI_COL_ACCENT` border, radius 8, centred
+  glyph in `UI_COL_ACCENT`.
+- Active tab: fill `UI_COL_ACCENT`, glyph in white. Active means the current
+  route: Home for route 0, Data for routes 1, 2 and 3 (the `/data` drill-down
+  keeps Data lit), Control for route 4, Info for route 5. Route 6 (`/setup`)
+  lights nothing.
+
+Bell style:
+
+- No alerts (`fake_null_count() == 0`): fill `UI_COL_CARD`, 1 px accent border,
+  glyph `LV_SYMBOL_BELL` in `UI_COL_ACCENT`.
+- Alerts present: fill `UI_COL_ALARM`, no border, glyph `LV_SYMBOL_WARNING` in
+  white. No count, no text.
+
+##### 3.8.1.3 Clock
+
+The display has no RTC and no route to the internet (it only runs a SoftAP),
+so no real time source exists today. The plan ships a placeholder: the label
+reads `--:--` and is set once at build. Two replacement paths, both documented
+here so the decision is not lost:
+
+- Uptime: format `millis()` as `HH:MM:SS`, refresh once per second from a new
+  `ui_shell_poll()` called in `loop()`. Label would read as uptime, not clock
+  time.
+- Wall clock: add a `TIME_S` holding register on the WT32 master (it already
+  reports NTP sync through `link_modbus_time_ok()`), read it over Modbus, and
+  format with `localtime()`. This needs a change on the WT32 firmware.
+
+Whichever path is chosen later only touches `ui_update_clock()`.
+
+##### 3.8.1.4 Functions in `ui_shell.cpp` / `ui_shell.h`
+
+- `build_status_bar()` (reworked): creates the four tab buttons, the clock
+  label, and the bell button; nothing else. The bar object keeps its current
+  800×44 `UI_COL_BAR` fill and `lv_obj_set_scrollable(bar, false)`.
+- `static void on_tab_clicked(lv_event_t *e)` (new): reads `intptr_t` user data
+  `0/1/2/3` -> `ui_show_home()` / `ui_show_data_picker()` / `ui_show_control()`
+  / `ui_show_info()`.
+- `static void set_tab_state(lv_obj_t *tab, lv_obj_t *label, bool active)` (new):
+  applies the active/inactive fills from §3.8.1.2.
+- `void ui_update_nav()` (new, public): maps `s_route` to the active tab and
+  calls `set_tab_state()` on all four. Called at the end of `render_current()`,
+  so every route change and every rebuild refreshes the highlight.
+- `void ui_update_bell()` (reworked): same trigger (`fake_null_count() == 0`),
+  but it sets only the glyph and the fill, no count and no `OK` text.
+- `void ui_update_clock()` (new, public): placeholder implementation sets
+  `--:--`; the real implementation later formats the chosen time source.
+- Statics: `s_tabHome`, `s_tabData`, `s_tabControl`, `s_tabInfo`,
+  `s_bellBtn`, `s_bellLabel`, `s_clock`. `s_postLabel` and `s_expLabel` are
+  deleted.
+- `on_bell_clicked()` is unchanged: it still opens the invalid-field modal.
+
+##### 3.8.1.5 Interaction notes
+
+- Tab buttons use `LV_EVENT_CLICKED`; they are plain buttons, no hold.
+- The bell and the tabs sit outside `s_content`, so `lv_obj_clean(s_content)`
+  on a route change never touches them.
+- The back buttons inside `/data` and `/info` stay as they are for now; once
+  the top bar carries all navigation, those rows become redundant and can be
+  removed in a later pass.
+- The 41 °C and 45 °C modals still cover the bar, since they are siblings of
+  `s_content` on the active screen.
 
 ### 3.9 Blocking modal primitive
 
@@ -579,4 +1377,4 @@ pio run -e display-v9
 ```
 
 ---
-Content generated by `opencode/space-bunny-free` in `opencode`.
+Content generated by `opencode/cat-jam-free` in `opencode`.

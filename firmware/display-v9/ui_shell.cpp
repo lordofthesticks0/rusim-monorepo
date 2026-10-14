@@ -201,6 +201,10 @@ bool ui_modal_visible() { return s_modal != nullptr; }
 
 static void render_current() {
   if (s_content == nullptr) return;
+  // Per-route teardown before lv_obj_clean() frees the widgets. Without this
+  // the /control statics (s_dbWarn, hold bars) dangle and the poll/timer
+  // callbacks spam "No screen found" on the deleted objects.
+  screen_control_hide();
   lv_obj_clean(s_content);
   switch (s_route) {
     case 1:
@@ -259,6 +263,7 @@ void ui_show_setup() {
   render_current();
 }
 bool ui_is_setup() { return s_route == 6; }
+bool ui_is_control() { return s_route == 4; }
 bool ui_is_info() { return s_route == 5; }
 
 void ui_refresh_current() {

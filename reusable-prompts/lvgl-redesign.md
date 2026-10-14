@@ -1,0 +1,1 @@
+Want you to read `docs/llm-generated/lvgl-redesign.md`. Don't actually change any code, this is basically a detailed plan file that we will do in one go later. Research how it'll be implemented later, and describe it in the docs, all the functions, all the layouts, all the text you want.
