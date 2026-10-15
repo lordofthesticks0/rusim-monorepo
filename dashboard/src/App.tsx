@@ -19,6 +19,11 @@ import {
   type ParameterName,
   type ParameterStats,
 } from "./data";
+import {
+  isMonitoringPollingEligible,
+  selectActiveExperiment,
+  selectMonitoringReadings,
+} from "./monitoring";
 import type { DeviceSession, Reading } from "./types/domain";
 import { formatExperimentId, isTestingExperiment } from "./types/domain";
 
@@ -114,30 +119,38 @@ function Dashboard({
     void loadData();
   }, [loadData]);
 
-  const experiments = useMemo(() => summarizeExperiments(readings), [readings]);
-  const liveExperiment = experiments.find((experiment) => !experiment.concluded);
+  // Freshness depends on the current clock, so recalculate on renders caused by
+  // refresh and error state changes instead of memoizing only by the rows array.
+  const experiments = summarizeExperiments(readings);
+  const liveExperiment = selectActiveExperiment(experiments);
+  const monitoringReadings = useMemo(
+    () => selectMonitoringReadings(readings, liveExperiment?.experiment_id ?? null),
+    [readings, liveExperiment?.experiment_id],
+  );
 
   // Which bottles reported at the newest sample, and which are missing from it.
   const presence = useMemo(
-    () => splitBottlesByPresence(readings, bottleCount),
-    [readings, bottleCount],
+    () => splitBottlesByPresence(monitoringReadings, bottleCount),
+    [monitoringReadings, bottleCount],
   );
   const selectedBottleIsDisconnected =
     presence.latestSample !== null && presence.disconnected.includes(selectedBottle);
 
-  // Poll only while some experiment still looks live. The interval is far longer
-  // than the staleness threshold, so each tick decides again from fresh data.
+  // Poll while Monitoring is open, including when no experiment is active, so
+  // a newly started experiment can be discovered without a page reload. The
+  // interval is far longer than the staleness threshold, so each tick decides
+  // again from fresh data.
   useEffect(() => {
-    if (view !== "monitoring" || pollSuspended || !liveExperiment) return;
+    if (!isMonitoringPollingEligible(view, pollSuspended)) return;
     const timer = window.setInterval(() => void loadData(), POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [view, pollSuspended, liveExperiment?.experiment_id, loadData]);
 
   const bottleReadings = useMemo(
-    () => readings
+    () => monitoringReadings
       .filter((reading) => reading.bottle_id === selectedBottle)
       .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp)),
-    [readings, selectedBottle],
+    [monitoringReadings, selectedBottle],
   );
   const latestReading = bottleReadings.at(-1);
   const latestReadingAt = latestReading
@@ -182,8 +195,13 @@ function Dashboard({
     </section>
 
     {view === "monitoring" ? <>
-      {error && <div className="notice">Unable to load readings. <span>{error}</span></div>}
-      {!loading && !error && readings.length === 0 && <div className="notice">No readings are available for this device.</div>}
+      {error && <div className="notice">Unable to refresh readings; showing the last loaded data. <span>{error}</span></div>}
+      {loading && <div className="notice">Loading readings...</div>}
+      {!loading && !liveExperiment ? <section className="panel monitoring-empty-state">
+        <p className="eyebrow">Monitoring</p>
+        <h2>Tidak ada eksperimen aktif</h2>
+        <p className="subtitle">Historical readings remain available in Experiment History.</p>
+      </section> : <>
 
       <section className="controls">
         <div className="control-copy"><span className="label">Showing</span><strong>Chamber {selectedBottle}</strong><span className="count">{bottleCount} chambers</span></div>
@@ -214,7 +232,7 @@ function Dashboard({
         {PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={latestReading ? getParameterValue(latestReading, name) : null} index={index} />)}
       </section>
 
-      {!loading && !error && bottleReadings.length === 0 && <div className="notice">
+      {!loading && !error && monitoringReadings.length === 0 && <div className="notice">
         No readings are available for this chamber{presence.latestSample ? "; it did not report at the latest sample" : ""}.
       </div>}
 
@@ -235,7 +253,8 @@ function Dashboard({
         </div>
       </section>
 
-      <footer><span>Data source: Supabase</span><span>-</span><span>Chamber readings across experiments</span></footer>
+      <footer><span>Data source: Supabase</span><span>-</span><span>Current experiment chamber readings</span></footer>
+      </>}
     </> : <ExperimentHistoryView experiments={experiments} loading={loading} error={error} sessionToken={sessionToken} />}
   </main>;
 }
