@@ -30,7 +30,7 @@
 #define UI_TEMP_STEP_C 0.1f
 
 // Locked interaction: binary toggles require hold-to-confirm.
-#define UI_HOLD_TO_CONFIRM_MS 500
+#define UI_HOLD_TO_CONFIRM_MS 2000
 
 // Screen sleep: backlight off after inactivity. NOTE: design notes say GPIO45,
 // but GPIO45 is R0 of the RGB panel bus in main.cpp, so this pass keeps the
@@ -45,7 +45,7 @@
 #define UI_OVERHEAT_WARN_C 41.0f
 #define UI_OVERHEAT_TRIP_C 45.0f
 
-#define FW_VERSION "v9.6-fake-0.2.0"
+#define FW_VERSION "v9.6-0.2.0"
 
 // Debug: general debug-build gate. Hardcoded default OFF; enable per-build
 // with -DIS_DEBUG=1 (e.g. extra build_flags). When on, /setup shows a

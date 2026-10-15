@@ -35,6 +35,7 @@ struct ClusterFake {
 struct AppState {
   bool loggedIn;  // portal auth succeeded; gates /control etc. before any run
   bool experimentRunning;
+  uint32_t experimentStartMs;  // 0 when not running (used by home progress arc)
   int expNum;
   int durationH;
   float tempSetpointC;

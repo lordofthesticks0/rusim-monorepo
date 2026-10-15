@@ -8,3 +8,4 @@
 - [FIRMWARE] Delegate GPIOs in the master ESP for control.
 - [SITE] Fix monitoring readings: Change it so only the latest experiment is shown on the monitoring tab.
 - [ALL] Decide and fixate on a single colour scheme
+- [FIRMWARE] Find the heap corruption behind the /info reboot (getHeapSize walk hangs; corrupt by end of setup). See docs/llm-generated/display-info-reboot.md.

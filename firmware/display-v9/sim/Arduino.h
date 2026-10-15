@@ -90,10 +90,17 @@ class SimSerial {
 
 extern SimSerial Serial;
 
-// Stub for ESP.* used by screen_info.cpp
+// Stub for ESP.* used by screen_info.cpp and serial_cmd.cpp (MEM).
+// Only O(1) counter APIs plus the boot-time total are stubbed. The total
+// reads 0 in sim, so the Mem gauge shows 0% there.
 struct SimESPClass {
   uint32_t getFreeHeap() { return 0; }
-  uint32_t getPsramSize() { return 0; }
+  uint32_t getHeapSize() { return 0; }
+  uint32_t getMinFreeHeap() { return 0; }
+  uint32_t getMaxAllocHeap() { return 0; }
+  uint32_t getFreePsram() { return 0; }
+  uint32_t getMinFreePsram() { return 0; }
+  uint32_t getMaxAllocPsram() { return 0; }
 };
 extern SimESPClass ESP;
 

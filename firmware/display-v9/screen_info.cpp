@@ -2,175 +2,191 @@
 
 #include "fake_data.h"
 #include "link_modbus.h"
-#include "provision_ap.h"
 #include "ui_config.h"
 #include "ui_shell.h"
 
-static void on_back(lv_event_t *e) {
-  (void)e;
-  ui_show_home();
+static lv_obj_t *s_tileIp = nullptr;
+static lv_obj_t *s_valIp = nullptr;
+static lv_obj_t *s_tileNet = nullptr;
+static lv_obj_t *s_valNet = nullptr;
+static lv_obj_t *s_tileFw = nullptr;
+static lv_obj_t *s_valFw = nullptr;
+static lv_obj_t *s_tileDb = nullptr;
+static lv_obj_t *s_valDb = nullptr;
+
+static lv_obj_t *s_gaugeStorage = nullptr;
+static lv_obj_t *s_ctrStorage = nullptr;
+static lv_obj_t *s_gaugeCpu = nullptr;
+static lv_obj_t *s_ctrCpu = nullptr;
+
+static uint32_t s_lastPollMs = 0;
+
+static lv_obj_t *mk_tile(lv_obj_t *parent, const char *caption, lv_obj_t **valueOut) {
+  lv_obj_t *card = ui_mk_card(parent, 0, 0, 180, 180);
+  *valueOut = lv_label_create(card);
+  lv_label_set_text(*valueOut, "");
+  lv_obj_set_width(*valueOut, 164);
+  lv_label_set_long_mode(*valueOut, LV_LABEL_LONG_MODE_WRAP);
+  lv_obj_set_style_text_align(*valueOut, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_set_style_text_font(*valueOut, &lv_font_montserrat_28_compressed, LV_PART_MAIN);
+  lv_obj_set_style_text_color(*valueOut, lv_color_hex(UI_COL_TEXT), LV_PART_MAIN);
+  lv_obj_align(*valueOut, LV_ALIGN_TOP_MID, 0, 34);
+
+  lv_obj_t *cap = ui_mk_label(card, caption, 8, 142, 164, UI_COL_DIM, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  (void)cap;
+  return card;
 }
 
-// --- network QR ---
-//
-// Same two-step flow as /setup (join code, then the credential-form URL), minus
-// the "phone connected" modal: this route is for reconnecting a phone after the
-// run has started, not for walking a first-time user through login. The SoftAP
-// is raised from here on demand, so screen_setup_poll() must not tear it down
-// while this route is up; see the guard there.
-static lv_obj_t *s_qr = nullptr;
-static lv_obj_t *s_step = nullptr;
-static lv_obj_t *s_apBtn = nullptr;
+static lv_obj_t *mk_gauge(lv_obj_t *parent, const char *caption, lv_obj_t **centreOut,
+                          lv_obj_t **arcOut) {
+  lv_obj_t *card = ui_mk_card(parent, 0, 0, 180, 180);
+  lv_obj_t *arc = lv_arc_create(card);
+  lv_obj_set_size(arc, 132, 132);
+  lv_obj_align(arc, LV_ALIGN_TOP_MID, 0, 10);
+  lv_arc_set_range(arc, 0, 100);
+  lv_arc_set_value(arc, 0);
+  lv_obj_remove_style(arc, nullptr, LV_PART_KNOB);
+  lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(arc, 10, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(arc, 10, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(arc, lv_color_hex(UI_COL_BAR), LV_PART_MAIN);
+  if (arcOut != nullptr) *arcOut = arc;
 
-// Payload currently painted, so the canvas is re-encoded only when it changes.
-static char s_qrShown[PROVISION_QR_MAX] = {0};
-// Step text currently in s_step, for the same reason.
-static char s_stepShown[64] = {0};
-// Button label currently set. String literals, so pointer identity is enough.
-static const char *s_apBtnShown = nullptr;
+  *centreOut = lv_label_create(card);
+  lv_label_set_text(*centreOut, "");
+  lv_obj_set_width(*centreOut, 92);
+  lv_label_set_long_mode(*centreOut, LV_LABEL_LONG_MODE_WRAP);
+  lv_obj_set_style_text_align(*centreOut, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_set_style_text_font(*centreOut, &lv_font_montserrat_20, LV_PART_MAIN);
+  lv_obj_set_style_text_color(*centreOut, lv_color_hex(UI_COL_TEXT), LV_PART_MAIN);
+  lv_obj_align(*centreOut, LV_ALIGN_TOP_MID, 0, 58);
 
-static void step_show(const char *t) {
-  if (s_step == nullptr || strcmp(s_stepShown, t) == 0) return;
-  lv_label_set_text(s_step, t);
-  strncpy(s_stepShown, t, sizeof(s_stepShown) - 1);
-  s_stepShown[sizeof(s_stepShown) - 1] = '\0';
+  lv_obj_t *cap = ui_mk_label(card, caption, 8, 142, 164, UI_COL_DIM, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  (void)cap;
+  return card;
 }
 
-static void qr_show(const char *payload) {
-  if (s_qr == nullptr || strcmp(s_qrShown, payload) == 0) return;
-  lv_obj_set_hidden(s_qr, false);
-  if (lv_qrcode_update(s_qr, payload, strlen(payload)) != LV_RESULT_OK) {
-    Serial.println("[INFO] QR encode failed");
+static int info_storage_pct() {
+  // No real value yet: unknown reads as full (red) until the WT32 sends one.
+  return 100;
+}
+
+static void gauge_set(lv_obj_t *arc, lv_obj_t *centre, int pct, const char *centreText) {
+  if (arc != nullptr) {
+    lv_arc_set_value(arc, pct);
+    lv_color_t lo = lv_color_hex(UI_COL_OK);
+    lv_color_t hi = lv_color_hex(UI_COL_ALARM);
+    // mix=255 yields c1, mix=0 yields c2: full load reads red, idle green.
+    lv_color_t c = lv_color_mix(hi, lo, (uint8_t)(pct * 255 / 100));
+    lv_obj_set_style_arc_color(arc, c, LV_PART_INDICATOR);
   }
-  strncpy(s_qrShown, payload, sizeof(s_qrShown) - 1);
-  s_qrShown[sizeof(s_qrShown) - 1] = '\0';
+  if (centre != nullptr && centreText != nullptr) {
+    lv_label_set_text(centre, centreText);
+  }
 }
 
-// Paints whichever code applies: the Wi-Fi join payload until a phone
-// associates, then the URL of the credential form. Runs on show and every loop
-// while the route is up, so an idle-timeout stop (provision_ap_poll) is
-// reflected as well as the button.
-static void info_qr_refresh() {
-  if (s_qr == nullptr) return;
+static void info_render() {
+  // IP tile
+  char ip[LINK_IP_MAX + 1];
+  link_modbus_get_ip(ip, sizeof(ip));
+  if (s_valIp != nullptr) {
+    lv_label_set_text(s_valIp, ip[0] != '\0' ? ip : "--");
+  }
 
-  if (s_apBtn != nullptr) {
-    const char *want = provision_ap_active() ? "Stop" : "Start phone login";
-    if (s_apBtnShown != want) {
-      lv_label_set_text(lv_obj_get_child(s_apBtn, 0), want);
-      s_apBtnShown = want;
+  // Network tile
+  if (s_valNet != nullptr) {
+    if (!g.loggedIn) {
+      lv_label_set_text(s_valNet, "Blocked");
+      lv_obj_set_style_text_color(s_valNet, lv_color_hex(UI_COL_WARN), LV_PART_MAIN);
+    } else if (ip[0] == '\0') {
+      lv_label_set_text(s_valNet, "Offline");
+      lv_obj_set_style_text_color(s_valNet, lv_color_hex(UI_COL_ALARM), LV_PART_MAIN);
+    } else {
+      lv_label_set_text(s_valNet, "Online");
+      lv_obj_set_style_text_color(s_valNet, lv_color_hex(UI_COL_OK), LV_PART_MAIN);
     }
   }
 
-  if (!provision_ap_active()) {
-    // Hide rather than paint a decoy; clearing s_qrShown forces a fresh encode
-    // when the AP comes back up.
-    lv_obj_set_hidden(s_qr, true);
-    s_qrShown[0] = '\0';
-    step_show("Tap Start to show the Wi-Fi code.");
-    return;
+  // Firmware tile
+  if (s_valFw != nullptr) {
+    lv_label_set_text(s_valFw, FW_VERSION);
   }
 
-  if (provision_ap_client_count() > 0) {
-    step_show("Step 2: scan again to open the login page.");
-    qr_show(provision_ap_url());
-  } else {
-    step_show("Step 1: scan to join this device's Wi-Fi.");
-    static char wifiBuf[PROVISION_QR_MAX];
-    provision_ap_wifi_qr_payload(wifiBuf, sizeof(wifiBuf));
-    qr_show(wifiBuf);
+  // DB tile
+  if (s_valDb != nullptr) {
+    int db = link_modbus_get_db_latest();
+    if (db == -2) {
+      lv_label_set_text(s_valDb, "--");
+    } else {
+      char t[32];
+      snprintf(t, sizeof(t), "%d", db);
+      lv_label_set_text(s_valDb, t);
+    }
   }
-}
 
-static void on_ap_toggle(lv_event_t *e) {
-  (void)e;
-  if (provision_ap_active()) {
-    provision_ap_end();
-  } else {
-    provision_ap_begin();
+  // Storage gauge (unknown -> full).
+  {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "100%%");
+    gauge_set(s_gaugeStorage, s_ctrStorage, info_storage_pct(), buf);
   }
-  info_qr_refresh();
+
+  // CPU gauge. lv_timer_get_idle() is LVGL's own busy measurement (render +
+  // input + timers), maintained as O(1) counters inside lv_timer_handler():
+  // no heap walk, no FreeRTOS dependency. 100 - idle = UI-thread load %.
+  // This is not whole-chip load: the WiFi stack, other tasks and ISRs are
+  // not counted. (FreeRTOS run-time stats would cover those but
+  // CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS is off in this Arduino core,
+  // and the prebuilt lib has no stats functions to link against.)
+  {
+    uint32_t idle = lv_timer_get_idle();
+    if (idle > 100) idle = 100;
+    int pct = 100 - (int)idle;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d%%", pct);
+    gauge_set(s_gaugeCpu, s_ctrCpu, pct, buf);
+  }
 }
 
 void screen_info_poll() {
-  if (ui_is_info()) info_qr_refresh();
+  if (!ui_is_info()) return;
+  if (s_gaugeStorage == nullptr) return;
+  uint32_t now = millis();
+  if (now - s_lastPollMs < 1000) return;
+  s_lastPollMs = now;
+  info_render();
 }
 
 void screen_info_show(lv_obj_t *parent) {
-  // Not cached: rebuilt fresh on every open (locked decision). Network rows
-  // are read live from the Modbus slave state the WT32 pushes each cycle.
-  ui_mk_label(parent, "/info (fresh on open)", 16, 8, 520, UI_COL_TEXT,
-              &lv_font_montserrat_20);
+  lv_obj_t *cont = lv_obj_create(parent);
+  lv_obj_set_pos(cont, 0, 0);
+  lv_obj_set_size(cont, 800, 436);
+  lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_width(cont, 0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(cont, 16, LV_PART_MAIN);
+  lv_obj_set_style_pad_row(cont, 16, LV_PART_MAIN);
+  lv_obj_set_style_pad_column(cont, 16, LV_PART_MAIN);
+  lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_ROW_WRAP);
+  lv_obj_set_flex_align(cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+  lv_obj_set_scrollable(cont, false);
 
-  char row[128];
-  snprintf(row, sizeof(row), "Storage limits: %s", g.storageNote);
-  ui_mk_label(parent, row, 16, 60, 520, UI_COL_TEXT, &lv_font_montserrat_14);
+  s_tileIp = mk_tile(cont, "IP Address", &s_valIp);
+  s_tileNet = mk_tile(cont, "Network", &s_valNet);
+  s_tileFw = mk_tile(cont, "Firmware", &s_valFw);
+  s_tileDb = mk_tile(cont, "DB experiment", &s_valDb);
 
-  char ip[LINK_IP_MAX + 1];
-  link_modbus_get_ip(ip, sizeof(ip));
-  if (ip[0] != '\0') {
-    snprintf(row, sizeof(row), "IP address: %s (real, WT32)", ip);
-  } else {
-    snprintf(row, sizeof(row), "IP address: waiting for WT32...");
+  {
+    lv_obj_t *card = mk_gauge(cont, "Storage", &s_ctrStorage, &s_gaugeStorage);
+    (void)card;
   }
-  ui_mk_label(parent, row, 16, 100, 520, UI_COL_TEXT, &lv_font_montserrat_14);
-
-  int pingMs = link_modbus_get_ping_ms();
-  if (pingMs >= 0) {
-    snprintf(row, sizeof(row), "Ping 1.1.1.1: %d ms (real, WT32)", pingMs);
-  } else if (link_modbus_net_up()) {
-    snprintf(row, sizeof(row), "Ping 1.1.1.1: no reply yet (real, WT32)");
-  } else {
-    snprintf(row, sizeof(row), "Ping 1.1.1.1: no data yet (link down?)");
+  {
+    lv_obj_t *card = mk_gauge(cont, "CPU", &s_ctrCpu, &s_gaugeCpu);
+    (void)card;
   }
-  ui_mk_label(parent, row, 16, 140, 520, UI_COL_TEXT, &lv_font_montserrat_14);
 
-  snprintf(row, sizeof(row), "Latest HTTP reply: %s", g.lastHttp);
-  ui_mk_label(parent, row, 16, 180, 520, UI_COL_TEXT, &lv_font_montserrat_14);
-
-  int dbLatest = link_modbus_get_db_latest();
-  if (dbLatest == -2) {
-    snprintf(row, sizeof(row), "DB latest exp: waiting for master sync...");
-  } else {
-    snprintf(row, sizeof(row), "DB latest exp: %d (next %d)%s", dbLatest, dbLatest + 1,
-             link_modbus_time_ok() ? " NTP OK" : " NTP no sync");
-  }
-  ui_mk_label(parent, row, 16, 200, 520, UI_COL_TEXT, &lv_font_montserrat_14);
-
-  snprintf(row, sizeof(row), "Firmware version: %s", FW_VERSION);
-  ui_mk_label(parent, row, 16, 220, 520, UI_COL_TEXT, &lv_font_montserrat_14);
-
-  // Real MCU readings, labeled as real to distinguish from fake rows.
-  snprintf(row, sizeof(row), "Heap free: %u B (real) | PSRAM: %u B (real)", ESP.getFreeHeap(),
-           ESP.getPsramSize());
-  ui_mk_label(parent, row, 16, 260, 520, UI_COL_DIM, &lv_font_montserrat_14);
-
-  snprintf(row, sizeof(row), "Fetched at %lu ms (fake stamp)", millis());
-  ui_mk_label(parent, row, 16, 300, 520, UI_COL_DIM, &lv_font_montserrat_14);
-
-  // Network QR: 180 px in the right column. Smaller than the /setup code (300
-  // px) because this route shows the whole diagnostic list beside it, and it is
-  // still scannable at arm's length on the bench.
-  s_qr = lv_qrcode_create(parent);
-  lv_obj_set_pos(s_qr, 596, 52);
-  lv_obj_set_size(s_qr, 180, 180);
-  lv_qrcode_set_size(s_qr, 180);
-  lv_qrcode_set_dark_color(s_qr, lv_color_hex(0x000000));
-  lv_qrcode_set_light_color(s_qr, lv_color_hex(0xFFFFFF));
-  lv_obj_set_hidden(s_qr, true);
-  // Fresh object: forget the cached payload and step text or the first paint
-  // would be skipped.
-  s_qrShown[0] = '\0';
-  s_stepShown[0] = '\0';
-  s_apBtnShown = nullptr;
-
-  s_step = ui_mk_label(parent, "Tap Start to show the Wi-Fi code.", 596, 240, 190,
-                       UI_COL_DIM, &lv_font_montserrat_14);
-
-  s_apBtn = ui_mk_button(parent, "Start phone login", 596, 292, 190, 48, UI_COL_CARD);
-  lv_obj_add_event_cb(s_apBtn, on_ap_toggle, LV_EVENT_CLICKED, nullptr);
-
-  lv_obj_t *back = ui_mk_button(parent, "< Home", 16, 360, 140, 48, UI_COL_CARD);
-  lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, nullptr);
-
-  info_qr_refresh();
+  info_render();
+  s_lastPollMs = millis();
 }

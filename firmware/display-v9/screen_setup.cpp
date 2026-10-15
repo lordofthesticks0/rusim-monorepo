@@ -236,6 +236,7 @@ void screen_setup_show(lv_obj_t *parent) {
 static void setup_close_success() {
   g.loggedIn = true;
   g.experimentRunning = false;
+  g.experimentStartMs = 0;
   Serial.println("[SETUP] WT32 auth OK, logged in; start the run from /control");
   link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
   // Never leave the credential form reachable once the run has started.

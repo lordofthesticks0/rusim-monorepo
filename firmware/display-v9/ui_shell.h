@@ -29,8 +29,14 @@ bool ui_is_info();
 void ui_refresh_current();
 // Recompute bell state from NULL fields and repaint the status bar.
 void ui_update_bell();
+// Repaint the nav tabs to reflect the current route.
+void ui_update_nav();
+// Repaint the status-bar clock (placeholder until a time source is wired).
+void ui_update_clock();
 // Called after any data mutation: bell + content refresh.
 void ui_shell_on_data();
+// Flip experiment running state (shared by /home and /control run buttons).
+void ui_experiment_toggle();
 // 41C warn / 45C trip evaluation against g.chamberTempC.
 void ui_eval_overheat();
 

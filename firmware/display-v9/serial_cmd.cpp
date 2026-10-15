@@ -18,10 +18,23 @@ static size_t s_len = 0;
 static void print_help() {
   Serial.println("CMDS: TEMP <f> | SETPOINT <f> | DURATION <1-99> | STIRRER ON|OFF |");
   Serial.println("      POST ON|OFF | RUN ON|OFF | EXP <n> | NODE <0-5> ON|OFF |");
-  Serial.println("      NULL <c> <b> <s> | UNNULL <c> <b> <s> | PUSH | STATUS | LINK | HELP");
+  Serial.println("      NULL <c> <b> <s> | UNNULL <c> <b> <s> | PUSH | STATUS | LINK | MEM | HELP");
   Serial.println("      (s = 0 CO2,1 CH4,2 Press,3 pH,4 Temp)");
   Serial.println("CREDS <user> <pass>   stage portal credentials for the WT32");
   Serial.println("AP                    toggle the cloaked SoftAP credential form");
+  Serial.println("MEM                   heap/PSRAM counters (O(1); never walks the heap)");
+}
+
+static void print_mem() {
+  // O(1) counter reads only. Deliberately avoids ESP.getHeapSize() and
+  // ESP.getPsramSize(): those walk every heap block under spinlock and hang
+  // the board (Interrupt WDT) if the heap is corrupted -- the /info reboot.
+  // min = low-water mark since boot (trends to 0 on a leak); maxblock =
+  // largest single allocatable block (drops on fragmentation).
+  Serial.printf("heap  free=%u min=%u maxblock=%u\n", ESP.getFreeHeap(),
+                ESP.getMinFreeHeap(), ESP.getMaxAllocHeap());
+  Serial.printf("psram free=%u min=%u maxblock=%u\n", ESP.getFreePsram(),
+                ESP.getMinFreePsram(), ESP.getMaxAllocPsram());
 }
 
 static void print_status() {
@@ -113,6 +126,8 @@ static void handle_line(char *line) {
     print_status();
   } else if (strcmp(cmd, "LINK") == 0) {
     link_modbus_debug_print();
+  } else if (strcmp(cmd, "MEM") == 0) {
+    print_mem();
   } else if (strcmp(cmd, "PUSH") == 0) {
     fake_wt32_push();
     mutated = true;
