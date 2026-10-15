@@ -51,6 +51,7 @@ document is the source of truth for anything measured on real hardware.
 | `network-master.md` | Production WT32 firmware: portal login via display Modbus |
 | `display-wt32-link.md` | The single Modbus RTU line: wiring, framing, register map, flows |
 | `db-sync-experiment-ntp.md` | Supabase latest-experiment sync, mismatch warn, NTP (backlog #1/#9/#12) |
+| `esp-db-sync.md` | ESP to database round trip: the missing push path, write grants, sensor chain, token exposure |
 | `display-provisioning-ap.md` | SoftAP credential form on the display: phone login instead of on-screen typing |
 | `display-sim.md` | `[env:display-sim]`: native PC/SDL build of the display-v9 UI |
 | `display-debug-flag.md` | `IS_DEBUG`: compile-time debug gate (login bypass on `/setup`) |
