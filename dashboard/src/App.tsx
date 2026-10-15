@@ -13,7 +13,6 @@ import {
   PARAMETER_UNITS,
   POLL_INTERVAL_MS,
   summarizeExperiments,
-  summarizeParameter,
   splitBottlesByPresence,
   type ExperimentSummary,
   type ParameterName,
@@ -24,6 +23,14 @@ import {
   selectActiveExperiment,
   selectMonitoringReadings,
 } from "./monitoring";
+import {
+  getHistoryPointDetails,
+  getExperimentChambers,
+  groupReadingsByChamber,
+  selectChamberReadings,
+  toggleExperimentSelection,
+  type ChamberSummary,
+} from "./history";
 import type { DeviceSession, Reading } from "./types/domain";
 import { formatExperimentId, isTestingExperiment } from "./types/domain";
 
@@ -276,8 +283,7 @@ function ExperimentHistoryView({
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
 
-  // Default to the newest experiment whenever the list changes underneath us.
-  const activeExperimentId = selectedExperimentId ?? experiments[0]?.experiment_id ?? null;
+  const activeExperimentId = selectedExperimentId;
 
   useEffect(() => {
     if (activeExperimentId === null) {
@@ -286,6 +292,7 @@ function ExperimentHistoryView({
     }
 
     let cancelled = false;
+    setReadings([]);
     setDetailLoading(true);
     setDetailError("");
     void fetchExperimentReadings(sessionToken, activeExperimentId)
@@ -307,7 +314,32 @@ function ExperimentHistoryView({
   }, [activeExperimentId, sessionToken]);
 
   const selectedExperiment = experiments.find((experiment) => experiment.experiment_id === activeExperimentId);
-  const bottleStats = useMemo(() => computeBottleStats(readings), [readings]);
+  const experimentReadings = useMemo(
+    () => activeExperimentId === null
+      ? []
+      : readings.filter((reading) => reading.experiment_id === activeExperimentId),
+    [readings, activeExperimentId],
+  );
+  const availableChambers = useMemo(
+    () => getExperimentChambers(experimentReadings, activeExperimentId),
+    [experimentReadings, activeExperimentId],
+  );
+  const [selectedChamberId, setSelectedChamberId] = useState<number | null>(null);
+  useEffect(() => {
+    setSelectedChamberId((current) => (
+      current !== null && availableChambers.includes(current)
+        ? current
+        : availableChambers[0] ?? null
+    ));
+  }, [availableChambers]);
+  const selectedChamberReadings = useMemo(
+    () => selectChamberReadings(experimentReadings, activeExperimentId, selectedChamberId),
+    [experimentReadings, activeExperimentId, selectedChamberId],
+  );
+  const chamberSummaries = useMemo(
+    () => groupReadingsByChamber(experimentReadings, activeExperimentId),
+    [experimentReadings, activeExperimentId],
+  );
 
   return <>
     {error && <div className="notice">Unable to load experiment history. <span>{error}</span></div>}
@@ -319,7 +351,7 @@ function ExperimentHistoryView({
         {experiments.map((experiment) => <button
           className={`history-item${experiment.experiment_id === activeExperimentId ? " selected" : ""}`}
           key={experiment.experiment_id}
-          onClick={() => setSelectedExperimentId(experiment.experiment_id)}
+          onClick={() => setSelectedExperimentId((current) => toggleExperimentSelection(current, experiment.experiment_id))}
         >
           <strong>{formatExperimentId(experiment.experiment_id)}</strong>
           <span>{experiment.reading_count} chamber readings{isTestingExperiment(experiment.experiment_id) ? " | Testing experiment" : ""}</span>
@@ -328,15 +360,17 @@ function ExperimentHistoryView({
       </div>
     </section>
 
+    {selectedExperiment === undefined && <div className="notice">Select an experiment to view its chamber readings and results.</div>}
+
     {selectedExperiment && <>
       <section className="controls history-navigation">
         <div className="control-copy"><span className="label">Selected experiment</span><strong>{formatExperimentId(selectedExperiment.experiment_id)}</strong><span className="count">{selectedExperiment.concluded ? "Concluded" : "Live"}</span></div>
         <div className="history-actions">
           <button
             className="history-tab"
-            onClick={() => downloadExperimentCsv(selectedExperiment.experiment_id, readings)}
-            disabled={detailLoading || detailError !== "" || readings.length === 0}
-            title={csvDisabledReason(readings.length, detailLoading, detailError)}
+            onClick={() => downloadExperimentCsv(selectedExperiment.experiment_id, experimentReadings)}
+            disabled={detailLoading || detailError !== "" || experimentReadings.length === 0}
+            title={csvDisabledReason(experimentReadings.length, detailLoading, detailError)}
           >
             Download CSV
           </button>
@@ -354,62 +388,66 @@ function ExperimentHistoryView({
 
       {detailError && <div className="notice">Unable to load experiment readings. <span>{detailError}</span></div>}
       {detailLoading && !detailError && <div className="notice">Loading experiment readings...</div>}
-      {!detailLoading && !detailError && readings.length === 0 && <div className="notice">No readings are available for this experiment.</div>}
-      {isTruncated(readings.length) && <div className="notice">
+      {!detailLoading && !detailError && experimentReadings.length === 0 && <div className="notice">No readings are available for this experiment.</div>}
+      {isTruncated(experimentReadings.length) && <div className="notice">
         Only the most recent {MAX_READING_ROWS.toLocaleString()} readings were loaded, so this experiment is incomplete on screen and any CSV export is truncated too.
       </div>}
 
-      {readings.length > 0 && historyPanel === "readings" && <>
+      {experimentReadings.length > 0 && historyPanel === "readings" && <>
+        <section className="controls history-navigation">
+          <label className="control-copy" htmlFor="history-chamber-select">
+            <span className="label">Chamber</span>
+            <strong>Select a chamber to inspect its readings</strong>
+          </label>
+          <select
+            id="history-chamber-select"
+            value={selectedChamberId ?? ""}
+            onChange={(event) => setSelectedChamberId(Number(event.target.value))}
+          >
+            {availableChambers.map((bottleId) => <option value={bottleId} key={bottleId}>Chamber {bottleId}</option>)}
+          </select>
+        </section>
         <section className="metrics">
-          {PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={getParameterValue(readings[0]!, name)} index={index} />)}
+          {PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={selectedChamberReadings.at(-1) ? getParameterValue(selectedChamberReadings.at(-1)!, name) : null} index={index} />)}
         </section>
         <div className="history-chart-grid">
-          {PARAMETER_NAMES.map((parameter) => <BottleChart key={parameter} readings={readings} parameter={parameter} />)}
+          {PARAMETER_NAMES.map((parameter) => <BottleChart key={parameter} readings={selectedChamberReadings} parameter={parameter} bottleId={selectedChamberId} />)}
         </div>
       </>}
 
-      {readings.length > 0 && historyPanel === "results" && <ExperimentResultsView bottleStats={bottleStats} experiment={selectedExperiment} />}
+      {experimentReadings.length > 0 && historyPanel === "results" && <ExperimentResultsView chamberSummaries={chamberSummaries} experiment={selectedExperiment} />}
     </>}
   </>;
 }
 
 function ExperimentResultsView({
-  bottleStats,
+  chamberSummaries,
   experiment,
 }: {
-  bottleStats: Array<{ bottle_id: number; reading: Reading }>;
+  chamberSummaries: ChamberSummary[];
   experiment: ExperimentSummary;
 }) {
-  const parameters = PARAMETER_NAMES.map((name) => ({
-    name,
-    stats: summarizeParameter(bottleStats.map((entry) => getParameterValue(entry.reading, name))),
-  }));
-
   return <>
     <section className="metrics results-overview">
       <article className="metric"><p>Experiment</p><strong>{formatExperimentId(experiment.experiment_id)}</strong><span className="unit">{isTestingExperiment(experiment.experiment_id) ? "Testing experiment" : "Regular experiment"}</span></article>
       <article className="metric"><p>Status</p><strong>{experiment.concluded ? "Concluded" : "Live"}</strong></article>
-      <article className="metric"><p>Chambers</p><strong>{bottleStats.length}</strong></article>
+      <article className="metric"><p>Chambers</p><strong>{chamberSummaries.length}</strong></article>
       <article className="metric"><p>Readings</p><strong>{experiment.reading_count}</strong></article>
-    </section>
-
-    <section className="panel">
-      <div className="panel-heading"><div><p className="eyebrow">Across chambers</p><h2>Parameter summary</h2></div><span className="tag">{bottleStats.length} chambers</span></div>
-      <div className="result-metrics">
-        {parameters.map(({ name, stats }) => <div className="result-metric" key={name}><strong>{parameterLabel(name)}</strong><span>{stats ? <>Min {formatValue(stats.min, name)} | Avg {formatValue(stats.average, name)} | Max {formatValue(stats.max, name)}</> : "No readings"}</span></div>)}
-      </div>
     </section>
 
     <section className="panel">
       <div className="panel-heading"><div><p className="eyebrow">Per chamber</p><h2>Chamber results</h2></div></div>
       <div className="result-list">
-        {bottleStats.map(({ bottle_id, reading }) => <article className="result-card" key={bottle_id}>
+        {chamberSummaries.map(({ bottle_id, readings, lastReading, stats }) => <article className="result-card" key={bottle_id}>
           <div className="result-heading">
-            <div><strong>Chamber {bottle_id}</strong><span>{formatDate(reading.timestamp)}</span></div>
-            <span className="tag">Sample</span>
+            <div><strong>Chamber {bottle_id}</strong><span>Latest sample: {formatDate(lastReading.timestamp)}</span></div>
+            <span className="tag">{readings.length} readings</span>
           </div>
           <div className="result-metrics">
-            {PARAMETER_NAMES.map((name) => <div className="result-metric" key={name}><strong>{parameterLabel(name)}</strong><span>{formatValue(getParameterValue(reading, name), name)}</span></div>)}
+            {PARAMETER_NAMES.map((name) => {
+              const parameterStats = stats[name];
+              return <div className="result-metric" key={name}><strong>{parameterLabel(name)}</strong><span>{parameterStats ? <>Min {formatValue(parameterStats.min, name)} | Avg {formatValue(parameterStats.average, name)} | Max {formatValue(parameterStats.max, name)}</> : "No readings"}</span></div>;
+            })}
           </div>
         </article>)}
       </div>
@@ -444,28 +482,64 @@ function isTruncated(rowCount: number): boolean {
   return rowCount >= MAX_READING_ROWS;
 }
 
-/** Pairs each bottle with its reading, so charts and tables can align by bottle. */
-function computeBottleStats(readings: Reading[]): Array<{ bottle_id: number; reading: Reading }> {
-  return [...readings]
-    .sort((left, right) => left.bottle_id - right.bottle_id)
-    .map((reading) => ({ bottle_id: reading.bottle_id, reading }));
-}
+type ChartInteraction = { index: number; pinned: boolean };
 
-function Chart({ rows, parameter }: { rows: Reading[]; parameter: ParameterName }) {
+function Chart({ rows, parameter, bottleId, interactive = false }: { rows: Reading[]; parameter: ParameterName; bottleId?: number | null; interactive?: boolean }) {
   const points = useMemo(() => createChartPoints(rows, parameter), [rows, parameter]);
   const labels = useMemo(() => createTimeLabels(rows), [rows]);
+  const [activePoint, setActivePoint] = useState<ChartInteraction | null>(null);
+
+  useEffect(() => {
+    setActivePoint(null);
+  }, [rows, parameter, bottleId]);
+
+  const activeReading = activePoint === null ? undefined : rows[activePoint.index];
+  const activeDetails = activeReading === undefined
+    ? undefined
+    : getHistoryPointDetails(activeReading, parameter);
 
   return <>
     <div className="gridlines"><i /><i /><i /><i /></div>
-    <svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label={`${parameterLabel(parameter)} reading chart`}><path d={chartPath(points)} /></svg>
+    <svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label={`${parameterLabel(parameter)} reading chart`}>
+      <path d={chartPath(points)} />
+      {interactive && points.map((point, index) => {
+        const reading = rows[index];
+        if (reading === undefined) return null;
+        const selected = activePoint?.index === index;
+        return <circle
+          key={`${reading.timestamp}-${index}`}
+          cx={point.x}
+          cy={point.y ?? 110}
+          r={selected ? 6 : 4}
+          fill={point.y === null ? "#a0a9b3" : "#2462ee"}
+          stroke="white"
+          strokeWidth="2"
+          tabIndex={0}
+          role="button"
+          aria-label={`${parameterLabel(parameter)} at ${formatDateTime(reading.timestamp)}`}
+          onMouseEnter={() => setActivePoint({ index, pinned: false })}
+          onMouseLeave={() => setActivePoint((current) => current?.pinned ? current : null)}
+          onFocus={() => setActivePoint({ index, pinned: false })}
+          onBlur={() => setActivePoint((current) => current?.pinned ? current : null)}
+          onClick={() => setActivePoint({ index, pinned: true })}
+        />;
+      })}
+    </svg>
     <div className="axis">{labels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}</div>
+    {interactive && activeDetails && <div className="chart-tooltip" role="status">
+      <span>Timestamp: {formatDateTime(activeDetails.timestamp)}</span>
+      <span>Chamber: {bottleId === null ? "Unavailable" : `Chamber ${bottleId}`}</span>
+      <span>Experiment: {formatExperimentId(activeReading!.experiment_id)}</span>
+      <span>Parameter: {parameterLabel(activeDetails.parameter)}</span>
+      <span>Value: {formatTooltipValue(activeDetails.value, activeDetails.parameter)}</span>
+    </div>}
   </>;
 }
 
-function BottleChart({ readings, parameter }: { readings: Reading[]; parameter: ParameterName }) {
+function BottleChart({ readings, parameter, bottleId }: { readings: Reading[]; parameter: ParameterName; bottleId: number | null }) {
   return <section className="panel telemetry-chart-panel">
-    <div className="panel-heading"><div><p className="eyebrow">Across chambers</p><h2>{parameterLabel(parameter)}</h2></div><span className="tag">{readings.length} chambers</span></div>
-    <div className="chart"><Chart rows={readings} parameter={parameter} /></div>
+    <div className="panel-heading"><div><p className="eyebrow">{bottleId === null ? "Selected chamber" : `Chamber ${bottleId}`}</p><h2>{parameterLabel(parameter)}</h2></div><span className="tag">{readings.length} readings</span></div>
+    <div className="chart"><Chart rows={readings} parameter={parameter} bottleId={bottleId} interactive /></div>
   </section>;
 }
 
@@ -476,6 +550,16 @@ function formatValue(value: number | null, parameter: ParameterName): string {
 
 function formatDate(value: string | null): string {
   return value ? new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "Not available";
+}
+
+function formatDateTime(value: string): string {
+  return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
+}
+
+function formatTooltipValue(value: number | null, parameter: ParameterName): string {
+  if (value === null) return "Unavailable";
+  const unit = PARAMETER_UNITS[parameter];
+  return unit ? `${String(value)} ${unit}` : String(value);
 }
 
 function getMetricValue(reading: Reading, name: ParameterName): number | null {
@@ -499,9 +583,10 @@ function isChartParameter(value: string): value is ParameterName {
  * that actually reported, so one missing value cannot distort the axis.
  */
 function createChartPoints(rows: Reading[], parameter: ParameterName): Array<{ x: number; y: number | null }> {
-  if (rows.length < 2) return [];
+  if (rows.length === 0) return [];
   const values = rows.map((row) => getMetricValue(row, parameter));
   const reported = values.filter((value): value is number => value !== null);
+  if (rows.length === 1) return [{ x: 400, y: values[0] === null ? null : 110 }];
   if (reported.length === 0) return values.map((_, index) => ({ x: (index / (values.length - 1)) * 800, y: null }));
 
   const min = Math.min(...reported);

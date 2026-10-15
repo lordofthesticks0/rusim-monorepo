@@ -50,4 +50,5 @@
 .history-chart-grid { display: grid; gap: 16px; }
 .telemetry-chart-panel { min-width: 0; }
 .telemetry-chart-panel h2 { font-size: 18px; }
+.chart-tooltip { position: absolute; z-index: 2; top: 9px; right: 0; display: grid; gap: 3px; max-width: min(280px, 80%); padding: 8px 10px; border: 1px solid #dce2e8; border-radius: 5px; background: rgba(255, 255, 255, .96); color: #384453; box-shadow: 0 5px 16px rgba(32, 41, 54, .1); font-size: 11px; line-height: 1.35; }
 @media (max-width: 760px) { .section-navigation { flex-direction: row; align-items: stretch; overflow-x: auto; }.nav-tab { flex: 1 0 auto; }.history-chart-grid { gap: 12px; }.telemetry-chart-panel { padding: 18px 15px 12px; }.telemetry-chart-panel .chart { height: 235px; } }
