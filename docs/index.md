@@ -25,7 +25,7 @@ document is the source of truth for anything measured on real hardware.
 
 | Directory | Board | Document |
 |---|---|---|
-| `firmware/display-v9/` | ESP32-S3 DevKitC-1 | `display-docs.md`, `migration-notes.md`, `display-wt32-link.md`, `display-provisioning-ap.md`, `display-sim.md`, `display-debug-flag.md`, `lvgl-redesign.md` |
+| `firmware/display-v9/` | ESP32-S3 DevKitC-1 | `display-docs.md`, `migration-notes.md`, `display-wt32-link.md`, `display-provisioning-ap.md`, `display-sim.md`, `display-debug-flag.md`, `lvgl-redesign.md`, `display-info-reboot.md` |
 | `firmware/wt32-eth01_ping-test/` | WT32-ETH01 | `wt32-eth01-ping-test.md`, `wt32-eth01.md` |
 | `firmware/wt32-eth01_captive-recon/` | WT32-ETH01 | `wt32-eth01-captive-recon.md` |
 | `firmware/network-master/` | WT32-ETH01 | `network-master.md` (production), `display-wt32-link.md` |
@@ -54,6 +54,7 @@ document is the source of truth for anything measured on real hardware.
 | `display-provisioning-ap.md` | SoftAP credential form on the display: phone login instead of on-screen typing |
 | `display-sim.md` | `[env:display-sim]`: native PC/SDL build of the display-v9 UI |
 | `display-debug-flag.md` | `IS_DEBUG`: compile-time debug gate (login bypass on `/setup`) |
+| `display-info-reboot.md` | `/info` reboot triage: heap-walk hang, backtrace decode, CPU gauge + `MEM` command, open corruption hunt |
 | `display-lvgl-9-6-port.md` | LVGL 9.3.0 -> 9.6.0 port: config + deprecated-API changes |
 | `memory-safety-hardening.md` | RAII ownership on `display-v9`, bounded buffers + atomic ISR flag on `network-master` |
 | `flash-factory-tool.md` | `scripts-hardware/flash-factory.ts` and the factory image |

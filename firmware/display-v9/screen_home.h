@@ -1,4 +1,6 @@
 #pragma once
-// /home: nav hub under the persistent status bar.
+// /home: run console (redesigned). Status bar owns navigation.
 #include <lvgl.h>
 void screen_home_show(lv_obj_t *parent);
+void screen_home_hide();
+void screen_home_poll();

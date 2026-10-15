@@ -522,7 +522,7 @@
 
 /* Enable the multi-touch gesture recognition feature */
 /* Gesture recognition requires the use of floats */
-#define LV_USE_GESTURE_RECOGNITION 0
+#define LV_USE_GESTURE_RECOGNITION 1
 
 /*=====================
  *  COMPILER SETTINGS
@@ -565,7 +565,7 @@
 #define LV_ATTRIBUTE_EXTERN_DATA
 
 /** Use `float` as `lv_value_precise_t` */
-#define LV_USE_FLOAT            0
+#define LV_USE_FLOAT            1
 
 /** Enable matrix support
  *  - Requires `LV_USE_FLOAT = 1` */
@@ -605,7 +605,7 @@
 #define LV_FONT_MONTSERRAT_48 0
 
 /* Demonstrate special features */
-#define LV_FONT_MONTSERRAT_28_COMPRESSED    0  /**< bpp = 3 */
+#define LV_FONT_MONTSERRAT_28_COMPRESSED    1  /**< bpp = 3 */
 #define LV_FONT_DEJAVU_16_PERSIAN_HEBREW    0  /**< Hebrew, Arabic, Persian letters and all their forms */
 #define LV_FONT_SIMSUN_14_CJK               0  /**< 1000 most common CJK radicals */
 #define LV_FONT_SIMSUN_16_CJK               0  /**< 1000 most common CJK radicals */
@@ -636,7 +636,7 @@
 #define LV_FONT_FMT_TXT_LARGE 0
 
 /** Enables/disables support for compressed fonts. */
-#define LV_USE_FONT_COMPRESSED 0
+#define LV_USE_FONT_COMPRESSED 1
 
 /** Enable drawing placeholders when glyph dsc is not found. */
 #define LV_USE_FONT_PLACEHOLDER 1

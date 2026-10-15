@@ -6,14 +6,18 @@
 #include "screen_home.h"
 #include "screen_info.h"
 #include "screen_setup.h"
+#include "link_modbus.h"
 #include "ui_config.h"
 
 // Layout: status bar 800x44 on top, content 800x436 below.
 static lv_obj_t *s_content = nullptr;
+static lv_obj_t *s_tabHome = nullptr;
+static lv_obj_t *s_tabData = nullptr;
+static lv_obj_t *s_tabControl = nullptr;
+static lv_obj_t *s_tabInfo = nullptr;
 static lv_obj_t *s_bellBtn = nullptr;
 static lv_obj_t *s_bellLabel = nullptr;
-static lv_obj_t *s_postLabel = nullptr;
-static lv_obj_t *s_expLabel = nullptr;
+static lv_obj_t *s_clock = nullptr;
 
 // Modal state.
 static lv_obj_t *s_modal = nullptr;
@@ -113,6 +117,111 @@ static void on_bell_clicked(lv_event_t *e) {
   ui_modal_show("Invalid fields (live, fake)", body, "Close", nullptr);
 }
 
+static void on_tab_clicked(lv_event_t *e) {
+  // Locked during network login: nav tabs are disabled and greyed out until
+  // the WT32 reports RESULT=success (g.loggedIn). Guard here too so a stray
+  // event can never route away from /setup.
+  if (!g.loggedIn) return;
+  intptr_t id = (intptr_t)lv_event_get_user_data(e);
+  switch (id) {
+    case 0:
+      ui_show_home();
+      break;
+    case 1:
+      ui_show_data_picker();
+      break;
+    case 2:
+      ui_show_control();
+      break;
+    case 3:
+      ui_show_info();
+      break;
+    default:
+      break;
+  }
+}
+
+// Swipe left/right to switch top-level tabs: home <-> data <-> control <->
+// info. Cluster/bottle drill-downs count as the data tab. Stops at the ends
+// (no wrap). Ignored during login, on /setup, and while a modal is up.
+// LVGL delivers one gesture per press after a 50 px flick, and every widget
+// bubbles gestures to the screen, so a single screen-level handler catches
+// swipes starting anywhere. Rebuilding the route here also deletes the
+// pressed widget before release, so no tap/click fires alongside the swipe.
+static void on_swipe_gesture(lv_event_t *e) {
+  lv_event_code_t code = lv_event_get_code(e);
+  if (code != LV_EVENT_GESTURE_LEFT && code != LV_EVENT_GESTURE_RIGHT) return;
+  if (!g.loggedIn) return;
+  if (ui_modal_visible()) return;
+  if (s_route == 6) return;  // /setup: swipes disabled
+  int tab;
+  if (s_route >= 1 && s_route <= 3)
+    tab = 1;  // picker / cluster / bottle
+  else if (s_route == 4)
+    tab = 2;  // control
+  else if (s_route == 5)
+    tab = 3;  // info
+  else
+    tab = 0;  // home
+  if (code == LV_EVENT_GESTURE_LEFT && tab < 3)
+    tab++;
+  else if (code == LV_EVENT_GESTURE_RIGHT && tab > 0)
+    tab--;
+  else
+    return;  // at the end: stay put
+  switch (tab) {
+    case 0:
+      ui_show_home();
+      break;
+    case 1:
+      ui_show_data_picker();
+      break;
+    case 2:
+      ui_show_control();
+      break;
+    case 3:
+      ui_show_info();
+      break;
+    default:
+      break;
+  }
+}
+
+static void set_tab_state(lv_obj_t *tab, bool active) {
+  if (tab == nullptr) return;
+  lv_obj_t *label = lv_obj_get_child(tab, 0);
+  if (active) {
+    lv_obj_set_style_bg_color(tab, lv_color_hex(UI_COL_ACCENT), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(tab, LV_OPA_COVER, LV_PART_MAIN);
+    if (label != nullptr)
+      lv_obj_set_style_text_color(label, lv_color_white(), LV_PART_MAIN);
+  } else {
+    lv_obj_set_style_bg_color(tab, lv_color_hex(UI_COL_CARD), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(tab, LV_OPA_COVER, LV_PART_MAIN);
+    if (label != nullptr)
+      lv_obj_set_style_text_color(label, lv_color_hex(UI_COL_ACCENT), LV_PART_MAIN);
+  }
+}
+
+// Greyed-out locked look used before login. Disabled state blocks input;
+// explicit grey fill + dim label signals it (no theme is enabled).
+static void set_tab_locked(lv_obj_t *tab, bool locked) {
+  if (tab == nullptr) return;
+  if (locked) {
+    lv_obj_add_state(tab, LV_STATE_DISABLED);
+  } else {
+    lv_obj_remove_state(tab, LV_STATE_DISABLED);
+  }
+  if (locked) {
+    lv_obj_set_style_bg_color(tab, lv_color_hex(UI_COL_CARD_OFF), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(tab, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(tab, lv_color_hex(UI_COL_DIM), LV_PART_MAIN);
+    lv_obj_t *label = lv_obj_get_child(tab, 0);
+    if (label != nullptr)
+      lv_obj_set_style_text_color(label, lv_color_hex(UI_COL_DIM), LV_PART_MAIN);
+  }
+}
+
 static void build_status_bar(lv_obj_t *scr) {
   lv_obj_t *bar = lv_obj_create(scr);
   lv_obj_set_pos(bar, 0, 0);
@@ -120,39 +229,73 @@ static void build_status_bar(lv_obj_t *scr) {
   style_plain(bar, UI_COL_BAR);
   lv_obj_set_scrollable(bar, false);
 
-  ui_mk_label(bar, "NET OK(fake)", 10, 12, 150, UI_COL_OK, &lv_font_montserrat_14);
-  s_postLabel = ui_mk_label(bar, "POST ON", 170, 12, 110, UI_COL_TEXT, &lv_font_montserrat_14);
-  s_expLabel =
-      ui_mk_label(bar, "exp --h (fake)", 290, 12, 220, UI_COL_DIM, &lv_font_montserrat_14);
+  // Square 32x32 icon tabs. Left cluster (home/data/control), clock centred,
+  // right cluster (info/bell).
+  s_tabHome = ui_mk_button(bar, LV_SYMBOL_HOME, 6, 6, 32, 32, UI_COL_CARD);
+  lv_obj_add_event_cb(s_tabHome, on_tab_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)0);
+  s_tabData = ui_mk_button(bar, LV_SYMBOL_LIST, 46, 6, 32, 32, UI_COL_CARD);
+  lv_obj_add_event_cb(s_tabData, on_tab_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)1);
+  s_tabControl = ui_mk_button(bar, LV_SYMBOL_SETTINGS, 86, 6, 32, 32, UI_COL_CARD);
+  lv_obj_add_event_cb(s_tabControl, on_tab_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)2);
+  s_clock = ui_mk_label(bar, "--:--", 300, 10, 200, UI_COL_TEXT, &lv_font_montserrat_20);
+  // center text
+  lv_obj_set_style_text_align(s_clock, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  s_tabInfo = ui_mk_button(bar, LV_SYMBOL_FILE, 722, 6, 32, 32, UI_COL_CARD);
+  lv_obj_add_event_cb(s_tabInfo, on_tab_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)3);
 
-  s_bellBtn = ui_mk_button(bar, "", 690, 6, 100, 32, UI_COL_DIM);
-  s_bellLabel = lv_label_create(s_bellBtn);
-  lv_label_set_text(s_bellLabel, "OK");
-  lv_obj_center(s_bellLabel);
-  lv_obj_set_style_text_color(s_bellLabel, lv_color_white(), LV_PART_MAIN);
+  s_bellBtn = ui_mk_button(bar, LV_SYMBOL_BELL, 762, 6, 32, 32, UI_COL_CARD);
+  s_bellLabel = lv_obj_get_child(s_bellBtn, 0);
+  lv_label_set_text(s_bellLabel, LV_SYMBOL_BELL);
+  lv_obj_set_style_text_color(s_bellLabel, lv_color_hex(UI_COL_ACCENT), LV_PART_MAIN);
   lv_obj_add_event_cb(s_bellBtn, on_bell_clicked, LV_EVENT_CLICKED, nullptr);
 }
 
 void ui_update_bell() {
   if (s_bellBtn == nullptr) return;
   int n = fake_null_count();
-  char exp[48];
-  if (g.experimentRunning) {
-    snprintf(exp, sizeof(exp), "exp #%d %dh (fake)", g.expNum, g.durationH);
-  } else {
-    snprintf(exp, sizeof(exp), "exp #%d --h (fake)", g.expNum);
-  }
-  lv_label_set_text(s_expLabel, exp);
-  lv_label_set_text(s_postLabel, g.postEnabled ? "POST ON" : "POST OFF");
+  if (s_bellLabel == nullptr) s_bellLabel = lv_obj_get_child(s_bellBtn, 0);
   if (n > 0) {
-    char t[32];
-    snprintf(t, sizeof(t), "ALERT(%d)", n);
-    lv_label_set_text(s_bellLabel, t);
+    lv_label_set_text(s_bellLabel, LV_SYMBOL_WARNING);
     lv_obj_set_style_bg_color(s_bellBtn, lv_color_hex(UI_COL_ALARM), LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_bellBtn, 0, LV_PART_MAIN);
+    if (s_bellLabel != nullptr)
+      lv_obj_set_style_text_color(s_bellLabel, lv_color_white(), LV_PART_MAIN);
   } else {
-    lv_label_set_text(s_bellLabel, "OK");
-    lv_obj_set_style_bg_color(s_bellBtn, lv_color_hex(UI_COL_OK), LV_PART_MAIN);
+    lv_label_set_text(s_bellLabel, LV_SYMBOL_BELL);
+    lv_obj_set_style_bg_color(s_bellBtn, lv_color_hex(UI_COL_CARD), LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_bellBtn, lv_color_hex(UI_COL_ACCENT), LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_bellBtn, 1, LV_PART_MAIN);
+    if (s_bellLabel != nullptr)
+      lv_obj_set_style_text_color(s_bellLabel, lv_color_hex(UI_COL_ACCENT), LV_PART_MAIN);
   }
+}
+
+void ui_update_nav() {
+  // Before login the nav tabs are unusable: grey them out and disable input.
+  // Active-route highlight only applies once logged in.
+  if (!g.loggedIn) {
+    set_tab_locked(s_tabHome, true);
+    set_tab_locked(s_tabData, true);
+    set_tab_locked(s_tabControl, true);
+    set_tab_locked(s_tabInfo, true);
+    return;
+  }
+  set_tab_locked(s_tabHome, false);
+  set_tab_locked(s_tabData, false);
+  set_tab_locked(s_tabControl, false);
+  set_tab_locked(s_tabInfo, false);
+  bool homeActive = (s_route == 0);
+  bool dataActive = (s_route >= 1 && s_route <= 3);
+  bool controlActive = (s_route == 4);
+  bool infoActive = (s_route == 5);
+  set_tab_state(s_tabHome, homeActive);
+  set_tab_state(s_tabData, dataActive);
+  set_tab_state(s_tabControl, controlActive);
+  set_tab_state(s_tabInfo, infoActive);
+}
+
+void ui_update_clock() {
+  if (s_clock != nullptr) lv_label_set_text(s_clock, "--:--");
 }
 
 // --- modal ---
@@ -201,6 +344,11 @@ bool ui_modal_visible() { return s_modal != nullptr; }
 
 static void render_current() {
   if (s_content == nullptr) return;
+  // Per-route teardown before lv_obj_clean() frees the widgets. Without this
+  // the /control statics (s_dbWarn, hold bars) dangle and the poll/timer
+  // callbacks spam "No screen found" on the deleted objects.
+  screen_control_hide();
+  screen_home_hide();
   lv_obj_clean(s_content);
   switch (s_route) {
     case 1:
@@ -225,6 +373,7 @@ static void render_current() {
       screen_home_show(s_content);
       break;
   }
+  ui_update_nav();
 }
 
 void ui_show_home() {
@@ -259,6 +408,7 @@ void ui_show_setup() {
   render_current();
 }
 bool ui_is_setup() { return s_route == 6; }
+bool ui_is_control() { return s_route == 4; }
 bool ui_is_info() { return s_route == 5; }
 
 void ui_refresh_current() {
@@ -303,6 +453,20 @@ void ui_eval_overheat() {
   s_warn41Shown = false;
 }
 
+void ui_experiment_toggle() {
+  if (g.experimentRunning) {
+    g.experimentRunning = false;
+    g.experimentStartMs = 0;
+  } else {
+    g.experimentRunning = true;
+    g.experimentStartMs = millis();
+    g.expNum++;
+  }
+  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  Serial.printf("[FAKE->WT32] RUN %s\n", g.experimentRunning ? "ON" : "OFF");
+  ui_update_bell();
+}
+
 // --- init ---
 
 static void on_push_timer(lv_timer_t *t) {
@@ -315,6 +479,11 @@ void ui_init() {
   lv_obj_t *scr = lv_screen_active();
   style_plain(scr, UI_COL_BG);
 
+  // Swipe navigation. Registered for the direction codes (not the generic
+  // GESTURE, which would double-fire since the indev sends both).
+  lv_obj_add_event_cb(scr, on_swipe_gesture, LV_EVENT_GESTURE_LEFT, nullptr);
+  lv_obj_add_event_cb(scr, on_swipe_gesture, LV_EVENT_GESTURE_RIGHT, nullptr);
+
   build_status_bar(scr);
 
   s_content = lv_obj_create(scr);
@@ -324,5 +493,7 @@ void ui_init() {
 
   ui_show_setup();  // first route until the WT32 reports RESULT=success
   ui_update_bell();
+  ui_update_nav();
+  ui_update_clock();
   lv_timer_create(on_push_timer, UI_PUSH_PERIOD_MS, nullptr);
 }

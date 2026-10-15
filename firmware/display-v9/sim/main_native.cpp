@@ -10,6 +10,7 @@
 #include "link_modbus.h"
 #include "serial_cmd.h"
 #include "screen_control.h"
+#include "screen_home.h"
 #include "screen_info.h"
 #include "screen_setup.h"
 #include "screen_sleep.h"
@@ -45,8 +46,10 @@ int main(int argc, char **argv) {
     serial_cmd_poll();
     link_modbus_poll();
     screen_setup_poll();
+    screen_home_poll();
     screen_control_poll();
     screen_info_poll();
+    ui_update_clock();
     sleep_tick();
     lv_timer_handler();
     SDL_Delay(5);
