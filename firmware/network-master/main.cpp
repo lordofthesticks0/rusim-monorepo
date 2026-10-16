@@ -8,6 +8,8 @@
 #include <atomic>
 #include <cstring>
 
+#include "supabase_ca.h"
+
 // network-master: production WT32-ETH01 firmware.
 //
 // - Brings up the LAN8720 over RMII (variant defaults: ADDR 1, PWR 16,
@@ -42,6 +44,9 @@
 //   0x0060 DURATION_H 1 reg, 1-99
 //   0x0005 DB_LATEST  master WR. Latest experiment_id in DB, 0xFFFF = unknown
 //   0x0006 TIME_OK    master WR. 1 = NTP synced, 0 = no valid time yet
+//   0x0007 DB_BOTTLES master WR. bottle_count from authenticate(), 0xFFFF = unknown
+//   0x0008 PUSH_DROPS master WR. Buffered push rows dropped on overflow
+//                        (oldest-drop), saturated at 0xFFFF
 //   0x0070-0x0077 IP_ADDR 8 regs = 16 bytes ASCII NUL-padded, master WR
 //   0x0078 PING_MS 1 reg, master WR. Avg ping to 1.1.1.1 in ms,
 //                        0xFFFF = no data / ping failed
@@ -90,6 +95,8 @@ static void IRAM_ATTR onPollRequest() { s_pollRequest.store(true); }
 #define LINK_REG_DURATION 0x0060
 #define LINK_REG_DB_LATEST 0x0005
 #define LINK_REG_TIME_OK 0x0006
+#define LINK_REG_DB_BOTTLES 0x0007
+#define LINK_REG_PUSH_DROPS 0x0008
 #define LINK_REG_IP_BASE 0x0070
 #define LINK_REG_IP_REGS 8
 #define LINK_REG_PING_MS 0x0078
@@ -124,10 +131,29 @@ static const char* kNtp2 = "time.google.com";
 static bool ntpSynced = false;
 static String dbSession;
 static int dbLatest = -2;  // -2 unknown, -1 none yet, >=0 latest experiment_id
+static int dbBottleCount = -1;  // -1 unknown, else bottle_count from authenticate()
+// Owner contact from authenticate(), kept for logs/info only. Bounded
+// char arrays, never heap Strings: truncated at 63 chars + NUL.
+static char dbOwnerName[64] = {0};
+static char dbOwnerEmail[64] = {0};
 static uint32_t lastDbPollMs = 0;
 static const uint32_t kDbPollMs = 30000;
 
 static const size_t kMaxBody = 4096;
+// Push body is sized separately from the portal's kMaxBody: one round of up
+// to 24 bottle objects as JSON is ~3 KB, so 6 KB leaves headroom without
+// inheriting the portal's 8 KB-page constant.
+static const size_t kPushBodyCap = 6144;
+// Ring capacity in bottle rows: 1200 rows = 50 full 24-bottle rounds at
+// ~40 bytes/row (~48 KB). Well under the 100-150 KB ceiling; a dropped row
+// is better than an overrun, and drops are counted, not silent.
+static const size_t kPushQueueRows = 1200;
+// Rounds flushed per syncDbLatest cycle: bounds worst-case blocking (each
+// POST has its own 10 s timeout) while draining gradually after an outage.
+static const int kPushFlushRounds = 2;
+// Sample-time floor, mirroring the server backstop (2025-01-01). Rows older
+// than this are rejected at enqueue so a 1970 clock can never enter the queue.
+static const uint32_t kMinSampleUnix = 1735689600UL;
 static const uint32_t kCredPollMs = 5000;
 // Re-probe for an already-valid portal session while waiting for creds.
 // Without this the gate deadlocks when no login is needed: the display
@@ -841,6 +867,143 @@ static void ensureNtpSync() {
   mbWriteSingle(LINK_REG_TIME_OK, 0);
 }
 
+// --- Supabase TLS + auth metadata + push queue (esp-db-sync plan) ---
+
+// Supabase gets a pinned CA bundle; the captive-portal path below stays
+// setInsecure() because the interception sits above TLS termination and
+// cannot be verified. Never add a setInsecure() fallback here: a broken pin
+// must fail loudly (soft, visible degradation) rather than silently reopen
+// the hole.
+static void sbApplyTls(WiFiClientSecure& client) { client.setCACert(kSupabaseCaPem); }
+
+// Parses one integer field out of a flat JSON object reply. Bounded: no
+// allocation, works on the caller's NUL-terminated buffer. Returns false
+// when the key is absent or not a number; the caller keeps its default.
+static bool sbParseIntField(const char* resp, const char* key, int& out) {
+  if (resp == nullptr || key == nullptr) return false;
+  char needle[48];
+  snprintf(needle, sizeof(needle), "\"%s\":", key);
+  const char* at = strstr(resp, needle);
+  if (at == nullptr) return false;
+  at += strlen(needle);
+  while (*at == ' ' || *at == '\t') at++;
+  if ((*at < '0' || *at > '9') && *at != '-') return false;
+  out = atoi(at);
+  return true;
+}
+
+// Parses one string-or-null field. Absent key -> false (caller keeps its
+// default); explicit null -> true with empty output; otherwise a bounded,
+// NUL-terminated copy truncated at cap - 1.
+static bool sbParseStrField(const char* resp, const char* key, char* out, size_t cap) {
+  if (resp == nullptr || key == nullptr || out == nullptr || cap == 0) return false;
+  char needle[48];
+  snprintf(needle, sizeof(needle), "\"%s\":", key);
+  const char* at = strstr(resp, needle);
+  if (at == nullptr) return false;
+  at += strlen(needle);
+  while (*at == ' ' || *at == '\t') at++;
+  if (strncmp(at, "null", 4) == 0) {
+    out[0] = '\0';
+    return true;
+  }
+  if (*at != '"') return false;
+  at++;
+  size_t pos = 0;
+  while (*at != '\0' && *at != '"' && pos + 1 < cap) {
+    if (*at == '\\' && *(at + 1) != '\0') at++;  // keep the escaped char raw
+    out[pos++] = *at++;
+  }
+  out[pos] = '\0';
+  return true;
+}
+
+// Keeps bottle_count + owner contact from authenticate() instead of
+// discarding them. bottle_count feeds the new DB_BOTTLES display register;
+// owner fields are log/info only.
+static void sbParseAuthMeta(const String& resp) {
+  const char* c = resp.c_str();
+  int bottles = -1;
+  if (sbParseIntField(c, "bottle_count", bottles) && bottles > 0 && bottles <= 99) {
+    dbBottleCount = bottles;
+  }
+  sbParseStrField(c, "owner_name", dbOwnerName, sizeof(dbOwnerName));
+  sbParseStrField(c, "owner_email", dbOwnerEmail, sizeof(dbOwnerEmail));
+}
+
+// --- Sample push queue: fixed ring, oldest-drop (memory-safety skill:
+// bounded buffer, no heap in the hot path) ---
+//
+// One row per bottle that reported. An absent bottle (disconnected) is
+// simply not enqueued, which is distinct from a present-but-null sensor
+// (nullMask bit set). Rows carry sample time, never flush time.
+struct PushRow {
+  uint8_t bottleId;
+  int32_t experimentId;  // <0 = omit, server applies the active experiment
+  int64_t sampleUnix;    // seconds since epoch at sampling
+  float ph;
+  float pressure;
+  float tempC;
+  float co2;
+  float ch4;
+  uint8_t nullMask;  // bit0 ph, 1 pressure, 2 temp, 3 co2, 4 ch4
+};
+
+// One bottle as handed over by the future sensor poller (dormant until the
+// deferred sensor chain lands; index in the array is the bottle id).
+struct BottleReading {
+  float ph;
+  float pressure;
+  float tempC;
+  float co2;
+  float ch4;
+  uint8_t nullMask;
+};
+
+static PushRow s_pushQueue[kPushQueueRows];
+static size_t s_pushHead = 0;   // oldest row
+static size_t s_pushTail = 0;   // next write slot
+static size_t s_pushCount = 0;  // rows held
+static uint32_t s_pushDrops = 0;  // saturating overflow counter -> PUSH_DROPS reg
+static char s_pushBody[kPushBodyCap];
+
+// Queues one sample round (up to 24 bottles). Rejects while NTP is unsynced
+// and any sample older than kMinSampleUnix, so no 1970 row can ever enter.
+// Full queue drops the oldest row, never the newest, and counts it.
+static bool pushEnqueueRound(time_t sampleUnix, int experimentId,
+                             const BottleReading* readings, size_t n) {
+  if (!ntpSynced) {
+    Serial.println("[PUSH] refused: NTP unsynced (TIME_OK=0)");
+    return false;
+  }
+  if (readings == nullptr || n == 0 || n > 24) return false;
+  if (sampleUnix < (time_t)kMinSampleUnix) {
+    Serial.println("[PUSH] refused: sample time predates 2025-01-01");
+    return false;
+  }
+  for (size_t i = 0; i < n; i++) {
+    if (i > 255) break;  // bottleId is uint8_t; rounds never exceed 24
+    if (s_pushCount == kPushQueueRows) {
+      s_pushHead = (s_pushHead + 1) % kPushQueueRows;
+      s_pushCount--;
+      if (s_pushDrops < 0xFFFFFFFFu) s_pushDrops++;
+    }
+    PushRow& r = s_pushQueue[s_pushTail];
+    r.bottleId = (uint8_t)i;
+    r.experimentId = (int32_t)experimentId;
+    r.sampleUnix = (int64_t)sampleUnix;
+    r.ph = readings[i].ph;
+    r.pressure = readings[i].pressure;
+    r.tempC = readings[i].tempC;
+    r.co2 = readings[i].co2;
+    r.ch4 = readings[i].ch4;
+    r.nullMask = readings[i].nullMask;
+    s_pushTail = (s_pushTail + 1) % kPushQueueRows;
+    s_pushCount++;
+  }
+  return true;
+}
+
 // --- Supabase real-data fetch (backlog #1) via device token (devices.token_hash) ---
 static bool sbAuthenticate() {
   if (String(SUPABASE_URL).length() == 0 || String(SUPABASE_ANON_KEY).length() == 0 ||
@@ -851,7 +1014,7 @@ static bool sbAuthenticate() {
   String url = String(SUPABASE_URL) + "/rest/v1/rpc/authenticate";
   String body = String("{\"p_token\":\"") + DEVICE_TOKEN + "\"}";
   WiFiClientSecure client;
-  client.setInsecure();
+  sbApplyTls(client);
   HTTPClient http;
   http.begin(client, url);
   http.setTimeout(10000);
@@ -876,7 +1039,9 @@ static bool sbAuthenticate() {
       }
       if (hexStart >= 0) {
         dbSession = resp.substring(hexStart, hexStart + 64);
-        Serial.println("[DB] authenticated, session cached (RAM only)");
+        sbParseAuthMeta(resp);
+        Serial.printf("[DB] authenticated, session cached (RAM only), bottles=%d owner='%s'\n",
+                      dbBottleCount, dbOwnerName);
         ok = true;
       }
     }
@@ -903,7 +1068,7 @@ static int sbFetchLatestExp() {
                "/rest/v1/readings?select=experiment_id&order=experiment_id.desc&limit=1";
   for (int attempt = 0; attempt < 2; attempt++) {
     WiFiClientSecure client;
-    client.setInsecure();
+    sbApplyTls(client);
     HTTPClient http;
     http.begin(client, url);
     http.setTimeout(10000);
@@ -930,6 +1095,125 @@ static int sbFetchLatestExp() {
   return -2;
 }
 
+// Formats one queued round (all rows sharing the head's sampleUnix, up to
+// 24) as a JSON array in s_pushBody. Returns the row count, or 0 when the
+// queue is empty or the body would overflow (which sizes kPushBodyCap).
+static size_t pushFormatHeadRound() {
+  if (s_pushCount == 0) return 0;
+  int64_t headTs = s_pushQueue[s_pushHead].sampleUnix;
+  size_t rows = 0;
+  while (rows < s_pushCount && rows < 24) {
+    if (s_pushQueue[(s_pushHead + rows) % kPushQueueRows].sampleUnix != headTs) break;
+    rows++;
+  }
+  struct tm tmv;
+  time_t ts = (time_t)headTs;
+  gmtime_r(&ts, &tmv);
+  char tsBuf[32];
+  snprintf(tsBuf, sizeof(tsBuf), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+           tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+           tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+  size_t pos = 0;
+  s_pushBody[0] = '[';
+  pos = 1;
+  for (size_t k = 0; k < rows; k++) {
+    const PushRow& r = s_pushQueue[(s_pushHead + k) % kPushQueueRows];
+    char obj[256];
+    char phB[16], prB[16], teB[16], coB[16], chB[16];
+    auto fmtVal = [](float v, bool isNull, char* b, size_t n) {
+      if (isNull) snprintf(b, n, "null");
+      else snprintf(b, n, "%.6g", (double)v);
+    };
+    fmtVal(r.ph, r.nullMask & 0x01, phB, sizeof(phB));
+    fmtVal(r.pressure, r.nullMask & 0x02, prB, sizeof(prB));
+    fmtVal(r.tempC, r.nullMask & 0x04, teB, sizeof(teB));
+    fmtVal(r.co2, r.nullMask & 0x08, coB, sizeof(coB));
+    fmtVal(r.ch4, r.nullMask & 0x10, chB, sizeof(chB));
+    int w;
+    if (r.experimentId < 0) {
+      w = snprintf(obj, sizeof(obj),
+                   "%s{\"bottle_id\":%u,\"timestamp\":\"%s\","
+                   "\"ph\":%s,\"pressure\":%s,\"temp\":%s,\"co2\":%s,\"ch4\":%s}",
+                   k ? "," : "", r.bottleId, tsBuf, phB, prB, teB, coB, chB);
+    } else {
+      w = snprintf(obj, sizeof(obj),
+                   "%s{\"bottle_id\":%u,\"timestamp\":\"%s\",\"experiment_id\":%ld,"
+                   "\"ph\":%s,\"pressure\":%s,\"temp\":%s,\"co2\":%s,\"ch4\":%s}",
+                   k ? "," : "", r.bottleId, tsBuf, (long)r.experimentId,
+                   phB, prB, teB, coB, chB);
+    }
+    if (w <= 0 || (size_t)w >= sizeof(obj)) return 0;
+    if (pos + (size_t)w + 2 > sizeof(s_pushBody)) return 0;  // +2 for ']' + NUL
+    memcpy(s_pushBody + pos, obj, (size_t)w);
+    pos += (size_t)w;
+  }
+  s_pushBody[pos++] = ']';
+  s_pushBody[pos] = '\0';
+  return rows;
+}
+
+// POSTs the oldest queued round to push_readings(). The RPC resolves
+// device_id from the session and ignores unknown keys, so identity cannot be
+// forged from here; replays are idempotent server-side. Dequeues only on a
+// 2xx so a failed flush is retried, never lost (until oldest-drop).
+// Returns true when the queue advanced (round sent or queue empty).
+static bool sbPushOneRound() {
+  if (s_pushCount == 0) return true;
+  if (dbSession.length() == 0 && !sbAuthenticate()) return false;
+  size_t rows = pushFormatHeadRound();
+  if (rows == 0) {
+    Serial.println("[PUSH] format failed (queue inconsistent or body cap)");
+    return false;
+  }
+  String url = String(SUPABASE_URL) + "/rest/v1/rpc/push_readings";
+  for (int attempt = 0; attempt < 2; attempt++) {
+    WiFiClientSecure client;
+    sbApplyTls(client);
+    HTTPClient http;
+    http.begin(client, url);
+    http.setTimeout(10000);
+    http.addHeader("apikey", SUPABASE_ANON_KEY);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Accept", "application/json");
+    http.addHeader("x-device-session", dbSession);
+    int code = http.POST((uint8_t*)s_pushBody, strlen(s_pushBody));
+    if (code >= 200 && code < 300) {
+      String resp = http.getString();
+      http.end();
+      s_pushHead = (s_pushHead + rows) % kPushQueueRows;
+      s_pushCount -= rows;
+      Serial.printf("[PUSH] flushed %u rows (server says %s, %u left)\n",
+                    (unsigned)rows, resp.c_str(), (unsigned)s_pushCount);
+      return true;
+    }
+    Serial.printf("[PUSH] push_readings HTTP %d (attempt %d, %u queued)\n",
+                  code, attempt, (unsigned)s_pushCount);
+    http.end();
+    if (code == 401 || code == 403) {
+      dbSession = "";
+      if (!sbAuthenticate()) return false;
+    } else {
+      return false;
+    }
+  }
+  return false;
+}
+
+// Flushes buffered rounds, oldest first. Clock-gated: returns early while
+// NTP is unsynced so nothing is ever stamped at 1970; rows stay queued.
+// Dormant until the sensor chain lands: with an empty queue this is a no-op.
+static void sbPushReadings() {
+  if (!ntpSynced) return;
+  if (s_pushCount == 0) return;
+  if (String(SUPABASE_URL).length() == 0 || String(SUPABASE_ANON_KEY).length() == 0 ||
+      String(DEVICE_TOKEN).length() == 0) {
+    return;
+  }
+  for (int i = 0; i < kPushFlushRounds && s_pushCount > 0; i++) {
+    if (!sbPushOneRound()) break;
+  }
+}
+
 // Pushes DB latest + time state to the display (backlog #9).
 static void pushDbState() {
   uint16_t latestReg = (dbLatest >= 0) ? (uint16_t)dbLatest : (dbLatest == -1 ? 0 : 0xFFFF);
@@ -940,6 +1224,14 @@ static void pushDbState() {
   }
   if (!mbWriteSingle(LINK_REG_TIME_OK, ntpSynced ? 1 : 0)) {
     Serial.println("[MB] TIME_OK write failed");
+  }
+  uint16_t bottlesReg = (dbBottleCount > 0) ? (uint16_t)dbBottleCount : 0xFFFF;
+  if (!mbWriteSingle(LINK_REG_DB_BOTTLES, bottlesReg)) {
+    Serial.println("[MB] DB_BOTTLES write failed");
+  }
+  uint16_t dropsReg = (s_pushDrops > 0xFFFFu) ? 0xFFFF : (uint16_t)s_pushDrops;
+  if (!mbWriteSingle(LINK_REG_PUSH_DROPS, dropsReg)) {
+    Serial.println("[MB] PUSH_DROPS write failed");
   }
 }
 
@@ -957,6 +1249,10 @@ static void syncDbLatest(bool force) {
     Serial.println("[DB] fetch failed, keeping last known value");
   }
   pushDbState();
+  // Drain buffered sample rounds (no-op until the sensor chain enqueues).
+  // Clock gating lives inside sbPushReadings: TIME_OK reporting above is
+  // unaffected, so the display keeps showing unsynced state.
+  sbPushReadings();
 }
 
 // Returns true on authenticated, false otherwise. Reports the verdict to
@@ -1156,8 +1452,9 @@ void loop() {
         stage = STAGE_NEED_CREDS;
         break;
       }
-      Serial.printf("[RUN] exp=%d duration=%dh running=%d dbLatest=%d ntp=%d (quick-polled)\n",
-                    expNum, durationH, expRunning ? 1 : 0, dbLatest, ntpSynced ? 1 : 0);
+      Serial.printf("[RUN] exp=%d duration=%dh running=%d dbLatest=%d bottles=%d ntp=%d queued=%u drops=%u (quick-polled)\n",
+                    expNum, durationH, expRunning ? 1 : 0, dbLatest, dbBottleCount,
+                    ntpSynced ? 1 : 0, (unsigned)s_pushCount, (unsigned)s_pushDrops);
       delay(kIntervalMs);
       break;
     }

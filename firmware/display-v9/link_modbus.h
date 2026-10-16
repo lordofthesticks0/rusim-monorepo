@@ -21,6 +21,10 @@
 //   0x0005 DB_LATEST   master WR, slave RO. Latest experiment_id in DB,
 //                        0xFFFF = unknown (no sync yet).
 //   0x0006 TIME_OK     master WR, slave RO. 1 = master NTP synced.
+//   0x0007 DB_BOTTLES  master WR, slave RO. bottle_count from authenticate(),
+//                        0xFFFF = unknown.
+//   0x0008 PUSH_DROPS  master WR, slave RO. Buffered push rows dropped on
+//                        WT32 queue overflow, saturated at 0xFFFF.
 //   0x0010-0x002F USERNAME 32 regs = 64 bytes ASCII.
 //   0x0030-0x004F PASSWORD 32 regs = 64 bytes ASCII.
 //   0x0060 DURATION_H 1 reg, 1-99.
@@ -58,6 +62,8 @@
 #define LINK_REG_EXP_NUM 0x0004
 #define LINK_REG_DB_LATEST 0x0005
 #define LINK_REG_TIME_OK 0x0006
+#define LINK_REG_DB_BOTTLES 0x0007
+#define LINK_REG_PUSH_DROPS 0x0008
 #define LINK_REG_USER_BASE 0x0010
 #define LINK_REG_USER_REGS 32
 #define LINK_REG_PASS_BASE 0x0030
@@ -113,6 +119,10 @@ uint32_t link_modbus_net_age_ms();  // ms since last NET_UP write, ~0 = never
 // Returns -2 when never synced, -1 when DB has no experiments yet, else latest id.
 int link_modbus_get_db_latest();
 bool link_modbus_time_ok();
+// bottle_count from authenticate(), -1 when unknown (0xFFFF on the wire).
+int link_modbus_get_db_bottles();
+// Buffered push rows dropped on WT32 queue overflow (saturated at 0xFFFF).
+int link_modbus_get_push_drops();
 
 // Debug over USB Serial.
 void link_modbus_debug_print();

@@ -29,11 +29,23 @@ Scope: `firmware/display-v9/main.cpp`, `firmware/display-v9/provision_ap.cpp`,
   into stack temps, trims whitespace in place, validates non-empty, then
   `strncpy` into globals and `memset` wipes the temps. `clearCreds()` overwrites
   then zeroes. `doLogin()` logs `username` directly.
+- Auth metadata: `dbOwnerName` / `dbOwnerEmail` are `char[64]` globals filled
+  by `sbParseIntField()` / `sbParseStrField()`, which scan the one-shot
+  authenticate reply with `strstr` + bounded copy (truncate at `cap - 1`,
+  NUL always written). Missing keys keep defaults; explicit JSON null
+  yields empty. No `String` temps per field.
 - HTTP bodies: added `readBodyFixed(http, out, cap)` capped at `kMaxBody`,
   `memcpy` chunks, NUL-terminates, returns length. `readBody()` kept as a
   one-shot wrapper (single `String` alloc from the fixed buffer) so existing
   callers (`fetchPortalUrl`, `postCredentials`, `fetchData`) keep working
   without per-chunk `concat` realloc churn.
+- Push queue: `s_pushQueue[1200]` static ring of 40-byte `PushRow` structs
+  (~48 KB) plus a static 6 KB JSON body (`kPushBodyCap`, separate from the
+  portal's `kMaxBody`). Oldest-drop on overflow with a saturating
+  `uint32_t` drop counter; no `malloc`/`String` in enqueue, format, or
+  flush. `pushFormatHeadRound()` builds the POST body with cursor-checked
+  `snprintf`/`memcpy` and bails returning 0 on any overflow instead of
+  truncating silently. Dequeue happens only on HTTP 2xx.
 - Page scan: `PageScan.formAction[256]` / `redir[256]` / `magic[128]` replace
   `String` fields. `valueAfterFixed()` uses `strstr`/`strchr` + bounded
   `memcpy`. `scanPage()` keeps a `char win[321]` rolling window with
@@ -45,11 +57,27 @@ Scope: `firmware/display-v9/main.cpp`, `firmware/display-v9/provision_ap.cpp`,
   with `exchange(false)`. Removes the ISR/loop data race with identical
   semantics.
 
+## display-v9: new master-written registers
+
+- `s_dbBottles` (`int`, `-1` unknown) and `s_pushDrops` (`uint16_t`,
+  saturating) mirror the `0x0007`/`0x0008` writes. `reg_read` maps unknown
+  to `0xFFFF`; `reg_write` maps it back. Both addresses added to
+  `reg_addr_valid` and the FC `0x10` writable set together, keeping the
+  one-writer rule. `/info` DB tile formats into a `char[32]` with
+  `snprintf`, ASCII only (no glyph risk from the compressed font).
+
 ## Verification
 
-- `pio run -e display-v9` — SUCCESS (RAM 36.1%, Flash 32.3%).
-- `pio run -e network-master` — SUCCESS (RAM 15.8%, Flash 74.6%).
-- `pio run -e display-sim` — SUCCESS (unchanged shared screens).
+- `pio run -e display-v9` — SUCCESS (RAM 36.0%, Flash 34.4%).
+- `pio run -e network-master` — SUCCESS (RAM 17.7%, Flash 75.2%).
+- `pio run -e display-sim` — SUCCESS (unchanged shared screens + new register stubs).
+- Queue/auth-meta/format logic: host test compiling the real functions
+  (`sbParseIntField`, `sbParseStrField`, `sbParseAuthMeta`,
+  `pushEnqueueRound`, `pushFormatHeadRound`) against Arduino stubs —
+  auth reply shapes, clock-gate refusals, exact JSON output, oldest-drop
+  counting to cap — all pass. The dormant queue is folded away by the
+  optimizer until the sensor pass enqueues (verified absent via `nm`;
+  ~0 RAM cost now, ~54 KB when materialized).
 - Hardware refs: ESP32-S3 display + WT32-ETH01 per `docs/hardware.md` §2-3;
   no pin or wiring changes.
 

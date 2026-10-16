@@ -13,7 +13,7 @@ This document catalogs the persistent schemas present in the live database. “S
 | `extensions` | 2 views, 55 routines, 2 custom types | Installed PostgreSQL extensions and their objects. The views are `pg_stat_statements` and `pg_stat_statements_info`. |
 | `graphql` | No relations or routines observed | Reserved GraphQL API namespace; currently empty. |
 | `graphql_public` | 1 routine; no relations | Public GraphQL entry point. |
-| `device_data` | 3 tables, 4 routines | **Active application schema.** Device registry, time-series readings, and token sessions. All 3 tables report RLS enabled. Exposed through the API and used exclusively by the dashboard. |
+| `device_data` | 5 tables, 5 routines | **Active application schema.** Device registry, time-series readings, token sessions, experiment configs, and per-device config. All 5 tables report RLS enabled. Exposed through the API and used exclusively by the dashboard. |
 | `public` | 12 tables, 4 sequences, 2 routines, 12 custom types | Legacy dashboard application schema, superseded by `device_data` and no longer read by the app. Tables and relationships described below. All 12 tables report RLS enabled. Retained for rollback. |
 | `realtime` | 11 tables (including one partitioned parent and eight date partitions), 1 sequence, 15 routines, 16 custom types | Supabase Realtime messages, subscriptions, and migration state. The partitioned message parent is `messages`; partitions observed cover 2026-09-26 through 2026-10-03. |
 | `storage` | 8 tables, 19 routines, 9 custom types | Supabase Storage buckets, objects, multipart uploads, vector/analytics bucket metadata, and migration state. All 8 tables report RLS enabled. |
@@ -27,6 +27,8 @@ The dashboard reads only this schema. It is a separate PostgreSQL namespace beca
 - `devices`: integer device registry, bottle count, owner contact details, and a hashed device token.
 - `readings`: sensor samples per device/bottle/timestamp, grouped into experiments.
 - `sessions`: short-lived token sessions created by a successful login, used to scope every read to one device.
+- `experiments`: per-device experiment configs (number, start, duration, sample interval, setpoints) pulled by the WT32.
+- `device_config`: one row per device for `bottle_count` and owner contact, seeded from `devices`, pulled by the WT32.
 
 The full column reference is in the [Reference](#reference-device_data-column-detail) section below, which records the live state.
 
@@ -64,7 +66,7 @@ The following inventories name every table and view found in the persistent proj
 
 - **`auth` tables:** `audit_log_entries`, `custom_oauth_providers`, `flow_state`, `identities`, `instances`, `mfa_amr_claims`, `mfa_challenges`, `mfa_factors`, `mfa_recovery_code_sets`, `mfa_recovery_codes`, `oauth_authorizations`, `oauth_client_states`, `oauth_clients`, `oauth_consents`, `one_time_tokens`, `refresh_tokens`, `saml_providers`, `saml_relay_states`, `schema_migrations`, `scim_tokens`, `scim_users`, `sessions`, `sso_domains`, `sso_providers`, `users`, `webauthn_challenges`, `webauthn_credentials`.
 - **`extensions` views:** `pg_stat_statements`, `pg_stat_statements_info`.
-- **`device_data` tables:** `devices`, `readings`, `sessions`.
+- **`device_data` tables:** `devices`, `readings`, `sessions`, `experiments`, `device_config`.
 - **`public` tables (legacy, unused):** `chamber_status_events`, `chambers`, `device_status_events`, `devices`, `experiment_chambers`, `experiment_devices`, `experiment_nodes`, `experiment_sessions`, `experiments`, `node_status_events`, `nodes`, `telemetry_readings`.
 - **`realtime` relations:** partitioned table `messages` (partitions `messages_2026_09_26` through `messages_2026_10_03`), `schema_migrations`, `subscription`.
 - **`storage` tables:** `buckets`, `buckets_analytics`, `buckets_vectors`, `migrations`, `objects`, `s3_multipart_uploads`, `s3_multipart_uploads_parts`, `vector_indexes`.
@@ -82,7 +84,7 @@ The inventory records schema structure, not a general operational health assessm
 
 ## Reference: `device_data` column detail
 
-Created by `dashboard/supabase/migrations/20260930082137_create_device_data_schema.sql`. **This schema is applied to the live project** and is now the only schema the dashboard reads. Migrations `20260930162000` through `20260930172000` added token authentication, made readings a time series, and populated development data.
+Created by `dashboard/supabase/migrations/20260930082137_create_device_data_schema.sql`. **This schema is applied to the live project** and is now the only schema the dashboard reads. Migrations `20260930162000` through `20260930172000` added token authentication, made readings a time series, and populated development data. Migration `20261016000000` added the device write path (`push_readings`) plus the `experiments` and `device_config` pull tables.
 
 ### `device_data.devices`
 
@@ -119,15 +121,37 @@ Because `experiment_id` is not in the key, one bottle cannot hold the same times
 | `created_at` | `timestamptz` | Required, defaults to `now()`. |
 | `expires_at` | `timestamptz` | Required, must be later than `created_at`. Currently set to 24 hours after login. |
 
+### `device_data.experiments`
+
+| Column | Type | Rules / meaning |
+|---|---|---|
+| `device_id` | `integer` | Part of the primary key; foreign key to `devices.device_id`, cascading on delete. |
+| `experiment_id` | `integer` | Part of the primary key; non-negative. Groups readings; not part of the readings key. |
+| `started_at` | `timestamptz` | Required, defaults to `now()`. |
+| `duration_h` | `integer` | Nullable; 1-99 when present (matches the display clamp). |
+| `sample_interval_s` | `integer` | Nullable; positive when present. |
+| `setpoints` | `jsonb` | Required, defaults to `{}`. |
+
+### `device_data.device_config`
+
+| Column | Type | Rules / meaning |
+|---|---|---|
+| `device_id` | `integer` | Primary key; foreign key to `devices.device_id`, cascading on delete. |
+| `bottle_count` | `integer` | Required, positive. Mirrors `devices.bottle_count`; seeded from it. |
+| `owner_name` | `text` | Nullable. Mirrors `devices.owner_name`. |
+| `owner_email` | `text` | Nullable. Mirrors `devices.owner_email`. |
+| `updated_at` | `timestamptz` | Required, defaults to `now()`. |
+
 ### Access control
 
 The dashboard is an anonymous browser client with no Supabase Auth user, so access is granted per device by token exchange:
 
 - `authenticate(p_token)` hashes the supplied token with SHA-512 and matches it against `devices.token_hash`, then inserts a session row and returns the session token plus device details. `SECURITY DEFINER`, because `anon` cannot read `token_hash`. A wrong token and an unknown token raise the same error, so the function is not an oracle for which devices exist.
+- `push_readings(p_readings jsonb)` inserts one sample round (up to 24 bottle objects) for the calling session's device and returns the inserted row count. `SECURITY DEFINER` with `device_id` forced from `session_device_id()`; the payload carries no identity, so a forged `device_id` key is ignored. Rejects non-arrays, `bottle_id` outside the device's `bottle_count`, timestamps before 2025-01-01 or more than 10 minutes in the future, and batches over 24 rows. A missing `experiment_id` resolves to the device's highest experiment, else `0`. Inserts use `ON CONFLICT (device_id, bottle_id, timestamp) DO NOTHING`, so replays are idempotent. The only write entry point: `readings` keeps its `SELECT`-only grants.
 - `revoke_session()` deletes the caller's own session.
 - `request_session_token()` reads the `x-device-session` request header. `session_device_id()` resolves it to a `device_id`, running `SECURITY DEFINER` so it can read the policy-free `sessions` table.
 
-The browser sends the session token in `x-device-session` on every read. RLS policies then restrict `devices` and `readings` to `device_id = device_data.session_device_id()`. `anon` and `authenticated` hold column-scoped `SELECT` on `devices` covering only `device_id`, `bottle_count`, `owner_name`, and `owner_email`, so `token_hash` is unreachable through PostgREST. `sessions` has no grants to client roles and is reachable only through the functions above.
+The browser sends the session token in `x-device-session` on every read. RLS policies then restrict `devices`, `readings`, `experiments`, and `device_config` to `device_id = device_data.session_device_id()`. `anon` and `authenticated` hold column-scoped `SELECT` on `devices` covering only `device_id`, `bottle_count`, `owner_name`, and `owner_email`, plus plain `SELECT` on `readings`, `experiments`, and `device_config`, so `token_hash` is unreachable through PostgREST. `sessions` has no grants to client roles and is reachable only through the functions above. Device writes go only through `push_readings()` (`EXECUTE` granted); direct `INSERT` on `readings` stays denied.
 
 Verified against the live project using only the anon publishable key: reads without a session return no rows, a valid session sees only its own device, `token_hash` and `sessions` both return permission denied, and a forged or expired token sees nothing.
 
@@ -142,4 +166,4 @@ It connects directly with `DATABASE_URL` using Bun's built-in Postgres client, s
 Every value reaches the database as a bound parameter rather than interpolated text. The readings are written in a single transaction, so a failure part-way through leaves the database untouched. Experiment `N` is placed one full span (`sample_count * gap`) further into the past than experiment `N-1`, so experiments occupy disjoint timestamp windows and generating one leaves the others intact. Bottles reporting are those below `bottle_count`; higher-numbered bottles never appear, which the dashboard reports as disconnected.
 
 ---
-Content generated by `stealth/space-bunny-alpha` using `opencode`.
+Content generated by `opencode/muse-spark-1.3-contributor-free` in `opencode`.

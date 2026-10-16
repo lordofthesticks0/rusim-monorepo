@@ -1,7 +1,16 @@
-# ESP to database sync — analysis and plan
+# ESP to database sync — plan
 
-Scope: how the WT32-ETH01 (`firmware/network-master`) could pull configuration
-and push sensor readings to Supabase, what already exists, and what is missing.
+> **Status: approved plan (2026-10-16), re-scoped (2026-10-16), steps 1, 2, 3, 7, 8 built (2026-10-16).** Decisions in
+> §6 are resolved. §8 is the build checklist.
+>
+> **Sensor chain deferred.** The Mega Mini sampling firmware, the WT32 RS485
+> master, and the display sensor registers (§8 steps 4–6) are out of the current
+> build order and will be implemented in a later pass. Nothing in the current
+> order samples sensors; the write path is written against a future sensor
+> source and stays dormant until that pass lands.
+
+Scope: how the WT32-ETH01 (`firmware/network-master`) pulls configuration
+and pushes sensor readings to Supabase, what already exists, and what is missing.
 
 `db-sync-experiment-ntp.md` documents the pull path that is already built. This
 document covers the whole round trip, including the push path, which does not
@@ -57,6 +66,10 @@ missing grant.
 ## 3. Nothing reads the sensors
 
 This is the larger gap, and no migration addresses it.
+
+> **Deferred (2026-10-16).** The sensor-side work described in this section is
+> not in the current build order. It stays here as the design the later pass
+> will follow.
 
 The five sensors are wired to the **ATmega2560 Mega Mini**
 (`docs/hardware.md` §5): HX710B pressure, TGS2611 methane, MH-Z19C CO2,
@@ -167,13 +180,104 @@ verified, because the interception sits above TLS termination
 host with a stable certificate chain.
 
 **Decision taken: pin the Supabase CA.** Replace `setInsecure()` on the Supabase
-calls with `setCACert()` and the Supabase root certificate. Leave the portal
-calls alone. Cost is roughly 1-2 KB against the ~316 KB of free flash recorded in
-`network-master.md` §6.
-
+calls with `setCACert()` and the root certificate. Leave the portal calls alone.
 This is the change that makes the device token defensible at all. Without it,
 anything on the wired network can read the token off the wire during
 authenticate and then hold a permanent credential.
+
+`setCACert()` is strictly better than it looks. In this core
+(`framework-arduinoespressif32` 4.20017.260907) it sets `_use_insecure = false`
+(`WiFiClientSecure.cpp:272`), and `esp_tls.h:162` documents that a null
+`common_name` means the certificate CN must match the hostname. The pin therefore
+turns on chain validation *and* hostname checking, which `setInsecure()` disables
+together.
+
+The chain observed on 2026-10-16 for `mdjpqjkduyexrlimepmb.supabase.co`:
+
+| Level | Subject | Issuer |
+|---|---|---|
+| Leaf | `CN=supabase.co` | `Google Trust Services, CN=WE1` |
+| Intermediate | `GTS WE1` | `Google Trust Services LLC, CN=GTS Root R4` |
+| Root | `GTS Root R4` | `GlobalSign Root CA` (cross-signature) |
+
+Leaf validity ran 2026-08-26 to 2026-11-24, a 90-day automated renewal. SANs are
+`supabase.co` and `*.supabase.co`, so the per-project subdomain matches by
+wildcard and hostname verification will pass. Check again with:
+
+```bash
+openssl s_client -connect <ref>.supabase.co:443 -servername <ref>.supabase.co \
+  -showcerts </dev/null 2>/dev/null | grep -E "^ *[0-9]+ s:|^ *i:"
+```
+
+### What a pin breaks, and what it does not
+
+| Change | Pin survives |
+|---|---|
+| Leaf renewal every 90 days | Yes. New leaf, same root. This is the common case. |
+| CDN, load balancer, or region change | Yes, while the chain still terminates at a pinned root. |
+| Supabase moving to a different CA | Only if that root is in the bundle. |
+| The root CA itself retiring | Yes. Public roots do not retire; the CA/B baseline requirements mandate successor certificates with long overlap. |
+
+Pinning a root survives the thing people actually worry about, rotation, because
+rotation happens below the root. What breaks a pin is a change of *trust anchor*,
+which is rare and slow.
+
+The mitigation is cheap. `setCACert()` takes a PEM string and mbedTLS parses
+concatenated blocks, so several roots go in one buffer. Bundle `GTS Root R4`,
+`GlobalSign Root CA R3` (the cross-sign above), and `ISRG Root X1` (Let's Encrypt,
+the plausible move if Supabase changes provider), at roughly 1 KB each.
+
+Three API notes for whoever implements this:
+
+- `setCACert()` **replaces** the trust store. It does not add to the bundled one,
+  so every root above must be passed explicitly.
+- Do not reach for `setCACertBundle()`. It loads the full Arduino CRT bundle at
+  around 200 KB, which does not fit the ~316 KB of free app partition recorded in
+  `network-master.md` §6.
+- `verify(fingerprint, domain)` pins a leaf and breaks on every renewal. Wrong
+  tool here.
+
+### Failure mode if the pin does break
+
+The handshake fails, `sbAuthenticate()` returns false, and `syncDbLatest()` logs
+the failure. Portal login and NTP use separate `setInsecure()` clients and are
+unaffected, so the device keeps running and the dashboard simply stops updating.
+`DB_LATEST` reverts to `0xFFFF`, which `link_modbus.h` already defines as unknown.
+The degradation is soft and visible.
+
+Do not add an automatic fallback to `setInsecure()`. It would silently reopen the
+hole being closed, and this failure is the kind that goes unnoticed for weeks.
+
+The residual cost is that a genuine trust-anchor change needs a reflash, and this
+firmware has no OTA. Bundling the three roots makes that unlikely; if units ever
+leave the lab, OTA becomes worth building before it becomes urgent.
+
+### What Postgres already computes
+
+`authenticate(p_token)` already does this. Line `:113`:
+
+```sql
+requested_hash := encode(sha512(convert_to(p_token, 'UTF8')), 'hex');
+```
+
+The device never computes SHA-512 and needs no crypto library for authentication.
+The plaintext token crosses the wire once, Postgres performs the only hash, and
+the stored value is a verifier rather than a credential. That ordering is what
+makes a database dump harmless and what keeps §4 from applying, since the hash
+never travels. It is the correct arrangement and should not be moved client-side
+to save a round trip, as there is no round trip to save.
+
+The same principle carries into the write path, with one exception:
+
+- **Let Postgres supply `device_id`**, from `session_device_id()`. This is what
+  the `SECURITY DEFINER` RPC in §6 does, and it removes the identity question
+  outright rather than relying on RLS to reject a forged value.
+- **Do not let Postgres supply `timestamp`.** It is tempting, since `now()` would
+  remove another client-supplied field, but it is wrong for any batch buffered
+  while the network was down: rows would carry flush time instead of sample time
+  and the time series would lie. `timestamp` is also part of the primary key
+  (`database.md:109`), so two buffered samples could collide on it. The device
+  sends sample time, already NTP-gated.
 
 ### The token is baked into flash
 
@@ -214,66 +318,51 @@ device's next login (`:127-129`), so the table does not grow without bound per
 device, but an unauthenticated caller can still drive insert churn across
 devices. Low priority for this project.
 
-## 6. Open decisions
+## 6. Decisions (resolved 2026-10-16)
 
-### How to grant the write
+### 6.1 Write grant: `SECURITY DEFINER` RPC
 
-Three options, unresolved:
+Decision: new `device_data.push_readings(jsonb)` with `SECURITY DEFINER`.
 
-| Option | Mechanism | Cost |
-|---|---|---|
-| `SECURITY DEFINER` RPC | New `device_data.push_readings(jsonb)` that forces `device_id` from `session_device_id()`. | A plpgsql batch insert function. The device never sends its own id. No table `INSERT` grant to `anon`. |
-| Column grant plus policy | `grant insert` on `readings` to `anon`, plus a `for insert` policy with `with check (device_id = device_data.session_device_id())`. | Least new code. The payload carries `device_id` and RLS rejects mismatches. |
-| Dedicated ingest role | A Postgres role with `INSERT` on `readings` and no access to `devices` or `token_hash`, keyed by a second secret on the device. | Strongest separation, and a second secret to manage. |
+- Forces `device_id` from `device_data.session_device_id()`. The device never sends its own id. `RUSIM_DEVICE_ID` stays log-only (`main.cpp:11`).
+- No table `INSERT` grant to `anon`. `readings` keeps `SELECT`-only grants; the RPC is the only write entry point. Rejected alternatives: column grant plus policy (payload carries `device_id`, wider `anon` surface), dedicated ingest role (second secret to manage).
+- `set search_path = pg_catalog, device_data`, `revoke all ... from public; grant execute ... to anon, authenticated`, matching `authenticate()` pattern in `20260930162000_add_device_data_token_auth.sql`.
+- Input is one JSONB array per sample round (24 objects max). Required per object: `bottle_id`, `timestamp` (sample time, timestamptz), nullable `ph`, `pressure`, `temp`, `co2`, `ch4`. Optional: `experiment_id`; when absent the function applies the device's active experiment.
+- Server-side checks: reject `timestamp` before 2025-01-01 or more than 10 minutes in the future; reject `bottle_id` outside the device's `bottle_count`; insert with `on conflict (device_id, bottle_id, timestamp) do nothing` so replays are idempotent.
 
-Recommended: the `SECURITY DEFINER` RPC. It keeps the identity assertion in the
-database, where the read path already keeps it, and it does not widen what
-`anon` can do against the table.
+### 6.2 Pull scope: full `experiments` plus one config row, scoped to same `device_id`
 
-Whatever is chosen must preserve one property the read path already has: the
-device never asserts its own `device_id`. `RUSIM_DEVICE_ID` is defined but
-deliberately log-only (`main.cpp:11`, `db-sync-experiment-ntp.md`).
+Decision: full pull, not the interim `bottle_count` register alone.
 
-### What the device should pull
+- Server-side (new migration): `device_data.experiments` holding experiment number, `device_id`, start time, duration, sample interval, and setpoints; plus `device_data.device_config` holding one row per device for `bottle_count` and owner contact. No experiments table exists today (`database.md:105`); this migration creates both.
+- RLS: `SELECT` scoped to `device_id = device_data.session_device_id()`, same pattern as `devices` / `readings` read policies. No device sees another device's rows.
+- WT32 polls both every 30 s alongside the existing latest-experiment query and pushes the result to the display over Modbus. `DURATION_H` (0x0060) remains display-owned until the experiments table lands; after that the WT32 copy overwrites it.
+- Interim step (no migration, still worth doing): stop discarding `bottle_count`, `owner_name`, `owner_email` from `authenticate()` and push `bottle_count` to the display as a new master-written register. The display grid is hardcoded to `UI_CLUSTERS` 6 x `UI_BOTTLES_PER_CLUSTER` 4 = 24 (`ui_config.h`).
 
-There is no experiments table (`database.md:105`). Experiment number is a bare
-integer column on `readings`, and `DURATION_H` (0x0060) is set from the display
-UI, not from the database. The dashboard therefore cannot command a run, and
-nothing can be pulled about run configuration because nothing stores it.
+## 7. Correctness rules for the push (decided)
 
-A minimal useful pull needs, server-side: an `experiments` table holding
-experiment number, start time, duration, sample interval, and setpoints, plus a
-`device_config` table for `bottle_count` and owner contact. The WT32 polls both
-every 30 s alongside the existing latest-experiment query and pushes the result
-to the display over Modbus.
-
-Cheaper interim step, no migration: stop discarding the `bottle_count`,
-`owner_name`, and `owner_email` that `authenticate()` already returns, and push
-`bottle_count` to the display as a new master-written register. The display's
-bottle grid is hardcoded to `UI_CLUSTERS` 6 x `UI_BOTTLES_PER_CLUSTER` 4 =
-24 (`ui_config.h`), which currently only agrees with the database by coincidence.
-
-## 7. Correctness details for the push
-
-**Clock gating.** `timestamp` is part of the primary key
+**Clock gating — refuse write when unsynced.** `timestamp` is part of the primary key
 `(device_id, bottle_id, timestamp)` (`database.md:109`). `ensureNtpSync()` gives
-up after 10 s and every caller proceeds regardless. A push path must refuse to
-write while `ntpSynced` is false, or it stamps rows at 1970.
+up after 10 s and every caller proceeds regardless. Decision: the push path
+refuses to write while `ntpSynced` is false. Firmware guardrails (all required):
 
-**Buffering.** The Unpad wired network drops, so samples need a queue. Two rules
-follow from the schema:
+- `sbPushReadings()` returns early when `!ntpSynced`; the buffered rounds stay queued, nothing is stamped at 1970.
+- `syncDbLatest()` continues to update `TIME_OK` (0x0006) so the display shows unsynced state.
+- Optional server backstop: `push_readings()` rejects `timestamp < '2025-01-01'` and `timestamp > now() + interval '10 minutes'`.
+
+**Buffering — merge duplicates.** The Unpad wired network drops, so samples need a queue. Two rules follow from the schema:
 
 - Stamp rows at **sample** time, not flush time, or the time series is wrong.
-- Make retries idempotent. A plain PostgREST `POST` is an insert, so replaying a
-  buffered batch duplicates rows. Send `Prefer: resolution=merge-duplicates`
-  with `on_conflict=(device_id,bottle_id,timestamp)`.
+- Retries are idempotent. Decision: send `Prefer: resolution=merge-duplicates`
+  with `on_conflict=(device_id,bottle_id,timestamp)` on direct PostgREST inserts,
+  and use `on conflict (device_id, bottle_id, timestamp) do nothing` inside
+  `push_readings()`. Replaying a buffered batch never duplicates rows.
 
 **Memory.** The WT32 has 320 KB RAM, 47 KB used, and no PSRAM. A sample round for
-24 bottles x 5 sensors is 480 bytes as raw floats. A few hundred buffered rounds
-is 100-150 KB, which competes with BearSSL. Use a fixed-size ring with
-oldest-drop, following the bounded-buffer pattern already applied to this
-firmware in `memory-safety-hardening.md`. A dropped row is better than an
-overrun; decide explicitly which the ring does.
+24 bottles x 5 sensors is 480 bytes as raw floats. Decision: fixed-size ring with
+oldest-drop, following the bounded-buffer pattern in `memory-safety-hardening.md`.
+A few hundred rounds max (100-150 KB ceiling, competes with BearSSL). A dropped row
+is better than an overrun; count drops in a counter pushed to the display.
 
 **Payload size.** 24 bottles per sample is one POST body with 24 objects, so it
 lands well inside a few kilobytes. `readBodyFixed()` (`:469`) already takes an
@@ -281,25 +370,30 @@ explicit capacity argument, and `kMaxBody = 4096` is the portal's value, chosen
 for an 8 KB HTML page. Size the reading body separately rather than inheriting
 the portal's constant.
 
-## 8. Implementation order
+## 8. Build plan
 
-Roughly dependency order, not effort order.
+Dependency order, not effort order. With the sensor chain deferred, the order is
+1 -> 2 -> 3 -> 7 -> 8. Step 8 has no round source until the deferred sensor
+chain lands; write it against the future sensor poller and leave it dormant.
 
-1. Pin the Supabase CA in the two `sb*` functions. Smallest change, removes the
-   worst exposure, and makes every later step safe to test.
-2. Stop discarding `bottle_count` and owner fields from `authenticate()`.
-3. Gate any future push on `ntpSynced`.
-4. Write the Mega Mini Modbus-slave firmware and bring it up over the loopback
-   harness in `firmware/max485-test/`.
-5. Add the sensor register block to the WT32 RS485 master, reading locally first.
-6. Add the display to WT32 sensor registers so the UI shows real values, replacing
-   `fake_data.cpp`.
-7. Write the push migration, once the read grant decision is settled.
-8. Implement the batch buffer and the push call.
+- [x] 1. Pin Supabase CA in `sbAuthenticate()` / `sbFetchLatestExp()` (`main.cpp:854,906`). Bundle GTS Root R4 + GlobalSign R3 + ISRG Root X1 via `setCACert()`. Accept: handshake passes after leaf renewal; no `setInsecure()` fallback on Supabase path. Built: `firmware/network-master/supabase_ca.h`, `sbApplyTls()` on all three Supabase calls (auth, fetch, push); portal calls stay `setInsecure()`. Live chain re-verified 2026-10-16 (leaf -> WE1 -> GTS R4 cross).
+- [x] 2. Stop discarding `bottle_count`, `owner_name`, `owner_email` from `authenticate()`. Add master-written display register for `bottle_count`. Accept: `/info` shows DB value, `0xFFFF` when unknown. Built: `sbParseAuthMeta()` into `dbBottleCount`/`dbOwnerName`/`dbOwnerEmail`; `0x0007 DB_BOTTLES` on both ends; `/info` DB tile shows `latest (Nbottles)`, `--` when never synced.
+- [x] 3. Firmware clock guard: `sbPushReadings()` early-return on `!ntpSynced`, keep `TIME_OK` reporting. Accept: no row with 1970 timestamp after 10 s NTP failure. Built: guard in `sbPushReadings()` plus enqueue-time refusal (`ntpSynced` and 2025-01-01 floor); `pushDbState()` still reports `TIME_OK`.
+- [x] 7. Migrations: (a) `push_readings(jsonb)` per §6.1; (b) `experiments` + `device_config` tables per §6.2 with session-scoped `SELECT`. Accept: anon `POST /rest/v1/readings` still denied; `POST /rest/v1/rpc/push_readings` with valid `x-device-session` inserts; forged `device_id` impossible (not in payload). Built: `20261016000000_add_push_readings_and_device_tables.sql`, verified on the local DB (insert + replay-idempotent + default-experiment + all rejects + RLS scoping; `device_config` seeded from `devices`).
+- [x] 8. Batch buffer + push call: fixed ring oldest-drop, sample-time stamps, `merge-duplicates` / `on conflict do nothing`, separate body cap from portal `kMaxBody`. Accept: network drop + replay produces no duplicates; drop counter increments instead of OOM. Built: 1200-row ring (~50 rounds), `kPushBodyCap = 6144`, 2 rounds flushed per 30 s cycle, `0x0008 PUSH_DROPS` register; queue/format logic verified by host test on the real functions; dormant (no enqueuer until the sensor pass; optimizer folds the queue away, ~0 RAM cost now, ~54 KB when materialized).
 
-Steps 4 through 6 are the bulk of the work and none of it touches the database.
-Steps 7 and 8 are comparatively small. Starting with the migration is the
-mistake to avoid: there is nothing to push until step 5 works.
+### Deferred (2026-10-16): sensor chain
+
+Out of the current build order; original numbers are kept so references in the
+sections above still line up. These return in a later pass.
+
+- [ ] 4. Mega Mini Modbus-slave firmware (5 sensors, 8 KB SRAM, manual DE/RE). Bring up over `firmware/max485-test/` loopback harness. Accept: two-request full poll (144 regs, FC 0x03) decodes cleanly.
+- [ ] 5. WT32 second Modbus master on RS485 bus (separate from TTL display bus). 6 regs/bottle (5 values + null bitmask). Accept: local read of 24 bottles in ~0.35 s at 9600 baud.
+- [ ] 6. Display sensor registers; replace `fake_data.cpp` with real values. Update `link_modbus.h`, `display-wt32-link.md`, `network-master.md` §3 together. Accept: UI shows live values, `sensorNull` only on per-sensor miss.
+
+### Done criteria
+
+Push path is done when a 24-bottle round sampled on the Mega Mini appears in `device_data.readings` with correct `device_id` (from session), sample-time `timestamp`, and nulls only where a sensor missed; pull path is done when the WT32 displays the active experiment + config for its own `device_id` polled every 30 s. The push criterion moves with the deferred sensor chain; until then, acceptance is the per-step criteria above.
 
 ## 9. Related documents
 
@@ -315,4 +409,4 @@ mistake to avoid: there is nothing to push until step 5 works.
 - `../hardware.md` — sensor wiring and MAX485 notes. Not edited.
 
 ---
-Content generated by `opencode/space-bunny-free` in `opencode`.
+Content generated by `opencode/muse-spark-1.3-contributor-free` in `opencode`.

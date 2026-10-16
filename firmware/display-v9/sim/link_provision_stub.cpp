@@ -53,6 +53,8 @@ bool link_modbus_net_up() { return false; }
 uint32_t link_modbus_net_age_ms() { return 0xFFFFFFFFu; }
 int link_modbus_get_db_latest() { return -2; }
 bool link_modbus_time_ok() { return false; }
+int link_modbus_get_db_bottles() { return -1; }
+int link_modbus_get_push_drops() { return 0; }
 void link_modbus_debug_print() {
   Serial.printf("[LINK] sim stub: creds_ready=%d result=%d run=%d exp=%d dur=%d\n",
                 s_credsReady ? 1 : 0, s_result, s_expRunning ? 1 : 0, s_expNum,

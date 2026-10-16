@@ -34,8 +34,11 @@ static bool s_netUp = false;
 static uint32_t s_netStampMs = 0;
 
 // WT32-pushed DB state (backlog #9): -2 unknown, -1 none, >=0 latest id.
+// Bottle count from authenticate() (-1 unknown); push-drop overflow counter.
 static int s_dbLatest = -2;
 static bool s_timeOk = false;
+static int s_dbBottles = -1;
+static uint16_t s_pushDrops = 0;
 
 static uint16_t regCount() { return 0x007A; }
 
@@ -56,6 +59,8 @@ static uint16_t reg_read(uint16_t addr) {
   if (addr == LINK_REG_EXP_NUM) return (uint16_t)s_expNum;
   if (addr == LINK_REG_DB_LATEST) return s_dbLatest < 0 ? 0xFFFF : (uint16_t)s_dbLatest;
   if (addr == LINK_REG_TIME_OK) return s_timeOk ? 1 : 0;
+  if (addr == LINK_REG_DB_BOTTLES) return s_dbBottles < 0 ? 0xFFFF : (uint16_t)s_dbBottles;
+  if (addr == LINK_REG_PUSH_DROPS) return s_pushDrops;
   if (addr >= LINK_REG_USER_BASE && addr < LINK_REG_USER_BASE + LINK_REG_USER_REGS) {
     uint16_t v = 0;
     regs_get(s_user, LINK_REG_USER_BASE, addr - LINK_REG_USER_BASE, v);
@@ -81,6 +86,7 @@ static bool reg_addr_valid(uint16_t addr) {
   if (addr <= LINK_REG_RESULT) return true;
   if (addr == LINK_REG_EXP_RUNNING || addr == LINK_REG_EXP_NUM) return true;
   if (addr == LINK_REG_DB_LATEST || addr == LINK_REG_TIME_OK) return true;
+  if (addr == LINK_REG_DB_BOTTLES || addr == LINK_REG_PUSH_DROPS) return true;
   if (addr >= LINK_REG_USER_BASE && addr < LINK_REG_USER_BASE + LINK_REG_USER_REGS) return true;
   if (addr >= LINK_REG_PASS_BASE && addr < LINK_REG_PASS_BASE + LINK_REG_PASS_REGS) return true;
   if (addr == LINK_REG_DURATION) return true;
@@ -140,6 +146,14 @@ static bool reg_write(uint16_t addr, uint16_t value) {
   }
   if (addr == LINK_REG_TIME_OK) {
     s_timeOk = (value != 0);
+    return true;
+  }
+  if (addr == LINK_REG_DB_BOTTLES) {
+    s_dbBottles = (value == 0xFFFF) ? -1 : (int)value;
+    return true;
+  }
+  if (addr == LINK_REG_PUSH_DROPS) {
+    s_pushDrops = value;
     return true;
   }
   if (addr == LINK_REG_NET_UP) {
@@ -267,14 +281,15 @@ static void handle_frame(const uint8_t *f, size_t n) {
     // Validate all writes before committing any.
     // Writable by master: LOGIN_REQ, CREDS_READY (ack), RESULT, plus the
     // WT32-pushed network status (IP_ADDR, PING_MS, NET_UP) and DB state
-    // (DB_LATEST, TIME_OK). Credential and duration blocks stay read-only:
-    // the display owns them.
+    // (DB_LATEST, TIME_OK, DB_BOTTLES, PUSH_DROPS). Credential and duration
+    // blocks stay read-only: the display owns them.
     for (uint16_t i = 0; i < cnt; i++) {
       uint16_t a = addr + i;
       if (a == LINK_REG_LOGIN_REQ || a == LINK_REG_CREDS_READY ||
           a == LINK_REG_RESULT || a == LINK_REG_PING_MS ||
           a == LINK_REG_NET_UP || a == LINK_REG_DB_LATEST ||
-          a == LINK_REG_TIME_OK ||
+          a == LINK_REG_TIME_OK || a == LINK_REG_DB_BOTTLES ||
+          a == LINK_REG_PUSH_DROPS ||
           (a >= LINK_REG_IP_BASE && a < LINK_REG_IP_BASE + LINK_REG_IP_REGS))
         continue;
       send_exception(fn, 0x02);
@@ -399,10 +414,11 @@ bool link_modbus_take_result(int &out) {
 void link_modbus_debug_print() {
   char ip[LINK_IP_MAX + 1];
   link_modbus_get_ip(ip, sizeof(ip));
-  Serial.printf("[LINK] req=%d ready=%d result=%d user='%s' exp=%d run=%d dur=%d ip='%s' ping=%d up=%d db=%d tok=%d\n",
+  Serial.printf("[LINK] req=%d ready=%d result=%d user='%s' exp=%d run=%d dur=%d ip='%s' ping=%d up=%d db=%d tok=%d bottles=%d drops=%d\n",
                 s_loginReq, s_credsReady, s_result, s_user, s_expNum,
                 s_expRunning ? 1 : 0, s_durationH, ip,
-                link_modbus_get_ping_ms(), s_netUp, s_dbLatest, s_timeOk ? 1 : 0);
+                link_modbus_get_ping_ms(), s_netUp, s_dbLatest, s_timeOk ? 1 : 0,
+                s_dbBottles, s_pushDrops);
 }
 
 void link_modbus_get_ip(char *out, size_t n) {
@@ -421,6 +437,10 @@ bool link_modbus_net_up() { return s_netUp; }
 int link_modbus_get_db_latest() { return s_dbLatest; }
 
 bool link_modbus_time_ok() { return s_timeOk; }
+
+int link_modbus_get_db_bottles() { return s_dbBottles; }
+
+int link_modbus_get_push_drops() { return (int)s_pushDrops; }
 
 uint32_t link_modbus_net_age_ms() {
   if (s_netStampMs == 0) return 0;

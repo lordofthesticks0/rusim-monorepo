@@ -115,14 +115,17 @@ static void info_render() {
     lv_label_set_text(s_valFw, FW_VERSION);
   }
 
-  // DB tile
+  // DB tile: latest experiment id plus the bottle_count from authenticate()
+  // ("12 (24bt)"). "--" while never synced (0xFFFF on the wire).
   if (s_valDb != nullptr) {
     int db = link_modbus_get_db_latest();
     if (db == -2) {
       lv_label_set_text(s_valDb, "--");
     } else {
+      int bottles = link_modbus_get_db_bottles();
       char t[32];
-      snprintf(t, sizeof(t), "%d", db);
+      if (bottles < 0) snprintf(t, sizeof(t), "%d", db);
+      else snprintf(t, sizeof(t), "%d (%dbt)", db, bottles);
       lv_label_set_text(s_valDb, t);
     }
   }
