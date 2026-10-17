@@ -1,0 +1,1405 @@
+<!doctype html>
+<html>
+    <head>
+        <title>System Monitor</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+:root {
+    color-scheme: light;
+    interpolate-size: allow-keywords;
+    scrollbar-gutter: stable;
+    text-wrap: pretty;
+    overflow-wrap: break-word;
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+    --bg: oklch(96% 0.01 250);
+    --bg-accent: oklch(90% 0.05 250 / 0.42);
+    --bg-accent-2: oklch(90% 0.06 150 / 0.42);
+    --surface: oklch(98% 0.005 250);
+    --surface-2: oklch(95% 0.005 250);
+    --surface-3: oklch(92% 0.01 250);
+    --text: oklch(20% 0.01 250);
+    --text-2: oklch(45% 0.01 250);
+    --text-3: oklch(58% 0.01 250);
+    --blue: oklch(58% 0.16 250);
+    --blue-strong: oklch(42% 0.16 250);
+    --blue-subtle: color-mix(in oklch, var(--blue) 16%, transparent);
+    --blue-border: color-mix(in oklch, var(--blue) 42%, transparent);
+    --green: oklch(66% 0.17 145);
+    --green-strong: oklch(42% 0.15 145);
+    --green-subtle: color-mix(in oklch, var(--green) 18%, transparent);
+    --green-border: color-mix(in oklch, var(--green) 45%, transparent);
+    --red: oklch(62% 0.2 25);
+    --red-strong: oklch(45% 0.19 25);
+    --red-subtle: color-mix(in oklch, var(--red) 18%, transparent);
+    --red-border: color-mix(in oklch, var(--red) 45%, transparent);
+    --orange: oklch(72% 0.16 60);
+    --divider: color-mix(in oklch, var(--text) 12%, transparent);
+
+    --shadow-soft: 0 0.5rem 1.5rem color-mix(in oklch, var(--text) 6%, transparent);
+    --shadow-card: 0 0.25rem 0.75rem color-mix(in oklch, var(--text) 4%, transparent);
+
+    --radius-sm: 0.625rem;
+    --radius-md: 0.875rem;
+    --radius-lg: 1.125rem;
+    --radius-xl: 1.5rem;
+
+    --text-xs: clamp(0.6875rem, 0.65rem + 0.2vw, 0.75rem);
+    --text-sm: clamp(0.75rem, 0.7rem + 0.3vw, 0.875rem);
+    --text-base: clamp(0.9375rem, 0.9rem + 0.3vw, 1rem);
+    --text-lg: clamp(1.125rem, 1rem + 0.5vw, 1.375rem);
+    --text-xl: clamp(1.375rem, 1.2rem + 0.8vw, 1.75rem);
+    --text-2xl: clamp(2rem, 1.6rem + 1.5vw, 3rem);
+    --text-3xl: clamp(2.75rem, 2rem + 2.5vw, 3.5rem);
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    min-width: 0;
+}
+
+body {
+    margin: 0;
+    min-height: 100dvh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background:
+        radial-gradient(circle at 15% 20%, var(--bg-accent) 0%, transparent 45%),
+        radial-gradient(circle at 85% 80%, var(--bg-accent-2) 0%, transparent 45%),
+        linear-gradient(135deg, oklch(96% 0.01 250), oklch(94% 0.01 250));
+    color: var(--text);
+    overflow: clip;
+    display: flex;
+    flex-direction: row;
+    font-size: var(--text-base);
+    -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+    text-wrap: balance;
+}
+
+img, svg, video {
+    display: block;
+    max-inline-size: 100%;
+    block-size: auto;
+}
+
+input, textarea, select {
+    font-size: max(16px, 1rem);
+}
+
+button, a, [role="button"] {
+    touch-action: manipulation;
+}
+
+button, [role="button"] {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+:focus-visible {
+    outline: max(2px, 0.08em) solid currentColor;
+    outline-offset: 0.25em;
+}
+
+.carplay-sidebar {
+    inline-size: clamp(6rem, 5.5rem + 1vw, 6.75rem);
+    block-size: 100dvh;
+    background: var(--surface);
+    border-inline-end: 1px solid var(--divider);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    padding-block: 0.875rem;
+    padding-inline: 0.625rem;
+    z-index: 10;
+    box-shadow: 0.25rem 0 1.25rem color-mix(in oklch, var(--text) 3%, transparent);
+    flex-shrink: 0;
+}
+
+.clock-container {
+    text-align: center;
+    inline-size: 100%;
+    padding-block: 0.25rem;
+}
+
+.clock-time {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+}
+
+.clock-date {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-2);
+    text-transform: uppercase;
+    margin-block-start: 0.125rem;
+}
+
+.nav-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    inline-size: 100%;
+    align-items: center;
+}
+
+.nav-btn {
+    background: var(--surface);
+    color: var(--text-2);
+    border: 1px solid var(--divider);
+    inline-size: 4.75rem;
+    block-size: 4.25rem;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3125rem;
+    padding: 0.375rem;
+    box-shadow: var(--shadow-card);
+    transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .nav-btn {
+        transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out), transform 120ms var(--ease-out);
+    }
+}
+
+.nav-btn svg {
+    block-size: 2.25cap;
+    inline-size: auto;
+    fill: currentColor;
+    transition: transform 120ms var(--ease-out);
+}
+
+.nav-label {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.nav-btn:active {
+    transform: scale(0.96);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .nav-btn:hover {
+        background: var(--surface-2);
+        color: var(--text);
+    }
+}
+
+.nav-btn.active {
+    background: var(--blue-subtle);
+    color: var(--blue-strong);
+    border-color: var(--blue-border);
+    box-shadow: 0 0.5rem 1.25rem color-mix(in oklch, var(--blue) 16%, transparent);
+}
+
+.nav-btn.active svg {
+    transform: scale(1.06);
+}
+
+.rec-container {
+    inline-size: 100%;
+    display: flex;
+    justify-content: center;
+}
+
+.rec-btn {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--divider);
+    box-shadow: var(--shadow-card);
+    padding-block: 0.625rem;
+    padding-inline: 0.375rem;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    inline-size: 5.125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .rec-btn {
+        transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out), transform 120ms var(--ease-out);
+    }
+}
+
+.rec-btn:active {
+    transform: scale(0.96);
+}
+
+.rec-btn.recording {
+    background: var(--red-subtle);
+    color: var(--red-strong);
+    border-color: var(--red-border);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .rec-btn.recording {
+        animation: pulse-red 2s infinite;
+    }
+}
+
+@keyframes pulse-red {
+    0% {
+        box-shadow: 0 0 0 0 color-mix(in oklch, var(--red) 35%, transparent);
+    }
+    70% {
+        box-shadow: 0 0 0 0.625rem transparent;
+    }
+    100% {
+        box-shadow: 0 0 0 0 transparent;
+    }
+}
+
+.main-viewport {
+    flex: 1;
+    block-size: 100dvh;
+    overflow-y: auto;
+    padding-block: clamp(1rem, 0.8rem + 0.8vw, 1.5rem);
+    padding-inline: clamp(1.25rem, 1rem + 1vw, 2rem);
+    overscroll-behavior: contain;
+}
+
+.page {
+    display: none;
+}
+
+.page.active {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    animation: fadeIn 200ms var(--ease-out);
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.home-layout {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+    gap: clamp(1rem, 0.8rem + 0.8vw, 1.375rem);
+    max-inline-size: 61.25rem;
+    inline-size: 100%;
+    margin-inline: auto;
+    align-items: stretch;
+}
+
+.temp-column {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    justify-content: center;
+}
+
+.temp-card {
+    background: var(--surface);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-xl);
+    padding-block: 1.25rem;
+    padding-inline: 1.375rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    box-shadow: var(--shadow-soft);
+}
+
+.temp-card.clickable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.temp-card.clickable:active {
+    transform: scale(0.99);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .temp-card.clickable {
+        transition: transform 120ms var(--ease-out);
+    }
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .temp-card.clickable:hover {
+        background: var(--surface-2);
+    }
+}
+
+.temp-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    inline-size: 100%;
+}
+
+.temp-label {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-3);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.chevron-icon {
+    block-size: 1.2cap;
+    inline-size: auto;
+    fill: var(--blue);
+    transition: transform 160ms var(--ease-out);
+}
+
+.temp-card.expanded .chevron-icon {
+    transform: rotate(180deg);
+}
+
+.temp {
+    font-size: var(--text-3xl);
+    font-weight: 700;
+    color: var(--text);
+    margin-block: 0.375rem 0.125rem;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+}
+
+.temp-sub {
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    color: var(--blue);
+    margin-block: 0.25rem 0.125rem;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+}
+
+.tap-hint {
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--text-3);
+    margin-block-start: 0.125rem;
+}
+
+.bottle-temp-drawer {
+    display: none;
+    inline-size: 100%;
+    margin-block-start: 0.75rem;
+    padding-block-start: 0.75rem;
+    border-block-start: 1px solid var(--divider);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.temp-card.expanded .bottle-temp-drawer {
+    display: grid;
+    animation: fadeIn 160ms var(--ease-out);
+}
+
+.mini-bottle-pill {
+    background: var(--surface-2);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-sm);
+    padding-block: 0.5rem;
+    padding-inline: 0.75rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: var(--text-base);
+}
+
+.mini-bottle-name {
+    font-weight: 600;
+    color: var(--text-2);
+    font-size: var(--text-xs);
+}
+
+.mini-bottle-val {
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.status-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--divider);
+    padding: 1.5rem;
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-soft);
+}
+
+.indicator {
+    font-size: var(--text-lg);
+    font-weight: 500;
+    color: var(--text-2);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    inline-size: 100%;
+    border-block-end: 1px solid var(--divider);
+    padding-block-end: 0.625rem;
+}
+
+.indicator:last-child {
+    border-block-end: none;
+    padding-block-end: 0;
+}
+
+.indicator span:last-child {
+    font-weight: 600;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--divider);
+    padding-block: 0.25rem;
+    padding-inline: 0.75rem;
+    border-radius: 999px;
+    font-size: var(--text-base);
+    font-variant-numeric: tabular-nums;
+}
+
+.on {
+    color: var(--green-strong) !important;
+    background: var(--green-subtle) !important;
+    border-color: var(--green-border) !important;
+}
+
+.warning {
+    color: var(--red-strong) !important;
+    background: var(--red-subtle) !important;
+    border-color: var(--red-border) !important;
+}
+
+.off {
+    color: var(--text-3) !important;
+    background: var(--surface-2) !important;
+    border-color: var(--divider) !important;
+}
+
+.bottle-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+    gap: 1rem;
+    max-inline-size: 68.75rem;
+    inline-size: 100%;
+    margin-inline: auto;
+}
+
+.bottle-card {
+    background: var(--surface);
+    border: 1px solid var(--divider);
+    padding-block: 1rem;
+    padding-inline: 1.25rem;
+    border-radius: var(--radius-lg);
+    text-align: start;
+    border-inline-start: 0.375rem solid color-mix(in oklch, var(--blue) 65%, transparent);
+    box-shadow: var(--shadow-soft);
+}
+
+.bottle-title {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    margin-block-end: 0.5rem;
+    border-block-end: 1px solid var(--divider);
+    padding-block-end: 0.375rem;
+    color: var(--blue-strong);
+    letter-spacing: 0.025em;
+}
+
+.data-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: var(--text-base);
+    color: var(--text-2);
+    margin-block: 0.25rem;
+    border-block-end: 1px solid var(--divider);
+    padding-block-end: 0.1875rem;
+}
+
+.data-row:last-child {
+    border-block-end: none;
+}
+
+.val {
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.unit {
+    font-size: var(--text-xs);
+    color: var(--text-3);
+    margin-inline-start: 0.25rem;
+}
+
+.error-text {
+    color: var(--red);
+    font-weight: 500;
+    font-size: var(--text-sm);
+}
+
+.single-panel {
+    background: var(--surface);
+    border: 1px solid var(--divider);
+    padding: 1.5rem;
+    border-radius: var(--radius-xl);
+    max-inline-size: 42.5rem;
+    inline-size: 100%;
+    margin-inline: auto;
+    box-shadow: var(--shadow-soft);
+}
+
+.single-panel h2,
+.settings-card h2 {
+    margin-block-start: 0;
+    font-size: var(--text-xl);
+    font-weight: 700;
+    color: var(--text);
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+    gap: 1.25rem;
+    max-inline-size: 60rem;
+    inline-size: 100%;
+    margin-inline: auto;
+}
+
+.settings-card {
+    background: var(--surface);
+    border: 1px solid var(--divider);
+    padding: 1.375rem;
+    border-radius: var(--radius-xl);
+    text-align: start;
+    box-shadow: var(--shadow-soft);
+}
+
+.file-list-container {
+    background: var(--surface-2);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-md);
+    padding: 0.5rem;
+    block-size: 10.625rem;
+    overflow-y: auto;
+    margin-block-end: 0.875rem;
+    overscroll-behavior: contain;
+}
+
+.file-item {
+    background: var(--surface);
+    color: var(--text);
+    padding-block: 0.625rem;
+    padding-inline: 0.875rem;
+    margin-block-end: 0.375rem;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--divider);
+    font-size: var(--text-base);
+    font-weight: 600;
+    text-align: start;
+    display: flex;
+    justify-content: space-between;
+    box-shadow: 0 0.125rem 0.375rem color-mix(in oklch, var(--text) 3%, transparent);
+    transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+
+.file-item:last-child {
+    margin-block-end: 0;
+}
+
+.file-item:active {
+    transform: scale(0.99);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .file-item {
+        transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out), transform 120ms var(--ease-out);
+    }
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .file-item:hover {
+        background: var(--surface-2);
+    }
+}
+
+.file-item.selected {
+    background: var(--blue-subtle);
+    border-color: var(--blue-border);
+    color: var(--blue-strong);
+    box-shadow: 0 0.25rem 0.75rem color-mix(in oklch, var(--blue) 12%, transparent);
+}
+
+.info-box {
+    background: var(--surface-2);
+    border: 1px solid var(--divider);
+    color: var(--text);
+    padding: 0.875rem;
+    border-radius: var(--radius-md);
+    margin-block-end: 0.75rem;
+    text-align: start;
+    font-size: var(--text-base);
+}
+
+.info-label {
+    font-weight: 600;
+    color: var(--text-2);
+    font-size: var(--text-sm);
+}
+
+.info-val {
+    float: inline-end;
+    font-weight: 600;
+}
+
+.btn-green,
+.btn-blue,
+.btn-danger {
+    font-size: var(--text-base);
+    padding-block: 0.875rem;
+    padding-inline: 1rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    inline-size: 100%;
+    margin-block-start: 0.5rem;
+    border: 1px solid var(--divider);
+    transition: filter 120ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .btn-green,
+    .btn-blue,
+    .btn-danger {
+        transition: filter 120ms var(--ease-out), transform 120ms var(--ease-out);
+    }
+}
+
+.btn-green:active,
+.btn-blue:active,
+.btn-danger:active {
+    transform: scale(0.98);
+}
+
+.btn-green {
+    background: var(--green-subtle);
+    color: var(--green-strong);
+    border-color: var(--green-border);
+    box-shadow: 0 0.375rem 1.125rem color-mix(in oklch, var(--green) 12%, transparent);
+}
+
+.btn-blue {
+    background: var(--blue-subtle);
+    color: var(--blue-strong);
+    border-color: var(--blue-border);
+    box-shadow: 0 0.375rem 1.125rem color-mix(in oklch, var(--blue) 12%, transparent);
+}
+
+.btn-danger {
+    background: var(--red-subtle);
+    color: var(--red-strong);
+    border-color: var(--red-border);
+    box-shadow: 0 0.375rem 1.125rem color-mix(in oklch, var(--red) 12%, transparent);
+}
+
+.btn-green:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+    transform: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .btn-green:hover,
+    .btn-blue:hover,
+    .btn-danger:hover {
+        filter: brightness(0.97);
+    }
+}
+
+input[type="datetime-local"],
+select {
+    font-size: max(16px, 1rem);
+    font-weight: 600;
+    padding-block: 0.6875rem;
+    padding-inline: 0.875rem;
+    inline-size: 100%;
+    margin-block-end: 0.625rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--divider);
+    background: var(--surface-2);
+    color: var(--text);
+    text-align: center;
+    box-shadow: inset 0 0.0625rem 0.125rem color-mix(in oklch, var(--text) 4%, transparent);
+}
+
+input[type="datetime-local"]:focus-visible,
+select:focus-visible {
+    outline: max(2px, 0.08em) solid var(--blue);
+    outline-offset: 0.25em;
+}
+
+.msg-box {
+    min-block-size: 1.5rem;
+    font-size: var(--text-base);
+    margin-block-start: 0.5rem;
+    font-weight: 600;
+    color: var(--orange);
+    text-align: center;
+}
+
+.section-title {
+    color: var(--text-2);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-block: 0.75rem 0.375rem;
+    border-block-end: 1px solid var(--divider);
+    padding-block-end: 0.25rem;
+    text-align: start;
+}
+
+.info-box > * + * {
+    margin-block-start: 0.5rem;
+}
+
+.settings-actions {
+    text-align: center;
+    margin-block-start: 1rem;
+}
+
+.settings-actions .btn-blue {
+    margin-block-end: 0.625rem;
+}
+
+.field-row {
+    display: flex;
+    gap: 0.625rem;
+    align-items: center;
+    margin-block-end: 0.5rem;
+}
+
+.field-row select {
+    margin-block-end: 0;
+}
+
+.empty-state,
+.loading-message {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--text-2);
+    font-weight: 500;
+    padding: 1.25rem;
+}
+
+.btn-compact {
+    inline-size: auto;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding-block: 0.6875rem;
+    padding-inline: 1rem;
+    font-size: var(--text-base);
+    margin: 0;
+}
+
+#wifiName {
+    color: color-mix(in oklch, var(--orange), black 18%);
+}
+
+#ipAddress {
+    color: var(--blue-strong);
+}
+
+        </style>
+    </head>
+    <body>
+        <!-- LEFT CARPLAY DOCK -->
+        <aside class="carplay-sidebar">
+            <div class="clock-container">
+                <div class="clock-time" id="clockTime">--:--</div>
+                <div class="clock-date" id="clockDate">--</div>
+            </div>
+
+            <nav class="nav-bar">
+                <!-- HOME (WATER) -->
+                <button
+                    id="tabWater"
+                    class="nav-btn active"
+                    onclick="switchTab('water')"
+                >
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 3L3 10.5V20a1 1 0 0 0 1 1h5v-6h6v6h5a1 1 0 0 0 1-1v-9.5L12 3z" />
+                    </svg>
+                    <span class="nav-label">Home</span>
+                </button>
+
+                <!-- BOTTLE -->
+                <button
+                    id="tabBottles"
+                    class="nav-btn"
+                    onclick="switchTab('bottles')"
+                >
+                    <svg viewBox="0 0 24 24">
+                        <rect x="9" y="2" width="6" height="3" rx="1" />
+                        <path d="M7 8a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3h-4a3 3 0 0 1-3-3V8z" />
+                    </svg>
+                    <span class="nav-label">Bottle</span>
+                </button>
+
+                <!-- LOGS (DATA) -->
+                <button
+                    id="tabData"
+                    class="nav-btn"
+                    onclick="switchTab('data')"
+                >
+                    <svg viewBox="0 0 24 24">
+                        <rect x="4" y="4" width="16" height="4" rx="1.5" />
+                        <rect x="4" y="10" width="16" height="4" rx="1.5" />
+                        <rect x="4" y="16" width="11" height="4" rx="1.5" />
+                    </svg>
+                    <span class="nav-label">Logs</span>
+                </button>
+
+                <!-- SETTINGS -->
+                <button
+                    id="tabSettings"
+                    class="nav-btn"
+                    onclick="switchTab('settings')"
+                >
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 2L20.66 7v10L12 22 3.34 17V7L12 2zm0 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" />
+                    </svg>
+                    <span class="nav-label">Settings</span>
+                </button>
+            </nav>
+
+            <div class="rec-container">
+                <button id="btnRec" class="rec-btn" onclick="toggleRec()">
+                    STOPPED
+                </button>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <main class="main-viewport">
+            <div id="pageWater" class="page active">
+                <div class="home-layout">
+                    <!-- Left Column: Water Bath Temp + Expandable Avg Bottle Temp -->
+                    <div class="temp-column">
+                        <div class="temp-card">
+                            <div class="temp-label">Water Bath Temp</div>
+                            <div class="temp" id="temp">--°C</div>
+                        </div>
+
+                        <div
+                            id="avgBottleCard"
+                            class="temp-card clickable"
+                            onclick="toggleBottleTemps()"
+                        >
+                            <div class="temp-header">
+                                <span class="temp-label">Avg Bottle Temp</span>
+                                <svg class="chevron-icon" viewBox="0 0 24 24">
+                                    <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />
+                                </svg>
+                            </div>
+                            <div class="temp-sub" id="avgBottleTemp">--°C</div>
+                            <div class="tap-hint" id="bottleTapHint">Tap to view bottles</div>
+
+                            <!-- Expandable Per-Bottle Breakdown -->
+                            <div class="bottle-temp-drawer" id="bottleTempDrawer">
+                                <div class="mini-bottle-pill">
+                                    <span class="mini-bottle-name">BOTTLE 1</span>
+                                    <span class="mini-bottle-val" id="homeBTemp1">--°C</span>
+                                </div>
+                                <div class="mini-bottle-pill">
+                                    <span class="mini-bottle-name">BOTTLE 2</span>
+                                    <span class="mini-bottle-val" id="homeBTemp2">--°C</span>
+                                </div>
+                                <div class="mini-bottle-pill">
+                                    <span class="mini-bottle-name">BOTTLE 3</span>
+                                    <span class="mini-bottle-val" id="homeBTemp3">--°C</span>
+                                </div>
+                                <div class="mini-bottle-pill">
+                                    <span class="mini-bottle-name">BOTTLE 4</span>
+                                    <span class="mini-bottle-val" id="homeBTemp4">--°C</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: System Indicators -->
+                    <div class="status-container">
+                        <div class="indicator">
+                            <span>WATER LEVEL</span> <span id="water">--</span>
+                        </div>
+                        <div class="indicator">
+                            <span>HEATER (39°C)</span> <span id="heater">--</span>
+                        </div>
+                        <div class="indicator">
+                            <span>PUMP (Auto)</span> <span id="pump">--</span>
+                        </div>
+                        <div class="indicator">
+                            <span>FAN (Auto)</span> <span id="fan">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="pageBottles" class="page">
+                <div class="bottle-grid" id="bottleGrid">
+                    <div class="empty-state">Waiting for Sensor Data...</div>
+                </div>
+            </div>
+
+            <div id="pageData" class="page">
+                <div class="single-panel">
+                    <h2>EXPORT LOGS</h2>
+                    <div class="section-title">1. Select Log File</div>
+                    <div class="file-list-container" id="fileList">
+                        <div class="loading-message">Loading...</div>
+                    </div>
+                    <div class="section-title">2. Select USB Drive</div>
+                    <select id="driveSelect">
+                        <option value="">Scanning...</option>
+                    </select>
+                    <button
+                        id="btnExport"
+                        class="btn-green"
+                        onclick="exportSelected()"
+                        disabled
+                    >
+                        EXPORT TO USB
+                    </button>
+                    <div id="exportMsg" class="msg-box"></div>
+                </div>
+            </div>
+
+            <div id="pageSettings" class="page">
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h2>DEVICE INFO</h2>
+                        <div class="info-box">
+                            <div>
+                                <span class="info-label">WIFI:</span>
+                                <span
+                                    id="wifiName"
+                                    class="info-val"
+                                    >--</span
+                                >
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">IP:</span>
+                                <span
+                                    id="ipAddress"
+                                    class="info-val"
+                                    >--</span
+                                >
+                            </div>
+                        </div>
+                        <div class="settings-actions">
+                            <button class="btn-blue" onclick="location.reload(true)">
+                                REFRESH DASHBOARD
+                            </button>
+                            <button class="btn-danger" onclick="shutdownPi()">
+                                SHUTDOWN SYSTEM
+                            </button>
+                        </div>
+                    </div>
+                    <div class="settings-card">
+                        <h2>DATE & TIME</h2>
+                        <div class="section-title">Time Zone</div>
+                        <div class="field-row">
+                            <select id="tzSelect">
+                                <option>Loading...</option>
+                            </select>
+                            <button
+                                class="btn-blue btn-compact"
+                                onclick="setSystemTimezone()"
+                            >
+                                SET
+                            </button>
+                        </div>
+                        <div class="section-title">Manual Date/Time</div>
+                        <input type="datetime-local" id="timeInput" />
+                        <button
+                            class="btn-green"
+                            onclick="setSystemTime()"
+                        >
+                            UPDATE TIME
+                        </button>
+                        <div id="timeMsg" class="msg-box"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <script>
+            let selectedFile = null;
+
+            function toggleBottleTemps() {
+                const card = document.getElementById("avgBottleCard");
+                const hint = document.getElementById("bottleTapHint");
+                card.classList.toggle("expanded");
+                hint.textContent = card.classList.contains("expanded")
+                    ? "Tap to collapse"
+                    : "Tap to view bottles";
+            }
+
+            function updateClock() {
+                const now = new Date();
+                document.getElementById("clockTime").textContent =
+                    now.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false,
+                    });
+                document.getElementById("clockDate").textContent =
+                    now.toLocaleDateString([], {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                    });
+            }
+            setInterval(updateClock, 1000);
+            updateClock();
+
+            function switchTab(tab) {
+                document
+                    .querySelectorAll(".page")
+                    .forEach((el) => el.classList.remove("active"));
+                document
+                    .querySelectorAll(".nav-btn")
+                    .forEach((el) => el.classList.remove("active"));
+                document
+                    .getElementById(
+                        "page" + tab.charAt(0).toUpperCase() + tab.slice(1),
+                    )
+                    .classList.add("active");
+                document
+                    .getElementById(
+                        "tab" + tab.charAt(0).toUpperCase() + tab.slice(1),
+                    )
+                    .classList.add("active");
+                if (tab === "data") {
+                    loadFiles();
+                    loadDrives();
+                }
+                if (tab === "settings") {
+                    checkNetwork();
+                    loadTimezones();
+                    initTimeInput();
+                }
+            }
+
+            function toggleRec() {
+                fetch("/toggle_logging", { method: "POST" })
+                    .then((r) => r.json())
+                    .then((data) => updateRecButton(data.logging));
+            }
+            function updateRecButton(isLogging) {
+                const btn = document.getElementById("btnRec");
+                if (isLogging) {
+                    btn.classList.add("recording");
+                    btn.textContent = "REC ●";
+                } else {
+                    btn.classList.remove("recording");
+                    btn.textContent = "STOPPED";
+                }
+            }
+            function loadFiles() {
+                fetch("/files")
+                    .then((r) => r.json())
+                    .then((files) => {
+                        const c = document.getElementById("fileList");
+                        c.innerHTML = "";
+                        if (files.length === 0) {
+                            c.innerHTML =
+                                '<div class="loading-message">No logs found.</div>';
+                            return;
+                        }
+                        files.forEach(
+                            (f) =>
+                                (c.innerHTML += `<div class="file-item" onclick="selectFile(this, '${f}')"><span>${f}</span> <span>CSV</span></div>`),
+                        );
+                    });
+            }
+            function loadDrives() {
+                const sel = document.getElementById("driveSelect");
+                sel.innerHTML = '<option value="">Scanning...</option>';
+                fetch("/get_drives")
+                    .then((r) => r.json())
+                    .then((drives) => {
+                        sel.innerHTML = "";
+                        if (drives.length === 0) {
+                            sel.innerHTML =
+                                '<option value="">No USB Drive Found</option>';
+                            return;
+                        }
+                        drives.forEach((d) => {
+                            let opt = document.createElement("option");
+                            opt.value = d.path;
+                            opt.textContent = `${d.name} (${d.free_gb}GB Free)`;
+                            sel.appendChild(opt);
+                        });
+                    });
+            }
+            function selectFile(el, f) {
+                document
+                    .querySelectorAll(".file-item")
+                    .forEach((d) => d.classList.remove("selected"));
+                el.classList.add("selected");
+                selectedFile = f;
+                checkExportReady();
+            }
+            document
+                .getElementById("driveSelect")
+                .addEventListener("change", checkExportReady);
+            function checkExportReady() {
+                const drive = document.getElementById("driveSelect").value;
+                document.getElementById("btnExport").disabled = !(
+                    selectedFile && drive
+                );
+                document.getElementById("exportMsg").textContent = "";
+            }
+            function exportSelected() {
+                const drive = document.getElementById("driveSelect").value;
+                if (!selectedFile || !drive) return;
+                const msg = document.getElementById("exportMsg");
+                msg.textContent = "Copying...";
+                msg.style.color = "#FF9500";
+                fetch("/export", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        filename: selectedFile,
+                        dest_path: drive,
+                    }),
+                })
+                    .then((r) => r.json())
+                    .then((d) => {
+                        msg.textContent = d.message;
+                        msg.style.color =
+                            d.status === "success" ? "#116629" : "#a3120a";
+                        if (d.status === "success") loadDrives();
+                    });
+            }
+            function checkNetwork() {
+                fetch("/get_ip")
+                    .then((r) => r.json())
+                    .then((d) => {
+                        document.getElementById("ipAddress").textContent = d.ip;
+                        document.getElementById("wifiName").textContent =
+                            d.ssid;
+                    });
+            }
+            function loadTimezones() {
+                const s = document.getElementById("tzSelect");
+                if (s.options.length > 1) return;
+                fetch("/get_timezones")
+                    .then((r) => r.json())
+                    .then((z) => {
+                        s.innerHTML = "";
+                        z.forEach((t) => {
+                            let o = document.createElement("option");
+                            o.value = t;
+                            o.innerHTML = t;
+                            s.appendChild(o);
+                        });
+                        s.value = "Asia/Jakarta";
+                    });
+            }
+            function initTimeInput() {
+                const now = new Date();
+                now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+                document.getElementById("timeInput").value = now
+                    .toISOString()
+                    .slice(0, 16);
+            }
+            function setSystemTime() {
+                fetch("/set_time", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        datetime: document
+                            .getElementById("timeInput")
+                            .value.replace("T", " "),
+                    }),
+                })
+                    .then((r) => r.json())
+                    .then((d) => {
+                        document.getElementById("timeMsg").textContent =
+                            d.status === "success" ? "Updated!" : "Error";
+                    });
+            }
+            function setSystemTimezone() {
+                fetch("/set_timezone", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        timezone: document.getElementById("tzSelect").value,
+                    }),
+                })
+                    .then((r) => r.json())
+                    .then((d) => {
+                        document.getElementById("timeMsg").textContent =
+                            d.status === "success" ? "Zone Set!" : "Error";
+                    });
+            }
+
+            function updateUI(data) {
+                const temp = Number(data.temp);
+                document.getElementById("temp").textContent =
+                    Number.isFinite(temp) && temp > -50 ? temp.toFixed(1) + "°C" : "--°C";
+
+                const waterSpan = document.getElementById("water");
+                waterSpan.textContent = data.water_low ? "CRITICAL LOW" : "NORMAL";
+                waterSpan.className = data.water_low ? "warning" : "on";
+
+                document.getElementById("heater").textContent = data.water_low
+                    ? "STOPPED"
+                    : data.heater
+                      ? "HEATING"
+                      : "IDLE";
+                document.getElementById("pump").textContent = data.water_low
+                    ? "STOPPED"
+                    : data.pump
+                      ? "RUNNING"
+                      : "IDLE";
+
+                const fanSpan = document.getElementById("fan");
+                if (fanSpan) {
+                    fanSpan.textContent = data.fan ? "ON" : "OFF";
+                    fanSpan.className = data.fan ? "on" : "off";
+                }
+                if (data.logging !== undefined) updateRecButton(data.logging);
+
+                let validBottleTempSum = 0;
+                let validBottleTempCount = 0;
+
+                for (let i = 1; i <= 4; i++) {
+                    const pillEl = document.getElementById("homeBTemp" + i);
+                    if (pillEl) pillEl.textContent = "--°C";
+                }
+
+                const bottleGrid = document.getElementById("bottleGrid");
+                if (Array.isArray(data.bottles) && data.bottles.length > 0) {
+                    let html = "";
+
+                    const fmt = (v, u, sentinels = []) => {
+                        const n = Number(v);
+                        const sList = Array.isArray(sentinels) ? sentinels : [sentinels];
+
+                        if (
+                            v === undefined ||
+                            v === null ||
+                            !Number.isFinite(n) ||
+                            sList.includes(n)
+                        ) {
+                            return `<span class="error-text">Unavailable</span>`;
+                        }
+                        return `<span class="val">${Number.isInteger(n) ? n : n.toFixed(2)}<span class="unit">${u}</span></span>`;
+                    };
+
+                    data.bottles.forEach((b, idx) => {
+                        const bId = b.id || idx + 1;
+                        const bTemp = Number(b.temp);
+                        const isTempValid =
+                            b.temp !== undefined &&
+                            b.temp !== null &&
+                            Number.isFinite(bTemp) &&
+                            bTemp !== -999 &&
+                            bTemp > -50;
+
+                        const homePill = document.getElementById("homeBTemp" + bId);
+                        if (homePill) {
+                            homePill.textContent = isTempValid
+                                ? bTemp.toFixed(1) + "°C"
+                                : "Err";
+                            homePill.style.color = isTempValid
+                                ? "var(--text-primary)"
+                                : "var(--ios-red)";
+                        }
+
+                        if (isTempValid) {
+                            validBottleTempSum += bTemp;
+                            validBottleTempCount++;
+                        }
+
+                        html += `<div class="bottle-card">
+                                <div class="bottle-title">BOTTLE ${bId}</div>
+                                <div class="data-row"><span>Temp</span> ${fmt(b.temp, "°C", -999)}</div>
+                                <div class="data-row"><span>pH</span> ${fmt(b.ph, "V", -1)}</div>
+                                <div class="data-row"><span>Methane</span> ${fmt(b.methane, "ppm", -1)}</div>
+                                <div class="data-row"><span>CH4 Vol</span> ${fmt(b.ch4_ml, "mL", -1)}</div>
+                                <div class="data-row"><span>CO2</span> ${fmt(b.co2, "ppm", -1)}</div>
+                                <div class="data-row"><span>CO2 Vol</span> ${fmt(b.co2_ml, "mL", -1)}</div>
+                                <div class="data-row"><span>Pressure</span> ${fmt(b.press, "hPa", -1)}</div>
+                            </div>`;
+                    });
+                    bottleGrid.innerHTML = html;
+                } else {
+                    bottleGrid.innerHTML =
+                        '<div class="empty-state">Waiting for Sensor Data...</div>';
+                }
+
+                const avgEl = document.getElementById("avgBottleTemp");
+                const backendAvg = Number(data.bottle_temp_avg);
+                if (validBottleTempCount > 0) {
+                    avgEl.textContent =
+                        (validBottleTempSum / validBottleTempCount).toFixed(1) + "°C";
+                } else if (Number.isFinite(backendAvg) && backendAvg > -50) {
+                    avgEl.textContent = backendAvg.toFixed(1) + "°C";
+                } else {
+                    avgEl.textContent = "--°C";
+                }
+            }
+
+            function shutdownPi() {
+                if (confirm("Shutdown?"))
+                    fetch("/command", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ command: "SHUTDOWN" }),
+                    });
+            }
+            setInterval(() => {
+                fetch("/status")
+                    .then((r) => r.json())
+                    .then((data) => updateUI(data));
+            }, 1000);
+        </script>
+    </body>
+</html>

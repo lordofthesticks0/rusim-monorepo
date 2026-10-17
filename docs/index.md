@@ -88,6 +88,12 @@ document is the source of truth for anything measured on real hardware.
 | [database.md](llm-generated/database.md) | Schema catalog for `device_data` and the unused `public` schema, relation inventories, exposure |
 | [security-report.md](llm-generated/security-report.md) | Public deployment findings, ordered by severity, with verification queries |
 
+## 3a. Legacy / Raspberry Pi
+
+| Path | Role |
+|---|---|
+| [`legacy/pi/invitro_ui_demo_newest_tpe_shit_version_5.html`](../legacy/pi/invitro_ui_demo_newest_tpe_shit_version_5.html) | Chromium kiosk UI for the Raspberry Pi 3B. [pi-kiosk-ui-css-redesign.md](llm-generated/pi-kiosk-ui-css-redesign.md) documents the CSS redesign. |
+
 ## 4. Hardware references
 
 These describe boards rather than this project's code.
