@@ -20,6 +20,11 @@ The dashboard uses `bun` to run things. Stick to it.
 
 **IMPORTANT**: Never ever, **EVER** read the raw `.env` file. Strictly off limits. The harness should disallow you but you should not test it regardless. Read `.env.example` instead if available.
 
+### 3. Legacy System Administrator
+If the task at hand mentions any Raspberry Pi, your work will be scoped entirely within `legacy/`. The system is a Raspberry Pi 3B, reachable at `invitro@10.92.128.23`. In short, it uses a self-contained HTML file as a dashboard with Chromium running at kiosk mode and a Python Flask server to process the data. 
+
+You should always mirror all changes to this repo and document it.  
+
 ## Context and Documentation
 
 Your context is limited in the codebase. This is a very large monorepo, with many lines of code and documentation. It is best practice to not immediately open any documentation files unless you think it is relevant. Only open documentation files when you are going to work on that specific part. Do not open them if you are not going to work on it.

@@ -1,3 +1,24 @@
+### 2026-10-20
+- `pio device monitor` is an interactive terminal, not a pipe-friendly serial
+  reader. It calls `termios.tcgetattr()` on stdin and dies with
+  `termios.error: (25, 'Inappropriate ioctl for device')` when stdin is not a
+  TTY (agent harness, pipe, service). Fix: configure the port with `stty` and
+  read it with `node:fs`, or use a serial library. Lesson: do not build a
+  non-interactive wrapper on top of an interactive monitor.
+- Opening a USB serial port resets the Mega via DTR, so the first telemetry
+  messages contain the firmware's invalid markers (`-1`, `-999`) while the
+  cache fills. Fix: discard a startup window (default 5 s, `--settle`) and
+  resynchronise to the next newline before parsing. The timer must start on the
+  first telemetry bytes, not on port open: bootloader and `setup()` time can
+  otherwise consume the whole window and the first printed row is still a cache
+  miss. (Found on the bench: a 5 s timer from open expired before the HX711
+  probes finished, so the table began with partial readings.)
+  (`scripts-hardware/read-legacy-slave.ts`)
+- Do not translate the firmware's invalid markers. The user asked for raw
+  values: `-1` and `-999` are printed as sent, not as `n/a`. The wrapper may
+  warm up the stream, but it should not reinterpret sensor data.
+  (`scripts-hardware/read-legacy-slave.ts`)
+
 ### 2026-10-08
 - `display-v9` / `network-master` are PlatformIO environments and
   `firmware/` directories, not git branches. `git branch -a` shows only

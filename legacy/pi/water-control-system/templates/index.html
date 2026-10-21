@@ -1,0 +1,1396 @@
+<!doctype html>
+<html>
+    <head>
+        <title>System Monitor</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+            :root {
+                --bg-main: #e4ecf7;
+                --dock-bg: #f3f6fb;
+                --card-bg: #ffffff;
+                --surface-secondary: #edf1f7;
+                --text-primary: #1c1c1e;
+                --text-secondary: #58585c;
+                --text-muted: #86868b;
+                --ios-blue: #007aff;
+                --ios-green: #34c759;
+                --ios-red: #ff3b30;
+                --ios-orange: #ff9500;
+                --divider: #dfe4ec;
+                --font-scale: 1.2;
+            }
+
+            * {
+                box-sizing: border-box;
+                -webkit-tap-highlight-color: transparent;
+                user-select: none;
+            }
+
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                font-size: calc(16px * var(--font-scale));
+                background: var(--bg-main);
+                color: var(--text-primary);
+                margin: 0;
+                height: 100vh;
+                width: 100vw;
+                overflow: hidden;
+                display: flex;
+            }
+
+            /* ==========================================
+               LEFT CARPLAY SIDEBAR
+               ========================================== */
+            .carplay-sidebar {
+                width: 104px;
+                height: 100vh;
+                background: var(--dock-bg);
+                border-right: 1px solid var(--divider);
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                align-items: center;
+                padding: 14px 8px;
+                flex-shrink: 0;
+            }
+
+            .clock-container {
+                text-align: center;
+                width: 100%;
+            }
+            .clock-time {
+                font-size: calc(19px * var(--font-scale));
+                font-weight: 700;
+                color: var(--text-primary);
+                line-height: 1.15;
+            }
+            .clock-date {
+                font-size: calc(11px * var(--font-scale));
+                font-weight: 600;
+                color: var(--text-secondary);
+                text-transform: uppercase;
+                margin-top: 2px;
+            }
+
+            .nav-bar {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                width: 100%;
+                align-items: center;
+            }
+            .nav-btn {
+                background: var(--card-bg);
+                color: var(--text-secondary);
+                border: 1px solid var(--divider);
+                width: 76px;
+                height: 66px;
+                border-radius: 16px;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+                padding: 6px;
+                transition: transform 0.1s ease-out;
+            }
+            .nav-btn svg {
+                width: 24px;
+                height: 24px;
+                fill: currentColor;
+            }
+            .nav-label {
+                font-size: calc(11px * var(--font-scale));
+                font-weight: 600;
+            }
+            .nav-btn:active {
+                transform: scale(0.92);
+            }
+            .nav-btn.active {
+                background: #d6e8ff;
+                color: #004099;
+                border-color: #8ec0ff;
+            }
+
+            .rec-btn {
+                background: #e3e7ef;
+                color: var(--text-primary);
+                border: 1px solid #cbd2df;
+                padding: 10px 6px;
+                font-size: calc(12px * var(--font-scale));
+                font-weight: 700;
+                border-radius: 12px;
+                cursor: pointer;
+                width: 82px;
+                text-transform: uppercase;
+                transition: transform 0.1s ease-out;
+            }
+            .rec-btn:active {
+                transform: scale(0.92);
+            }
+            .rec-btn.recording {
+                background: #ffd9d6;
+                color: #9e1109;
+                border-color: #ff8078;
+            }
+
+            /* ==========================================
+               MAIN VIEWPORT & ADAPTIVE TELEMETRY DOCK
+               ========================================== */
+            .main-viewport {
+                flex: 1;
+                height: 100vh;
+                overflow: hidden;
+                padding: 12px 20px 16px 20px;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .telemetry-dock {
+                width: 100%;
+                max-width: 1100px;
+                margin: 0 auto;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                flex-shrink: 0;
+            }
+
+            /* Centers telemetry and cards together on the Settings tab */
+            .main-viewport.settings-mode {
+                justify-content: center;
+                gap: 12px;
+            }
+            .main-viewport.settings-mode .telemetry-dock {
+                max-width: 960px;
+                margin: 0 auto;
+            }
+
+            .pi-perf-strip {
+                background: var(--card-bg);
+                border: 1px solid var(--divider);
+                border-radius: 14px;
+                padding: 7px 14px;
+                display: grid;
+                grid-template-columns: repeat(5, 1fr);
+                gap: 12px;
+                align-items: center;
+            }
+
+            .pkt-perf-strip {
+                display: none;
+                background: var(--card-bg);
+                border: 1px solid var(--divider);
+                border-radius: 14px;
+                padding: 7px 14px;
+                grid-template-columns: repeat(5, 1fr) auto;
+                gap: 12px;
+                align-items: center;
+            }
+            .main-viewport.settings-mode .pkt-perf-strip {
+                display: grid;
+            }
+
+            .perf-item {
+                display: flex;
+                flex-direction: column;
+                gap: 3px;
+                border-right: 1px solid var(--divider);
+                padding-right: 10px;
+            }
+            .perf-item:last-child {
+                border-right: none;
+                padding-right: 0;
+            }
+            .perf-top {
+                display: flex;
+                justify-content: space-between;
+                align-items: baseline;
+            }
+            .perf-label {
+                font-size: calc(10px * var(--font-scale));
+                font-weight: 600;
+                color: var(--text-muted);
+                text-transform: uppercase;
+            }
+            .perf-val {
+                font-size: calc(12px * var(--font-scale));
+                font-weight: 700;
+                color: var(--text-primary);
+            }
+            .perf-bar-bg {
+                width: 100%;
+                height: 4px;
+                background: var(--surface-secondary);
+                border-radius: 4px;
+                overflow: hidden;
+            }
+            .perf-bar-fill {
+                height: 100%;
+                width: 100%;
+                background: var(--ios-blue);
+                transform-origin: left center;
+                transform: scaleX(0);
+                transition: transform 0.2s ease-out;
+            }
+            .perf-badge {
+                font-size: calc(11px * var(--font-scale));
+                font-weight: 700;
+                padding: 2px 8px;
+                border-radius: 8px;
+            }
+            .btn-mini-glass {
+                background: #d6e8ff;
+                color: #004099;
+                border: 1px solid #8ec0ff;
+                border-radius: 8px;
+                padding: 4px 10px;
+                font-size: calc(11px * var(--font-scale));
+                font-weight: 600;
+                cursor: pointer;
+                transition: transform 0.1s ease-out;
+            }
+            .btn-mini-glass:active {
+                transform: scale(0.92);
+            }
+
+            /* ==========================================
+               PAGES
+               ========================================== */
+            .page {
+                display: none;
+                flex: 1;
+                min-height: 0;
+            }
+            .page.active {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+            }
+
+            /* Collapse settings wrapper from flex: 1 so it wraps snugly below telemetry */
+            .main-viewport.settings-mode #pageSettings.active {
+                flex: 0 0 auto;
+                width: 100%;
+            }
+
+            /* ==========================================
+               HOME / WATER PAGE
+               ========================================== */
+            .home-layout {
+                display: grid;
+                grid-template-columns: 1fr 1.15fr;
+                gap: 18px;
+                max-width: 980px;
+                width: 100%;
+                margin: 0 auto;
+                align-items: stretch;
+            }
+            .temp-column {
+                display: flex;
+                flex-direction: column;
+                gap: 14px;
+                justify-content: center;
+            }
+            .temp-card {
+                background: var(--card-bg);
+                border: 1px solid var(--divider);
+                border-radius: 20px;
+                padding: 18px 20px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                transition: transform 0.1s ease-out;
+            }
+            .temp-card.clickable {
+                cursor: pointer;
+            }
+            .temp-card.clickable:active {
+                transform: scale(0.98);
+            }
+            .temp-header {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+            }
+            .temp-label {
+                font-size: calc(12px * var(--font-scale));
+                font-weight: 600;
+                color: var(--text-muted);
+                text-transform: uppercase;
+            }
+            .chevron-icon {
+                width: 16px;
+                height: 16px;
+                fill: var(--ios-blue);
+                transition: transform 0.15s ease-out;
+            }
+            .temp-card.expanded .chevron-icon {
+                transform: rotate(180deg);
+            }
+            .temp {
+                font-size: calc(52px * var(--font-scale));
+                font-weight: 700;
+                margin: 4px 0 2px 0;
+                line-height: 1.05;
+            }
+            .temp-sub {
+                font-size: calc(42px * var(--font-scale));
+                font-weight: 700;
+                color: var(--ios-blue);
+                margin: 4px 0 2px 0;
+                line-height: 1.05;
+            }
+            .tap-hint {
+                font-size: calc(11px * var(--font-scale));
+                color: var(--text-muted);
+            }
+
+            .bottle-temp-drawer {
+                display: none;
+                width: 100%;
+                margin-top: 10px;
+                padding-top: 10px;
+                border-top: 1px solid var(--divider);
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+            .temp-card.expanded .bottle-temp-drawer {
+                display: grid;
+            }
+            .mini-bottle-pill {
+                background: var(--surface-secondary);
+                border-radius: 10px;
+                padding: 7px 10px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: calc(13px * var(--font-scale));
+            }
+            .mini-bottle-name {
+                font-weight: 600;
+                color: var(--text-secondary);
+                font-size: calc(11px * var(--font-scale));
+            }
+            .mini-bottle-val {
+                font-weight: 700;
+            }
+
+            .status-container {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                gap: 12px;
+                background: var(--card-bg);
+                border: 1px solid var(--divider);
+                padding: 22px;
+                border-radius: 20px;
+            }
+            .indicator {
+                font-size: calc(17px * var(--font-scale));
+                font-weight: 500;
+                color: var(--text-secondary);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid var(--divider);
+                padding-bottom: 10px;
+            }
+            .indicator:last-child {
+                border-bottom: none;
+                padding-bottom: 0;
+            }
+            .indicator span:last-child {
+                font-weight: 600;
+                color: var(--text-primary);
+                background: var(--surface-secondary);
+                padding: 4px 12px;
+                border-radius: 12px;
+                font-size: calc(14px * var(--font-scale));
+            }
+            .on {
+                color: #116629 !important;
+                background: #d5f5df !important;
+            }
+            .warning {
+                color: #a3120a !important;
+                background: #ffd9d6 !important;
+            }
+
+            /* ==========================================
+               BOTTLES PAGE
+               ========================================== */
+            .bottle-grid {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 12px;
+                max-width: 1100px;
+                width: 100%;
+                margin: 0 auto;
+            }
+            .bottle-card {
+                background: var(--card-bg);
+                border: 1px solid var(--divider);
+                padding: 12px 16px;
+                border-radius: 18px;
+                border-left: 5px solid var(--ios-blue);
+            }
+            .bottle-title {
+                font-size: calc(16px * var(--font-scale));
+                font-weight: 700;
+                margin-bottom: 6px;
+                border-bottom: 1px solid var(--divider);
+                padding-bottom: 4px;
+                color: #004799;
+            }
+            .data-row {
+                display: flex;
+                justify-content: space-between;
+                font-size: calc(14px * var(--font-scale));
+                color: var(--text-secondary);
+                margin: 3px 0;
+                border-bottom: 1px solid var(--divider);
+                padding-bottom: 2px;
+            }
+            .data-row:last-child {
+                border-bottom: none;
+            }
+            .val {
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .unit {
+                font-size: calc(11px * var(--font-scale));
+                color: var(--text-muted);
+                margin-left: 3px;
+            }
+            .error-text {
+                color: var(--ios-red);
+                font-weight: 500;
+                font-size: calc(13px * var(--font-scale));
+            }
+
+            /* ==========================================
+               LOGS PAGE: ULTRA-FAST SINGLE-NODE VIEWER
+               ========================================== */
+            .logs-split-layout {
+                display: grid;
+                grid-template-columns: 290px 1fr;
+                gap: 14px;
+                max-width: 1100px;
+                width: 100%;
+                height: 100%;
+                min-height: 0;
+                margin: 0 auto;
+            }
+            .logs-split-layout.expanded-viewer {
+                grid-template-columns: 1fr;
+            }
+            .logs-split-layout.expanded-viewer .logs-left-pane {
+                display: none;
+            }
+
+            .logs-left-pane,
+            .logs-right-pane {
+                background: var(--card-bg);
+                border: 1px solid var(--divider);
+                padding: 14px 16px;
+                border-radius: 18px;
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
+                min-width: 0;
+            }
+            .logs-left-pane h2,
+            .settings-card h2 {
+                margin: 0 0 4px 0;
+                font-size: calc(16px * var(--font-scale));
+                font-weight: 700;
+            }
+
+            .file-list-container {
+                background: var(--surface-secondary);
+                border-radius: 12px;
+                padding: 6px;
+                flex: 1;
+                min-height: 60px;
+                overflow-y: auto;
+                margin-bottom: 6px;
+            }
+            .file-item {
+                background: var(--card-bg);
+                color: var(--text-primary);
+                padding: 8px 10px;
+                margin-bottom: 4px;
+                cursor: pointer;
+                border-radius: 8px;
+                border: 1px solid var(--divider);
+                font-size: calc(13px * var(--font-scale));
+                font-weight: 600;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            .file-item.selected {
+                background: #d6e8ff;
+                border-color: #8ec0ff;
+                color: #004099;
+            }
+
+            .inspector-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding-bottom: 8px;
+                border-bottom: 1px solid var(--divider);
+                margin-bottom: 8px;
+                gap: 8px;
+                flex-shrink: 0;
+            }
+            .inspector-title {
+                font-size: calc(15px * var(--font-scale));
+                font-weight: 700;
+            }
+            .inspector-subtitle {
+                font-size: calc(11px * var(--font-scale));
+                font-weight: 600;
+                color: var(--text-muted);
+                margin-left: 6px;
+            }
+            .inspector-controls {
+                display: flex;
+                gap: 6px;
+            }
+            .btn-pill-toggle {
+                background: var(--surface-secondary);
+                color: var(--text-secondary);
+                border: 1px solid var(--divider);
+                border-radius: 8px;
+                padding: 5px 10px;
+                font-size: calc(11px * var(--font-scale));
+                font-weight: 600;
+                cursor: pointer;
+                transition: transform 0.1s ease-out;
+            }
+            .btn-pill-toggle:active {
+                transform: scale(0.93);
+            }
+            .btn-pill-toggle.active {
+                background: #d6e8ff;
+                color: #004099;
+                border-color: #8ec0ff;
+            }
+
+            .inspector-body {
+                flex: 1;
+                min-height: 0;
+                background: var(--surface-secondary);
+                border-radius: 12px;
+                overflow: auto;
+            }
+            .raw-log-pre {
+                margin: 0;
+                padding: 10px 12px;
+                font-family: monospace;
+                font-size: calc(12px * var(--font-scale));
+                line-height: 1.45;
+                color: var(--text-primary);
+                white-space: pre;
+                user-select: text;
+            }
+
+            /* ==========================================
+               HOTSPOT QR MODAL & SETTINGS
+               ========================================== */
+            .modal-backdrop {
+                display: none;
+                position: fixed;
+                inset: 0;
+                background: rgba(15, 23, 42, 0.45);
+                z-index: 100;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }
+            .modal-backdrop.open {
+                display: flex;
+            }
+            .hotspot-modal {
+                background: var(--card-bg);
+                border: 1px solid var(--divider);
+                border-radius: 20px;
+                padding: 18px 22px;
+                max-width: 660px;
+                width: 100%;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+            .hotspot-modal-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid var(--divider);
+                padding-bottom: 8px;
+            }
+            .qr-steps-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 14px;
+            }
+            .qr-step-card {
+                background: var(--surface-secondary);
+                border-radius: 14px;
+                padding: 12px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+                gap: 6px;
+            }
+            .qr-step-badge {
+                font-size: calc(11px * var(--font-scale));
+                font-weight: 700;
+                color: #004099;
+                background: #d6e8ff;
+                padding: 3px 10px;
+                border-radius: 10px;
+            }
+            .qr-img-box {
+                width: 140px;
+                height: 140px;
+                background: #ffffff;
+                border-radius: 10px;
+                padding: 6px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border: 1px solid var(--divider);
+            }
+            .qr-img-box img {
+                width: 100%;
+                height: 100%;
+            }
+            .qr-meta {
+                font-size: calc(12px * var(--font-scale));
+                color: var(--text-secondary);
+                line-height: 1.35;
+            }
+
+            .settings-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 18px;
+                max-width: 960px;
+                width: 100%;
+                margin: 0 auto;
+            }
+            .settings-card {
+                background: var(--card-bg);
+                border: 1px solid var(--divider);
+                padding: 18px 20px;
+                border-radius: 20px;
+            }
+            .info-box {
+                background: var(--surface-secondary);
+                padding: 12px;
+                border-radius: 12px;
+                margin-bottom: 12px;
+                font-size: calc(15px * var(--font-scale));
+            }
+            .info-label {
+                font-weight: 600;
+                color: var(--text-secondary);
+                font-size: calc(12px * var(--font-scale));
+            }
+            .info-val {
+                float: right;
+                font-weight: 600;
+            }
+
+            .btn-green,
+            .btn-blue,
+            .btn-danger {
+                font-size: calc(13px * var(--font-scale));
+                padding: 10px 12px;
+                border-radius: 11px;
+                cursor: pointer;
+                font-weight: 600;
+                width: 100%;
+                margin-top: 5px;
+                transition: transform 0.1s ease-out;
+            }
+            .btn-green:active,
+            .btn-blue:active,
+            .btn-danger:active {
+                transform: scale(0.96);
+            }
+            .btn-green {
+                background: #d3f4de;
+                color: #116629;
+                border: 1px solid #8ce0a6;
+            }
+            .btn-blue {
+                background: #d6e8ff;
+                color: #004099;
+                border: 1px solid #8ec0ff;
+            }
+            .btn-danger {
+                background: #ffd9d6;
+                color: #a3120a;
+                border: 1px solid #ff9c96;
+            }
+            .btn-green:disabled,
+            .btn-blue:disabled {
+                opacity: 0.42;
+                cursor: not-allowed;
+                transform: none;
+            }
+
+            input[type="datetime-local"],
+            select {
+                font-size: calc(14px * var(--font-scale));
+                font-weight: 600;
+                padding: 8px 10px;
+                width: 100%;
+                margin-bottom: 4px;
+                border-radius: 10px;
+                border: 1px solid var(--divider);
+                background: var(--surface-secondary);
+                color: var(--text-primary);
+                text-align: center;
+            }
+            .msg-box {
+                min-height: 16px;
+                font-size: calc(12px * var(--font-scale));
+                margin-top: 4px;
+                font-weight: 600;
+                color: var(--ios-orange);
+                text-align: center;
+            }
+            .section-title {
+                color: var(--text-secondary);
+                font-size: calc(11px * var(--font-scale));
+                font-weight: 600;
+                text-transform: uppercase;
+                margin: 6px 0 4px 0;
+                border-bottom: 1px solid var(--divider);
+                padding-bottom: 2px;
+            }
+        </style>
+    </head>
+    <body>
+        <aside class="carplay-sidebar">
+            <div class="clock-container">
+                <div class="clock-time" id="clockTime">--:--</div>
+                <div class="clock-date" id="clockDate">--</div>
+            </div>
+
+            <nav class="nav-bar">
+                <button id="tabWater" class="nav-btn active" onclick="switchTab('water')">
+                    <svg viewBox="0 0 24 24"><path d="M12 3L3 10.5V20a1 1 0 0 0 1 1h5v-6h6v6h5a1 1 0 0 0 1-1v-9.5L12 3z" /></svg>
+                    <span class="nav-label">Home</span>
+                </button>
+                <button id="tabBottles" class="nav-btn" onclick="switchTab('bottles')">
+                    <svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="3" rx="1" /><path d="M7 8a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3h-4a3 3 0 0 1-3-3V8z" /></svg>
+                    <span class="nav-label">Bottle</span>
+                </button>
+                <button id="tabData" class="nav-btn" onclick="switchTab('data')">
+                    <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="4" rx="1.5" /><rect x="4" y="10" width="16" height="4" rx="1.5" /><rect x="4" y="16" width="11" height="4" rx="1.5" /></svg>
+                    <span class="nav-label">Logs</span>
+                </button>
+                <button id="tabSettings" class="nav-btn" onclick="switchTab('settings')">
+                    <svg viewBox="0 0 24 24"><path d="M12 2L20.66 7v10L12 22 3.34 17V7L12 2zm0 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" /></svg>
+                    <span class="nav-label">Settings</span>
+                </button>
+            </nav>
+
+            <button id="btnRec" class="rec-btn" onclick="toggleRec()">STOPPED</button>
+        </aside>
+
+        <main class="main-viewport" id="mainViewport">
+            <div class="telemetry-dock">
+                <div class="pi-perf-strip">
+                    <div class="perf-item">
+                        <div class="perf-top"><span class="perf-label">CPU Load</span><span class="perf-val" id="piCpuVal">--%</span></div>
+                        <div class="perf-bar-bg"><div class="perf-bar-fill" id="piCpuBar"></div></div>
+                    </div>
+                    <div class="perf-item">
+                        <div class="perf-top"><span class="perf-label">RAM</span><span class="perf-val" id="piRamVal">--%</span></div>
+                        <div class="perf-bar-bg"><div class="perf-bar-fill" id="piRamBar"></div></div>
+                    </div>
+                    <div class="perf-item">
+                        <div class="perf-top"><span class="perf-label">SoC Temp</span><span class="perf-val" id="piTempVal">--°C</span></div>
+                        <div class="perf-bar-bg"><div class="perf-bar-fill" id="piTempBar"></div></div>
+                    </div>
+                    <div class="perf-item">
+                        <div class="perf-top"><span class="perf-label">SD Storage</span><span class="perf-val" id="piDiskVal">--%</span></div>
+                        <div class="perf-bar-bg"><div class="perf-bar-fill" id="piDiskBar"></div></div>
+                    </div>
+                    <div class="perf-item">
+                        <div class="perf-top" style="align-items: center;"><span class="perf-label">5V Rail</span><span class="perf-badge on" id="piPwrBadge">OK</span></div>
+                    </div>
+                </div>
+
+                <div class="pkt-perf-strip">
+                    <div class="perf-item"><div class="perf-top"><span class="perf-label">Total Pkts</span><span class="perf-val" id="pktTotalVal">0</span></div></div>
+                    <div class="perf-item"><div class="perf-top"><span class="perf-label">Outgoing (TX)</span><span class="perf-val" id="pktTxVal" style="color: var(--ios-blue);">0</span></div></div>
+                    <div class="perf-item"><div class="perf-top"><span class="perf-label">Incoming (RX)</span><span class="perf-val" id="pktRxVal" style="color: #116629;">0</span></div></div>
+                    <div class="perf-item"><div class="perf-top"><span class="perf-label">Pkt Loss</span><span class="perf-val" id="pktLostVal">0</span></div></div>
+                    <div class="perf-item"><div class="perf-top" style="align-items: center;"><span class="perf-label">Loss Rate</span><span class="perf-badge on" id="pktLossBadge">0.0%</span></div></div>
+                    <div><button class="btn-mini-glass" onclick="resetPackets()">RESET</button></div>
+                </div>
+            </div>
+
+            <!-- HOME -->
+            <div id="pageWater" class="page active">
+                <div class="home-layout">
+                    <div class="temp-column">
+                        <div class="temp-card">
+                            <div class="temp-label">Water Bath Temp</div>
+                            <div class="temp" id="temp">--°C</div>
+                        </div>
+                        <div id="avgBottleCard" class="temp-card clickable" onclick="toggleBottleTemps()">
+                            <div class="temp-header">
+                                <span class="temp-label">Avg Bottle Temp</span>
+                                <svg class="chevron-icon" viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" /></svg>
+                            </div>
+                            <div class="temp-sub" id="avgBottleTemp">--°C</div>
+                            <div class="tap-hint" id="bottleTapHint">Tap to view bottles</div>
+                            <div class="bottle-temp-drawer">
+                                <div class="mini-bottle-pill"><span class="mini-bottle-name">BOTTLE 1</span><span class="mini-bottle-val" id="homeBTemp1">--°C</span></div>
+                                <div class="mini-bottle-pill"><span class="mini-bottle-name">BOTTLE 2</span><span class="mini-bottle-val" id="homeBTemp2">--°C</span></div>
+                                <div class="mini-bottle-pill"><span class="mini-bottle-name">BOTTLE 3</span><span class="mini-bottle-val" id="homeBTemp3">--°C</span></div>
+                                <div class="mini-bottle-pill"><span class="mini-bottle-name">BOTTLE 4</span><span class="mini-bottle-val" id="homeBTemp4">--°C</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="status-container">
+                        <div class="indicator"><span>WATER LEVEL</span> <span id="water">--</span></div>
+                        <div class="indicator"><span>HEATER (39°C)</span> <span id="heater">--</span></div>
+                        <div class="indicator"><span>PUMP (Auto)</span> <span id="pump">--</span></div>
+                        <div class="indicator"><span>FAN (Auto)</span> <span id="fan">--</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BOTTLES -->
+            <div id="pageBottles" class="page">
+                <div class="bottle-grid" id="bottleGrid">
+                    <div style="grid-column: 1/-1; text-align: center; color: var(--text-secondary);">Waiting for Sensor Data...</div>
+                </div>
+            </div>
+
+            <!-- LOGS -->
+            <div id="pageData" class="page">
+                <div class="logs-split-layout" id="logsSplitLayout">
+                    <div class="logs-left-pane">
+                        <h2>LOGS & EXPORT</h2>
+                        <div class="section-title">1. Tap Log to Select</div>
+                        <div class="file-list-container" id="fileList">Loading...</div>
+                        <div class="section-title">2. Phone Wi-Fi Download</div>
+                        <button id="btnHotspotDownload" class="btn-blue" onclick="openHotspotModal()" disabled>DOWNLOAD VIA HOTSPOT</button>
+                        <div class="section-title">3. USB Drive Export</div>
+                        <select id="driveSelect"><option value="">Scanning...</option></select>
+                        <button id="btnExport" class="btn-green" onclick="exportSelected()" disabled>EXPORT TO USB</button>
+                        <div id="exportMsg" class="msg-box"></div>
+                    </div>
+
+                    <div class="logs-right-pane">
+                        <div class="inspector-header">
+                            <div>
+                                <span class="inspector-title" id="inspectorFileTitle">No Log Selected</span>
+                                <span class="inspector-subtitle" id="inspectorRowCount"></span>
+                            </div>
+                            <div class="inspector-controls">
+                                <button id="btnLiveTail" class="btn-pill-toggle active" onclick="toggleLiveTail()">LIVE TAIL</button>
+                                <button id="btnExpandLog" class="btn-pill-toggle" onclick="toggleExpandInspector()">FULL WIDTH</button>
+                            </div>
+                        </div>
+                        <div class="inspector-body" id="inspectorBody">
+                            <pre class="raw-log-pre" id="logPreContent">Tap a CSV file on the left to inspect data on the spot.</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SETTINGS -->
+            <div id="pageSettings" class="page">
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h2>DEVICE INFO</h2>
+                        <div class="info-box">
+                            <div><span class="info-label">SSID:</span><span id="wifiName" class="info-val" style="color: #c96e00">--</span></div>
+                            <div style="margin-top: 8px"><span class="info-label">IP:</span><span id="ipAddress" class="info-val" style="color: #004799">--</span></div>
+                        </div>
+                        <button class="btn-blue" onclick="location.reload(true)" style="margin-bottom: 8px;">REFRESH DASHBOARD</button>
+                        <button class="btn-danger" onclick="shutdownPi()">SHUTDOWN SYSTEM</button>
+                    </div>
+                    <div class="settings-card">
+                        <h2>DATE & TIME</h2>
+                        <div class="section-title">Time Zone</div>
+                        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
+                            <select id="tzSelect" style="margin-bottom: 0;"><option>Loading...</option></select>
+                            <button class="btn-blue" style="width: auto; padding: 8px 16px; margin: 0;" onclick="setSystemTimezone()">SET</button>
+                        </div>
+                        <div class="section-title">Manual Date/Time</div>
+                        <input type="datetime-local" id="timeInput" />
+                        <button class="btn-green" onclick="setSystemTime()">UPDATE TIME</button>
+                        <div id="timeMsg" class="msg-box"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- HOTSPOT MODAL -->
+        <div class="modal-backdrop" id="hotspotModal">
+            <div class="hotspot-modal">
+                <div class="hotspot-modal-header">
+                    <div>
+                        <div style="font-size: calc(17px * var(--font-scale)); font-weight: 700;" id="hsModalTitle">Download Log via Phone Hotspot</div>
+                        <div style="font-size: calc(12px * var(--font-scale)); color: var(--text-muted);" id="hsModalStatus">Starting Raspberry Pi Hotspot...</div>
+                    </div>
+                    <button class="btn-danger" style="width: auto; margin: 0; padding: 7px 14px;" onclick="closeHotspotModal()">CLOSE</button>
+                </div>
+                <div class="qr-steps-grid">
+                    <div class="qr-step-card">
+                        <span class="qr-step-badge">Step 1 · Connect Wi-Fi</span>
+                        <div class="qr-img-box" id="hsWifiQrBox"><span style="font-size: calc(11px * var(--font-scale));">Starting AP...</span></div>
+                        <div class="qr-meta">SSID: <strong id="hsSsidText">InVitro-Hotspot</strong><br />Key: <strong id="hsWifiPassText">invitrowifi</strong></div>
+                    </div>
+                    <div class="qr-step-card">
+                        <span class="qr-step-badge">Step 2 · Login & Download</span>
+                        <div class="qr-img-box" id="hsUrlQrBox"><span style="font-size: calc(11px * var(--font-scale));">Generating QR...</span></div>
+                        <div class="qr-meta">User: <strong id="hsUserText">invitro</strong> | Pass: <strong id="hsPassText">password</strong><br /><span id="hsUrlText" style="font-size: calc(11px * var(--font-scale)); color: var(--ios-blue);">http://10.42.0.1:5000</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            let selectedFile = null;
+            let isFetchingStatus = false;
+            let renderedBottleCount = 0;
+            let activeTab = "water";
+            let liveTailActive = true;
+            let lastLogText = "";
+
+            const dateFmt = new Intl.DateTimeFormat([], { weekday: "short", month: "short", day: "numeric" });
+
+            const DOM = {};
+            [
+                "clockTime", "clockDate", "mainViewport", "temp", "water", "heater", "pump", "fan",
+                "btnRec", "avgBottleCard", "avgBottleTemp", "bottleTapHint", "homeBTemp1", "homeBTemp2",
+                "homeBTemp3", "homeBTemp4", "bottleGrid", "piCpuVal", "piCpuBar", "piRamVal", "piRamBar",
+                "piTempVal", "piTempBar", "piDiskVal", "piDiskBar", "piPwrBadge", "pktTotalVal", "pktTxVal",
+                "pktRxVal", "pktLostVal", "pktLossBadge", "fileList", "driveSelect", "btnExport",
+                "btnHotspotDownload", "exportMsg", "inspectorFileTitle", "inspectorRowCount",
+                "logPreContent", "btnLiveTail", "btnExpandLog", "logsSplitLayout", "wifiName", "ipAddress",
+                "tzSelect", "timeInput", "timeMsg", "hotspotModal", "hsModalTitle", "hsModalStatus",
+                "hsWifiQrBox", "hsUrlQrBox", "hsSsidText", "hsWifiPassText", "hsUserText", "hsPassText", "hsUrlText"
+            ].forEach((id) => { DOM[id] = document.getElementById(id); });
+
+            function setText(el, text) {
+                const s = String(text);
+                if (el && el.textContent !== s) el.textContent = s;
+            }
+            function setClass(el, cls) {
+                if (el && el.className !== cls) el.className = cls;
+            }
+
+            function toggleBottleTemps() {
+                const exp = DOM.avgBottleCard.classList.toggle("expanded");
+                setText(DOM.bottleTapHint, exp ? "Tap to collapse" : "Tap to view bottles");
+            }
+
+            function updateClock() {
+                const now = new Date();
+                const hh = String(now.getHours()).padStart(2, "0");
+                const mm = String(now.getMinutes()).padStart(2, "0");
+                setText(DOM.clockTime, `${hh}:${mm}`);
+                setText(DOM.clockDate, dateFmt.format(now));
+            }
+            setInterval(updateClock, 2000);
+            updateClock();
+
+            function switchTab(tab) {
+                activeTab = tab;
+                DOM.mainViewport.classList.toggle("settings-mode", tab === "settings");
+                document.querySelectorAll(".page").forEach((el) => el.classList.remove("active"));
+                document.querySelectorAll(".nav-btn").forEach((el) => el.classList.remove("active"));
+                document.getElementById("page" + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add("active");
+                document.getElementById("tab" + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add("active");
+
+                if (tab === "data") {
+                    loadFiles();
+                    loadDrives();
+                } else if (tab === "settings") {
+                    checkNetwork();
+                    loadTimezones();
+                    initTimeInput();
+                }
+            }
+
+            function setBarScale(barEl, pct, warn = 75, crit = 90) {
+                if (!barEl) return;
+                const clamped = Math.min(1, Math.max(0.02, pct / 100));
+                const t = `scaleX(${clamped.toFixed(2)})`;
+                if (barEl.style.transform !== t) barEl.style.transform = t;
+                const col = pct >= crit ? "var(--ios-red)" : pct >= warn ? "var(--ios-orange)" : "var(--ios-blue)";
+                if (barEl.style.background !== col) barEl.style.background = col;
+            }
+
+            function updateSysAndPackets(s, p) {
+                if (s) {
+                    const cpu = Number(s.cpu_percent || 0);
+                    setText(DOM.piCpuVal, cpu.toFixed(0) + "%");
+                    setBarScale(DOM.piCpuBar, cpu, 75, 90);
+
+                    const ram = Number(s.ram_percent || 0);
+                    setText(DOM.piRamVal, s.ram_used_mb ? `${ram.toFixed(0)}% (${s.ram_used_mb}M)` : `${ram.toFixed(0)}%`);
+                    setBarScale(DOM.piRamBar, ram, 80, 92);
+
+                    const temp = Number(s.cpu_temp || 0);
+                    setText(DOM.piTempVal, temp.toFixed(1) + "°C");
+                    setBarScale(DOM.piTempBar, ((temp - 30) / 55) * 100, 70, 80);
+
+                    const disk = Number(s.disk_percent || 0);
+                    setText(DOM.piDiskVal, disk.toFixed(0) + "%");
+                    setBarScale(DOM.piDiskBar, disk, 80, 92);
+
+                    setText(DOM.piPwrBadge, s.power_ok ? "OK" : "LOW V");
+                    setClass(DOM.piPwrBadge, "perf-badge " + (s.power_ok ? "on" : "warning"));
+                }
+                if (p && activeTab === "settings") {
+                    setText(DOM.pktTotalVal, p.total ?? 0);
+                    setText(DOM.pktTxVal, p.outgoing ?? 0);
+                    setText(DOM.pktRxVal, p.incoming ?? 0);
+                    setText(DOM.pktLostVal, p.lost ?? 0);
+                    const lossPct = Number(p.loss_pct ?? 0);
+                    setText(DOM.pktLossBadge, lossPct.toFixed(1) + "%");
+                    setClass(DOM.pktLossBadge, "perf-badge " + (lossPct > 5.0 ? "warning" : "on"));
+                }
+            }
+
+            function resetPackets() {
+                fetch("/reset_packets", { method: "POST" })
+                    .then((r) => r.json())
+                    .then((d) => updateSysAndPackets(null, d.packets));
+            }
+
+            function toggleRec() {
+                fetch("/toggle_logging", { method: "POST" })
+                    .then((r) => r.json())
+                    .then((data) => {
+                        DOM.btnRec.classList.toggle("recording", Boolean(data.logging));
+                        setText(DOM.btnRec, data.logging ? "REC ●" : "STOPPED");
+                        if (activeTab === "data") loadFiles();
+                    });
+            }
+
+            /* ==========================================
+               SINGLE-NODE LOG VIEWER & HOTSPOT
+               ========================================== */
+            function loadFiles() {
+                fetch("/files")
+                    .then((r) => r.json())
+                    .then((files) => {
+                        DOM.fileList.innerHTML = "";
+                        if (files.length === 0) {
+                            DOM.fileList.innerHTML = '<div style="padding:14px; color: var(--text-muted);">No logs found.</div>';
+                            return;
+                        }
+                        files.forEach((f, idx) => {
+                            const isSel = selectedFile === f || (!selectedFile && idx === 0);
+                            const div = document.createElement("div");
+                            div.className = "file-item" + (isSel ? " selected" : "");
+                            div.innerHTML = `<span>${f}</span> <span style="font-size:calc(11px * var(--font-scale));">OPEN ▸</span>`;
+                            div.onclick = () => selectFile(div, f);
+                            DOM.fileList.appendChild(div);
+                            if (isSel && !selectedFile) selectFile(div, f);
+                        });
+                    });
+            }
+
+            function selectFile(el, f) {
+                document.querySelectorAll(".file-item").forEach((d) => d.classList.remove("selected"));
+                if (el) el.classList.add("selected");
+                selectedFile = f;
+                lastLogText = "";
+                DOM.btnHotspotDownload.disabled = !selectedFile;
+                checkExportReady();
+                fetchLogContent(f);
+            }
+
+            function fetchLogContent(filename) {
+                if (!filename) return;
+                fetch(`/read_log?filename=${encodeURIComponent(filename)}&lines=40`)
+                    .then((r) => r.json())
+                    .then((d) => {
+                        if (d.status !== "success") return;
+                        setText(DOM.inspectorFileTitle, d.filename);
+                        setText(DOM.inspectorRowCount, `(Latest ${d.total_shown} rows)`);
+                        if (d.raw !== lastLogText) {
+                            lastLogText = d.raw;
+                            setText(DOM.logPreContent, d.raw || "Empty log file.");
+                        }
+                    })
+                    .catch(() => {});
+            }
+
+            function toggleLiveTail() {
+                liveTailActive = !liveTailActive;
+                DOM.btnLiveTail.classList.toggle("active", liveTailActive);
+                if (liveTailActive && selectedFile) fetchLogContent(selectedFile);
+            }
+
+            function toggleExpandInspector() {
+                const exp = DOM.logsSplitLayout.classList.toggle("expanded-viewer");
+                setText(DOM.btnExpandLog, exp ? "SHOW FILES" : "FULL WIDTH");
+                DOM.btnExpandLog.classList.toggle("active", exp);
+            }
+
+            function openHotspotModal() {
+                if (!selectedFile) return;
+                DOM.hotspotModal.classList.add("open");
+                setText(DOM.hsModalTitle, `Download ${selectedFile}`);
+                setText(DOM.hsModalStatus, "Activating Wi-Fi Hotspot on wlan0...");
+                DOM.hsWifiQrBox.innerHTML = '<span style="font-size: calc(11px * var(--font-scale));">Starting AP...</span>';
+                DOM.hsUrlQrBox.innerHTML = '<span style="font-size: calc(11px * var(--font-scale));">Generating QR...</span>';
+
+                fetch("/hotspot/start", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename: selectedFile }),
+                })
+                    .then((r) => r.json())
+                    .then((d) => {
+                        if (d.status !== "success") {
+                            setText(DOM.hsModalStatus, d.message || "Failed to start hotspot.");
+                            return;
+                        }
+                        setText(DOM.hsModalStatus, "Hotspot Active · Scan Step 1 then Step 2");
+                        setText(DOM.hsSsidText, d.ssid);
+                        setText(DOM.hsWifiPassText, d.wifi_pass);
+                        setText(DOM.hsUserText, d.portal_user);
+                        setText(DOM.hsPassText, d.portal_pass);
+                        setText(DOM.hsUrlText, d.url);
+                        DOM.hsWifiQrBox.innerHTML = d.wifi_qr ? `<img src="${d.wifi_qr}" />` : "Install python3-qrcode";
+                        if (d.url_qr) DOM.hsUrlQrBox.innerHTML = `<img src="${d.url_qr}" />`;
+                    })
+                    .catch(() => setText(DOM.hsModalStatus, "Error starting hotspot."));
+            }
+
+            function closeHotspotModal() {
+                DOM.hotspotModal.classList.remove("open");
+                fetch("/hotspot/stop", { method: "POST" }).catch(() => {});
+            }
+
+            function loadDrives() {
+                DOM.driveSelect.innerHTML = '<option value="">Scanning...</option>';
+                fetch("/get_drives")
+                    .then((r) => r.json())
+                    .then((drives) => {
+                        DOM.driveSelect.innerHTML = "";
+                        if (drives.length === 0) {
+                            DOM.driveSelect.innerHTML = '<option value="">No USB Drive Found</option>';
+                            return;
+                        }
+                        drives.forEach((d) => {
+                            let opt = document.createElement("option");
+                            opt.value = d.path;
+                            opt.textContent = `${d.name} (${d.free_gb}GB Free)`;
+                            DOM.driveSelect.appendChild(opt);
+                        });
+                        checkExportReady();
+                    });
+            }
+            DOM.driveSelect.addEventListener("change", checkExportReady);
+            function checkExportReady() {
+                DOM.btnExport.disabled = !(selectedFile && DOM.driveSelect.value);
+                setText(DOM.exportMsg, "");
+            }
+            function exportSelected() {
+                const drive = DOM.driveSelect.value;
+                if (!selectedFile || !drive) return;
+                setText(DOM.exportMsg, "Copying...");
+                fetch("/export", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename: selectedFile, dest_path: drive }),
+                })
+                    .then((r) => r.json())
+                    .then((d) => {
+                        setText(DOM.exportMsg, d.message);
+                        if (d.status === "success") loadDrives();
+                    });
+            }
+            function checkNetwork() {
+                fetch("/get_ip")
+                    .then((r) => r.json())
+                    .then((d) => {
+                        setText(DOM.ipAddress, d.ip);
+                        setText(DOM.wifiName, d.ssid);
+                    });
+            }
+            function loadTimezones() {
+                if (DOM.tzSelect.options.length > 1) return;
+                fetch("/get_timezones")
+                    .then((r) => r.json())
+                    .then((z) => {
+                        DOM.tzSelect.innerHTML = "";
+                        z.forEach((t) => {
+                            let o = document.createElement("option");
+                            o.value = t;
+                            o.textContent = t;
+                            DOM.tzSelect.appendChild(o);
+                        });
+                        DOM.tzSelect.value = "Asia/Jakarta";
+                    });
+            }
+            function initTimeInput() {
+                const now = new Date();
+                now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+                DOM.timeInput.value = now.toISOString().slice(0, 16);
+            }
+            function setSystemTime() {
+                fetch("/set_time", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ datetime: DOM.timeInput.value.replace("T", " ") }),
+                })
+                    .then((r) => r.json())
+                    .then((d) => setText(DOM.timeMsg, d.status === "success" ? "Updated!" : "Error"));
+            }
+            function setSystemTimezone() {
+                fetch("/set_timezone", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ timezone: DOM.tzSelect.value }),
+                })
+                    .then((r) => r.json())
+                    .then((d) => setText(DOM.timeMsg, d.status === "success" ? "Zone Set!" : "Error"));
+            }
+
+            function fmtMetric(v, u, sentinel) {
+                const n = Number(v);
+                if (v === undefined || v === null || !Number.isFinite(n) || n === sentinel) {
+                    return `<span class="error-text">Unavailable</span>`;
+                }
+                return `<span class="val">${Number.isInteger(n) ? n : n.toFixed(2)}<span class="unit">${u}</span></span>`;
+            }
+
+            function ensureBottleCards(bottles) {
+                if (renderedBottleCount === bottles.length) return;
+                let html = "";
+                bottles.forEach((b, idx) => {
+                    const bId = b.id || idx + 1;
+                    html += `<div class="bottle-card">
+                        <div class="bottle-title" id="bTitle_${idx}">BOTTLE ${bId}</div>
+                        <div class="data-row"><span>Temp</span> <span id="bTemp_${idx}"></span></div>
+                        <div class="data-row"><span>pH</span> <span id="bPh_${idx}"></span></div>
+                        <div class="data-row"><span>Methane</span> <span id="bCh4_${idx}"></span></div>
+                        <div class="data-row"><span>CH4 Vol</span> <span id="bCh4Vol_${idx}"></span></div>
+                        <div class="data-row"><span>CO2</span> <span id="bCo2_${idx}"></span></div>
+                        <div class="data-row"><span>CO2 Vol</span> <span id="bCo2Vol_${idx}"></span></div>
+                        <div class="data-row"><span>Pressure</span> <span id="bPress_${idx}"></span></div>
+                    </div>`;
+                });
+                DOM.bottleGrid.innerHTML = html;
+                renderedBottleCount = bottles.length;
+            }
+
+            function setHTMLIfChanged(id, newHTML) {
+                const el = document.getElementById(id);
+                if (el && el.innerHTML !== newHTML) el.innerHTML = newHTML;
+            }
+
+            function updateUI(data) {
+                const temp = Number(data.temp);
+                setText(DOM.temp, Number.isFinite(temp) && temp > -50 ? temp.toFixed(1) + "°C" : "--°C");
+                setText(DOM.water, data.water_low ? "CRITICAL LOW" : "NORMAL");
+                setClass(DOM.water, data.water_low ? "warning" : "on");
+                setText(DOM.heater, data.water_low ? "STOPPED" : data.heater ? "HEATING" : "IDLE");
+                setText(DOM.pump, data.water_low ? "STOPPED" : data.pump ? "RUNNING" : "IDLE");
+                setText(DOM.fan, data.fan ? "ON" : "OFF");
+                setClass(DOM.fan, data.fan ? "on" : "off");
+
+                if (data.logging !== undefined) {
+                    DOM.btnRec.classList.toggle("recording", Boolean(data.logging));
+                    setText(DOM.btnRec, data.logging ? "REC ●" : "STOPPED");
+                }
+                updateSysAndPackets(data.sys, data.packets);
+
+                let validBottleTempSum = 0;
+                let validBottleTempCount = 0;
+
+                if (Array.isArray(data.bottles) && data.bottles.length > 0) {
+                    ensureBottleCards(data.bottles);
+                    data.bottles.forEach((b, idx) => {
+                        const bId = b.id || idx + 1;
+                        const bTemp = Number(b.temp);
+                        const isTempValid = b.temp !== undefined && b.temp !== null && Number.isFinite(bTemp) && bTemp !== -999 && bTemp > -50;
+
+                        const homePill = DOM["homeBTemp" + bId];
+                        if (homePill) {
+                            setText(homePill, isTempValid ? bTemp.toFixed(1) + "°C" : "Err");
+                        }
+                        if (isTempValid) {
+                            validBottleTempSum += bTemp;
+                            validBottleTempCount++;
+                        }
+                        if (activeTab === "bottles") {
+                            setHTMLIfChanged(`bTemp_${idx}`, fmtMetric(b.temp, "°C", -999));
+                            setHTMLIfChanged(`bPh_${idx}`, fmtMetric(b.ph, "V", -1));
+                            setHTMLIfChanged(`bCh4_${idx}`, fmtMetric(b.methane, "ppm", -1));
+                            setHTMLIfChanged(`bCh4Vol_${idx}`, fmtMetric(b.ch4_ml, "mL", -1));
+                            setHTMLIfChanged(`bCo2_${idx}`, fmtMetric(b.co2, "ppm", -1));
+                            setHTMLIfChanged(`bCo2Vol_${idx}`, fmtMetric(b.co2_ml, "mL", -1));
+                            setHTMLIfChanged(`bPress_${idx}`, fmtMetric(b.press, "hPa", -1));
+                        }
+                    });
+                } else {
+                    for (let i = 1; i <= 4; i++) setText(DOM["homeBTemp" + i], "--°C");
+                }
+
+                const backendAvg = Number(data.bottle_temp_avg);
+                if (validBottleTempCount > 0) {
+                    setText(DOM.avgBottleTemp, (validBottleTempSum / validBottleTempCount).toFixed(1) + "°C");
+                } else if (Number.isFinite(backendAvg) && backendAvg > -50) {
+                    setText(DOM.avgBottleTemp, backendAvg.toFixed(1) + "°C");
+                } else {
+                    setText(DOM.avgBottleTemp, "--°C");
+                }
+            }
+
+            function shutdownPi() {
+                if (confirm("Shutdown?"))
+                    fetch("/command", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ command: "SHUTDOWN" }),
+                    });
+            }
+
+            setInterval(() => {
+                if (isFetchingStatus) return;
+                isFetchingStatus = true;
+                fetch("/status")
+                    .then((r) => r.json())
+                    .then((data) => {
+                        updateUI(data);
+                        if (activeTab === "data" && selectedFile && liveTailActive) {
+                            fetchLogContent(selectedFile);
+                        }
+                    })
+                    .catch(() => {})
+                    .finally(() => { isFetchingStatus = false; });
+            }, 1500);
+        </script>
+    </body>
+</html>

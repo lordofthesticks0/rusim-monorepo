@@ -17,9 +17,10 @@ document is the source of truth for anything measured on real hardware.
 | [`platformio.ini`](../platformio.ini) | Every firmware build environment. |
 | [`docs/`](../docs/) | Human documentation. |
 | [`docs/llm-generated/`](../docs/llm-generated/) | Agent-written documentation. |
+| [`docs/llm-generated/raspi-docs/`](../docs/llm-generated/raspi-docs/) | Agent-written documentation of the live Raspberry Pi `invitrocontroller` system: board, OS, kiosk, backend, firmware, logging, network. |
 | [`.backup/`](../.backup/) | Local full-flash images and digests. Git-ignored, not committed. |
 | [`.pio/`](../.pio/) | PlatformIO build output. Git-ignored. |
-| [`compile_commands.json`](../compile_commands.json) | Editor tooling. Git-ignored. |
+| [`compile_commands.json`](../compile_commands.json) | Editor tooling: the clangd compilation database, merged from every PlatformIO environment by [`gen-compile-db.sh`](../gen-compile-db.sh) |
 
 ## 2. Firmware
 
@@ -31,6 +32,7 @@ document is the source of truth for anything measured on real hardware.
 | [`firmware/network-master/`](../firmware/network-master/) | WT32-ETH01 | [network-master.md](llm-generated/network-master.md) (production), [display-wt32-link.md](llm-generated/display-wt32-link.md) |
 | [`firmware/methane-calibrate/`](../firmware/methane-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §6 |
 | [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §5 |
+| [`firmware/temp-probe/`](../firmware/temp-probe/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §7 |
 | [`firmware/co2-calibrate/`](../firmware/co2-calibrate/) | ATmega328 Nano | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §4 |
 | [`firmware/loadcell-test/`](../firmware/loadcell-test/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §3 |
 | [`firmware/blink-test/`](../firmware/blink-test/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §2 |
@@ -41,10 +43,11 @@ document is the source of truth for anything measured on real hardware.
 | Document | Covers |
 |---|---|
 | [platformio-environments.md](llm-generated/platformio-environments.md) | `platformio.ini`: environment table, source filters, display build flags, commands, fixed defects |
+| [compile-commands.md](llm-generated/compile-commands.md) | `compile_commands.json` and `gen-compile-db.sh`: the clangd compilation database, regeneration, and which errors it cannot remove |
 | [display-docs.md](llm-generated/display-docs.md) | The `display-v9` UI: screen tree, file map, fake-data serial protocol, hold-to-confirm |
 | [lvgl-redesign.md](llm-generated/lvgl-redesign.md) | `display-v9` UI redesign working document: as-built layout and behaviour per state and tab, empty redesign tables |
 | [migration-notes.md](llm-generated/migration-notes.md) | LVGL v8 to v9 changes and the required code edits |
-| [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) | The five sensor test and calibration programs |
+| [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) | The six sensor test and calibration programs |
 | [rs485-loopback-test.md](llm-generated/rs485-loopback-test.md) | The dual-MAX485 loopback test and its direction control |
 | [wt32-eth01-ping-test.md](llm-generated/wt32-eth01-ping-test.md) | The Ethernet and ping demo |
 | [wt32-eth01-captive-recon.md](llm-generated/wt32-eth01-captive-recon.md) | Captive portal recon firmware |
@@ -61,6 +64,7 @@ document is the source of truth for anything measured on real hardware.
 | [flash-factory-tool.md](llm-generated/flash-factory-tool.md) | `scripts-hardware/flash-factory.ts` and the factory image |
 | [captive-portal-workaround.md](llm-generated/captive-portal-workaround.md) | Plan for headless captive portal authentication on the WT32-ETH01 |
 | [captive-portal-login-script.md](llm-generated/captive-portal-login-script.md) | `scripts-hardware/captive-portal-login.sh`: the firmware login sequence as a one-shot bash script |
+| [legacy-slave.md](llm-generated/legacy-slave.md) | `legacy/slave/new-slave.cpp`: 4-bottle sensor slave, JSON protocol, USB stream, HX711 init trap, known gaps |
 
 ## 3. Dashboard
 
@@ -92,7 +96,30 @@ document is the source of truth for anything measured on real hardware.
 
 | Path | Role |
 |---|---|
-| [`legacy/pi/invitro_ui_demo_newest_tpe_shit_version_5.html`](../legacy/pi/invitro_ui_demo_newest_tpe_shit_version_5.html) | Chromium kiosk UI for the Raspberry Pi 3B. [pi-kiosk-ui-css-redesign.md](llm-generated/pi-kiosk-ui-css-redesign.md) documents the CSS redesign. |
+| [`legacy/pi/water-control-system/`](../legacy/pi/water-control-system/) | Read-only mirror of the live Pi project: `web_control.py`, `templates/index.html`, `water_control_arduino/`, `logs/`. [pi-water-control-system-mirror.md](llm-generated/pi-water-control-system-mirror.md). The kiosk text is scaled by 20 %; see [pi-kiosk-font-scale.md](llm-generated/pi-kiosk-font-scale.md). |
+| [`legacy/pi/captive-portal-login.sh`](../legacy/pi/captive-portal-login.sh) | Bash reimplementation of the master firmware's captive-portal login sequence. [captive-portal-login-script.md](llm-generated/captive-portal-login-script.md). |
+| [`legacy/slave/new-slave.cpp`](../legacy/slave/new-slave.cpp) | ATmega2560 Mega Mini sensor slave: 4 bottles of pH, CH4, temperature, CO2 and pressure, published as JSON over RS485 and USB. [legacy-slave.md](llm-generated/legacy-slave.md). |
+| [`scripts-hardware/read-legacy-slave.ts`](../scripts-hardware/read-legacy-slave.ts) | Bun wrapper that reads the slave's JSON stream and prints a per-bottle table. [legacy-slave-json-wrapper.md](llm-generated/legacy-slave-json-wrapper.md). |
+
+## 3b. Raspberry Pi system documentation (`raspi-docs/`)
+
+Agent-written documentation of the live `invitrocontroller` Raspberry Pi 3B system, generated from SSH inspection. Index: [raspi-docs/README.md](llm-generated/raspi-docs/README.md).
+
+| Document | Covers |
+|---|---|
+| [raspi-docs/README.md](llm-generated/raspi-docs/README.md) | Overview, quick facts, architecture at a glance, current runtime state |
+| [raspi-docs/01-hardware-and-os.md](llm-generated/raspi-docs/01-hardware-and-os.md) | Board, OS, toolchain, packages |
+| [raspi-docs/02-boot-and-kiosk.md](llm-generated/raspi-docs/02-boot-and-kiosk.md) | Autologin, LightDM, openbox, PM2, Chromium kiosk |
+| [raspi-docs/03-project-overview.md](llm-generated/raspi-docs/03-project-overview.md) | `water-control-system` and its three copies |
+| [raspi-docs/04-backend-web-control.md](llm-generated/raspi-docs/04-backend-web-control.md) | Flask + SocketIO backend, routes, workers, CSV logging |
+| [raspi-docs/05-frontend-ui.md](llm-generated/raspi-docs/05-frontend-ui.md) | Kiosk dashboard: tabs, indicators, bottle grid |
+| [raspi-docs/06-master-firmware.md](llm-generated/raspi-docs/06-master-firmware.md) | Arduino master sketch `water_control_arduino.ino` |
+| [raspi-docs/07-data-and-logging.md](llm-generated/raspi-docs/07-data-and-logging.md) | CSV schema, logs, USB export |
+| [raspi-docs/08-auxiliary-tools.md](llm-generated/raspi-docs/08-auxiliary-tools.md) | Helper scripts, analog tests, rpi-clone |
+| [raspi-docs/09-network-and-services.md](llm-generated/raspi-docs/09-network-and-services.md) | Network, enabled services, cloudflared |
+| [raspi-docs/10-security-and-caveats.md](llm-generated/raspi-docs/10-security-and-caveats.md) | Risks, offline state, observations |
+| [raspi-docs/11-key-paths.md](llm-generated/raspi-docs/11-key-paths.md) | Quick path reference |
+| [raspi-docs/12-copies-and-git-state.md](llm-generated/raspi-docs/12-copies-and-git-state.md) | The three project copies and their uncommitted changes |
 
 ## 4. Hardware references
 

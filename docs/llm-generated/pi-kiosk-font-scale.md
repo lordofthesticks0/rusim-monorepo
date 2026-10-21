@@ -1,0 +1,145 @@
+# Kiosk text scale
+
+The kiosk dashboard at `legacy/pi/water-control-system/templates/index.html` sets
+every text size through one variable, `--font-scale`, defined in `:root`:
+
+```css
+:root {
+    ...
+    --font-scale: 1.2;
+}
+```
+
+`1.2` means every size is 20 % larger than the original page. To change the
+bump, edit that one value and nothing else.
+
+## How it works
+
+The original page wrote all 42 text sizes as literal pixels, for example
+`font-size: 12px`. Each one now reads:
+
+```css
+font-size: calc(12px * var(--font-scale));
+```
+
+The base size on `body` is also scaled:
+
+```css
+body {
+    font-size: calc(16px * var(--font-scale));
+}
+```
+
+so text that does not declare its own size (the "Waiting for Sensor Data…"
+placeholder, for example) grows with the rest. This covers the stylesheet, the
+inline `style="..."` attributes in the modal markup, and the two sizes built
+inside JavaScript template literals.
+
+Approximate result at `--font-scale: 1.2`:
+
+| Original | Scaled |
+|---|---|
+| 10 px perf label | 12 px |
+| 11 px hint / unit | 13.2 px |
+| 12 px value | 14.4 px |
+| 13 px file row | 15.6 px |
+| 14 px data row | 16.8 px |
+| 16 px card title | 19.2 px |
+| 19 px clock | 22.8 px |
+| 42 px avg bottle temp | 50.4 px |
+| 52 px bath temp | 62.4 px |
+
+The display is 1024×600. At 1.2 the home, bottle, logs and settings layouts still
+fit: the tallest card is the bottle grid at roughly 330 px against about 510 px
+of viewport height. At 1.25 and above, check the bottle grid and the logs left
+pane before deploying.
+
+## Deploying a change to the kiosk
+
+The mirrored file is the source of truth in this repository. The Pi is a second
+copy.
+
+1. Edit `legacy/pi/water-control-system/templates/index.html`.
+2. Back up the live file on the Pi, outside the project directory so the Pi's
+   git status stays as it is:
+
+   ```sh
+   ssh invitro@10.92.128.23 \
+     'cp -p /home/invitro/water-control-system/templates/index.html \
+        /home/invitro/index.html.orig-$(date +%Y%m%d-%H%M%S).bak'
+   ```
+
+3. Copy the file over:
+
+   ```sh
+   scp legacy/pi/water-control-system/templates/index.html \
+       invitro@10.92.128.23:/home/invitro/water-control-system/templates/index.html
+   ```
+
+4. **Restart the Flask app.** `web_control.py` runs with `debug=False`
+   (`app.run(..., debug=False, ...)`), so Jinja caches `templates/index.html`
+   and will keep serving the old page until the process restarts:
+
+   ```sh
+   ssh invitro@10.92.128.23 'pm2 restart water-ui'
+   ```
+
+5. **Reload the kiosk browser.** It stays on the already-loaded page, and
+   `xdotool` is not installed, so a remote key press is not possible. Kill and
+   relaunch Chromium with the openbox autostart command:
+
+   ```sh
+   ssh invitro@10.92.128.23 \
+     'pkill -x chromium; sleep 3; DISPLAY=:0 setsid -f /usr/bin/chromium \
+        --kiosk --disable-infobars --noerrdialogs --incognito --disable-pinch \
+        --force-device-scale-factor=1.0 --disable-features=AsyncDns \
+        http://127.0.0.1:5000 >/tmp/kiosk-relaunch.log 2>&1'
+   ```
+
+   Do **not** run `pkill -f chromium`: over SSH the pattern also matches the
+   command line of the shell carrying the command and kills the session before
+   the relaunch, leaving the screen blank. Use `pkill -x chromium`, which
+   matches the process name only.
+
+6. Verify. `curl -s http://127.0.0.1:5000/ | grep font-scale` should find the
+   declarations, and a screenshot confirms the rendering:
+
+   ```sh
+   ssh invitro@10.92.128.23 'DISPLAY=:0 scrot -o /tmp/kiosk.png'
+   scp invitro@10.92.128.23:/tmp/kiosk.png .
+   ```
+
+## 2026-10-20 change
+
+The scale was first set to 1.1, then raised to 1.2 because the 10 % bump was
+hard to see on the 7-inch panel. `--font-scale: 1.2` is the final value in both
+copies:
+
+| Where | Path | MD5 after |
+|---|---|---|
+| Repository mirror | `legacy/pi/water-control-system/templates/index.html` | `38c2d2782447cf02116113867048bf5c` |
+| Pi | `/home/invitro/water-control-system/templates/index.html` | `38c2d2782447cf02116113867048bf5c` |
+
+Backups on the Pi, outside the project directory:
+
+- `/home/invitro/index.html.orig-20261020.bak` — original page, scale 1.0
+  (`108ba363c039d0c944cdc7b07e027672`).
+- `/home/invitro/index.html.scale1.1-20261020.bak` — intermediate page, scale
+  1.1 (`6889378851c2a64499b671450dad4200`).
+
+`pm2 restart water-ui` took effect, the kiosk was relaunched, and a screenshot
+at 1024×600 showed the Home tab with the 20 % text and no overflow. Logging was
+off at the time of the restarts, so no recording was interrupted.
+
+Restarting pm2 alone is not enough for a template edit: the browser keeps the
+HTML it already loaded. Both steps in the procedure above are required.
+
+## Related documents
+
+- [pi-water-control-system-mirror.md](pi-water-control-system-mirror.md) — the
+  mirror itself.
+- [raspi-docs/05-frontend-ui.md](raspi-docs/05-frontend-ui.md) — tabs, data flow
+  and styling of the dashboard.
+
+---
+Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.

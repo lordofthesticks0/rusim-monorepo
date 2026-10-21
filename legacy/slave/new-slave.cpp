@@ -1,6 +1,7 @@
 /*
  * PROJECT: Bio-Array Slave (ID 1) - Calibrated Multi-Sensor Firmware
- * PROTOCOL: Responds to "#1:PING*" on Serial1 with 4-Bottle JSON Telemetry
+ * PROTOCOL: Responds to "#1:PING*" on Serial1 with 4-Bottle JSON Telemetry.
+ *           The same JSON is streamed to USB serial (Serial) once per second.
  */
 
 #include <Arduino.h>
@@ -17,7 +18,7 @@ const int NUM_BOTTLES = 4;
 
 const int PIN_PH[NUM_BOTTLES]        = {A2, A5, A8, A11};
 const int PIN_METHANE[NUM_BOTTLES]   = {A1, A4, A7, A10};
-const int PIN_TEMP[NUM_BOTTLES]      = {4, 7, 10, 13};
+const int PIN_TEMP[NUM_BOTTLES]      = {4, 7, 10, 22};
 const int PIN_CO2_PWM[NUM_BOTTLES]   = {14, 15, 16, 17};
 const int PIN_PRESS_OUT[NUM_BOTTLES] = {2, 5, 8, 11};
 const int PIN_PRESS_SCK[NUM_BOTTLES] = {3, 6, 9, 12};
@@ -88,9 +89,15 @@ float cachedPress[NUM_BOTTLES]   = {-1.0f, -1.0f, -1.0f, -1.0f};
 unsigned long lastTempReqMs = 0;
 bool pingHandledDuringCo2   = false;
 
+// USB telemetry stream cadence. The same JSON sent on an RS485 PING is also
+// printed to the USB serial port at this interval, without a master present.
+const unsigned long USB_STREAM_INTERVAL_MS = 1000;
+unsigned long lastUsbStreamMs = 0;
+
 // Forward declarations
 void serviceMasterPing();
-void sendTelemetryJson();
+void serviceUsbTelemetry();
+void sendTelemetryJson(Stream &port);
 
 // ==========================================
 // METHANE FUNCTIONS
@@ -156,7 +163,7 @@ void updateAllMethane() {
 static bool waitForLevel(uint8_t pin, uint8_t level) {
   const unsigned long start = micros();
   while (digitalRead(pin) != level) {
-    if (Serial1.available()) {
+    if (Serial.available() || Serial1.available()) {
       serviceMasterPing();
       pingHandledDuringCo2 = true;
     }
@@ -208,12 +215,18 @@ bool waitHx711Ready(int idx, unsigned long timeoutMs) {
 }
 
 bool initPressureSensor(int idx) {
-  pressureSensors[idx]->begin(PIN_PRESS_OUT[idx], PIN_PRESS_SCK[idx]);
+  // doReset = false: the library's reset calls read(), which blocks forever
+  // while DOUT stays HIGH. That happens when no HX711 is connected, and it
+  // would stop setup() before the USB telemetry stream ever starts.
+  pressureSensors[idx]->begin(PIN_PRESS_OUT[idx], PIN_PRESS_SCK[idx],
+                              false, false);
   if (!waitHx711Ready(idx, HX711_INIT_TIMEOUT_MS)) {
     return false;
   }
   pressureSensors[idx]->set_scale(CALIBRATION_FACTORS[idx]);
-  pressureSensors[idx]->tare();
+  // tare() also performs blocking reads. Only call it after the sensor has
+  // answered, so a missing load cell cannot hang the board.
+  pressureSensors[idx]->tare(3);
   return true;
 }
 
@@ -257,16 +270,16 @@ void updatePhAndTemp() {
 // ==========================================
 // RS485 PING HANDLER & JSON SERIALIZER
 // ==========================================
-void serviceMasterPing() {
-  if (!Serial1.available()) return;
+void handlePingStream(Stream &port) {
+  if (!port.available()) return;
 
   String msg = "";
   unsigned long start = millis();
 
   // 50ms window to capture complete "#1:PING*" frame
   while (millis() - start < 50) {
-    if (Serial1.available()) {
-      char c = Serial1.read();
+    if (port.available()) {
+      char c = port.read();
       if (c == '*') break;
       msg += c;
     }
@@ -282,13 +295,25 @@ void serviceMasterPing() {
       command.trim();
 
       if (targetID == SLAVE_ID && command == "PING") {
-        sendTelemetryJson();
+        sendTelemetryJson(port);
       }
     }
   }
 }
 
-void sendTelemetryJson() {
+void serviceMasterPing() {
+  handlePingStream(Serial);
+  handlePingStream(Serial1);
+}
+
+void serviceUsbTelemetry() {
+  unsigned long now = millis();
+  if (now - lastUsbStreamMs < USB_STREAM_INTERVAL_MS) return;
+  lastUsbStreamMs = now;
+  sendTelemetryJson(Serial);
+}
+
+void sendTelemetryJson(Stream &port) {
   StaticJsonDocument<1536> doc;
   JsonArray bottles = doc.createNestedArray("bottles");
 
@@ -302,8 +327,8 @@ void sendTelemetryJson() {
     bottle["press"]   = cachedPress[i];
   }
 
-  serializeJson(doc, Serial1);
-  Serial1.println();
+  serializeJson(doc, port);
+  port.println();
 }
 
 // ==========================================
@@ -338,11 +363,16 @@ void setup() {
   for (int i = 0; i < NUM_BOTTLES; i++) {
     pressInitialized[i] = initPressureSensor(i);
   }
+
+  // Boot marker on USB so a monitor can tell setup() completed. RS485 stays
+  // silent until the master sends a PING.
+  Serial.println(F("{\"status\":\"ready\"}"));
 }
 
 void loop() {
   // Always keep RS485 responsive
   serviceMasterPing();
+  serviceUsbTelemetry();
 
   // 1. Update pH, DS18B20 Temps, and 32-sample Methane array
   updatePhAndTemp();
@@ -352,6 +382,7 @@ void loop() {
   for (int i = 0; i < NUM_BOTTLES; i++) {
     serviceMasterPing();
     updatePressure(i);
+    serviceUsbTelemetry();
 
     serviceMasterPing();
     float ppm = 0.0f;
@@ -361,6 +392,7 @@ void loop() {
       // Only flag -1 if it failed uninterrupted by a Serial1 ping transmit
       cachedCo2[i] = -1;
     }
+    serviceUsbTelemetry();
 
     // Re-sample fast sensors between CO2 channels
     updatePhAndTemp();
