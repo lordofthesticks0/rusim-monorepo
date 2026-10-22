@@ -106,6 +106,11 @@ about 2.1 lines/s (one `master_status` per second plus one slave packet per
 | `/set_timezone` | POST | `sudo timedatectl set-timezone` |
 | `/set_time` | POST | `sudo date -s` |
 
+Full request/response reference for every route:
+[13-rest-api-reference.md](13-rest-api-reference.md). It also covers how to
+turn the heater off and how to stop the Flask app without leaving the master in
+`AUTO`.
+
 ### `GET /raw`
 
 Reads only the in-memory buffer. It never opens the serial port, so it is safe

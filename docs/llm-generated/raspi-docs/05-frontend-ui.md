@@ -24,7 +24,8 @@ Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-st
 
 ## Mode button
 
-- `toggleSystemMode()` posts `AUTO`/`OFF` to `/set_mode`; updates the mode badge and `systemState`.
+- Not present in the current live copy. Neither `~/water-control-system/templates/index.html` nor the repository mirror contains `set_mode`, `system_mode` or `toggleSystemMode()` in its JavaScript, and the Home tab has no mode badge. Mode changes therefore require `POST /set_mode` or the physical `D6` switch on the master. See [13-rest-api-reference.md](13-rest-api-reference.md).
+- Older/source copies may still contain the button; it posts `AUTO`/`OFF` to `/set_mode`.
 
 ## Export flow
 
