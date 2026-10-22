@@ -41,6 +41,11 @@ unsigned long stirPulseSec    = 30;   // Default: 30-second pulse duration
 unsigned long stirTimedMin    = 15;   // Default: 15-minute timed continuous run
 unsigned long stirCycleStart  = 0;    // Timestamp tracker for Pulse / Timed modes
 
+// Stirrer non-blocking slew-rate ramp state
+bool stirTargetOn = false;
+uint8_t stirRampOriginPwm = 0;
+unsigned long stirRampOriginMs = 0;
+
 OneWire oneWire(TEMP_SENSOR_PIN);
 DallasTemperature bathSensor(&oneWire);
 
@@ -92,25 +97,38 @@ void driveStirrer(bool state) {
   driveStirrerPwm(state ? STIR_MAX_PWM : 0);
 }
 
-static uint8_t computeRampedPwm(unsigned long elapsedMs, unsigned long windowMs, bool softStop) {
-  unsigned long upPwm = (elapsedMs < STIR_RAMP_MS)
-                          ? ((elapsedMs * STIR_MAX_PWM) / STIR_RAMP_MS)
-                          : STIR_MAX_PWM;
-  unsigned long pwm = upPwm;
-  if (softStop) {
-    unsigned long remMs = (windowMs > elapsedMs) ? (windowMs - elapsedMs) : 0;
-    unsigned long downPwm = (remMs < STIR_RAMP_MS)
-                              ? ((remMs * STIR_MAX_PWM) / STIR_RAMP_MS)
-                              : STIR_MAX_PWM;
-    if (downPwm < pwm) pwm = downPwm;
+void slewStirrer(bool wantOn, unsigned long now) {
+  if (wantOn != stirTargetOn) {
+    stirTargetOn = wantOn;
+    stirRampOriginPwm = stirrerPwm;
+    stirRampOriginMs = now;
   }
-  if (pwm == 0 && STIR_MAX_PWM > 0) pwm = 1;
-  return (uint8_t)pwm;
+
+  unsigned long elapsed = now - stirRampOriginMs;
+  unsigned long delta = (elapsed * STIR_MAX_PWM) / STIR_RAMP_MS;
+
+  uint8_t nextPwm = 0;
+  if (stirTargetOn) {
+    unsigned long target = (unsigned long)stirRampOriginPwm + delta;
+    if (target > STIR_MAX_PWM) target = STIR_MAX_PWM;
+    if (target == 0 && STIR_MAX_PWM > 0) target = 1;
+    nextPwm = (uint8_t)target;
+  } else {
+    if (delta >= stirRampOriginPwm) {
+      nextPwm = 0;
+    } else {
+      nextPwm = (uint8_t)(stirRampOriginPwm - delta);
+    }
+  }
+
+  driveStirrerPwm(nextPwm);
 }
 
 void forceAllOff() {
   driveHeater(false);
   drivePump(false);
+  stirTargetOn = false;
+  stirRampOriginPwm = 0;
   driveStirrerPwm(0);
 }
 
@@ -129,42 +147,45 @@ void sendSlavePing(byte id) {
 // ==========================================
 void updateStirrer(unsigned long now) {
   if (currentMode == MODE_OFF) {
+    stirTargetOn = false;
+    stirRampOriginPwm = 0;
     driveStirrerPwm(0);
     return;
   }
 
   if (stirMode == 0) {
-    // OFF (immediate cut to 0)
-    driveStirrerPwm(0);
+    // Manual OFF (3s soft-stop ramp down to 0)
+    slewStirrer(false, now);
   } 
   else if (stirMode == 1) {
-    // CONSTANT ON (3s soft-start ramp to 255)
-    unsigned long elapsed = now - stirCycleStart;
-    driveStirrerPwm(computeRampedPwm(elapsed, 0, false));
+    // CONSTANT ON (3s soft-start ramp up to 255)
+    slewStirrer(true, now);
   } 
   else if (stirMode == 2) {
-    // PULSE INTERVAL (e.g. run for stirPulseSec every stirIntervalMin with soft-start + soft-stop)
+    // PULSE INTERVAL (run for stirPulseSec every stirIntervalMin with 3s soft-start + 3s soft-stop)
     unsigned long periodMs = stirIntervalMin * 60000UL;
     unsigned long onWindowMs = stirPulseSec * 1000UL;
     if (periodMs == 0) periodMs = 60000UL;
     if (onWindowMs > periodMs) onWindowMs = periodMs;
 
     unsigned long elapsed = (now - stirCycleStart) % periodMs;
-    if (elapsed < onWindowMs) {
-      driveStirrerPwm(computeRampedPwm(elapsed, onWindowMs, true));
-    } else {
-      driveStirrerPwm(0);
-    }
+    unsigned long activeDriveMs = (onWindowMs > STIR_RAMP_MS)
+                                    ? (onWindowMs - STIR_RAMP_MS)
+                                    : (onWindowMs / 2);
+    slewStirrer(elapsed < activeDriveMs, now);
   } 
   else if (stirMode == 3) {
-    // TIMED RUN (run continuously for stirTimedMin with soft-start + soft-stop, then switch to OFF)
+    // TIMED RUN (run continuously for stirTimedMin with 3s soft-start + 3s soft-stop, then switch to OFF)
     unsigned long durationMs = stirTimedMin * 60000UL;
     unsigned long elapsed = now - stirCycleStart;
     if (elapsed < durationMs) {
-      driveStirrerPwm(computeRampedPwm(elapsed, durationMs, true));
+      unsigned long activeDriveMs = (durationMs > STIR_RAMP_MS)
+                                      ? (durationMs - STIR_RAMP_MS)
+                                      : (durationMs / 2);
+      slewStirrer(elapsed < activeDriveMs, now);
     } else {
       stirMode = 0;
-      driveStirrerPwm(0);
+      slewStirrer(false, now);
     }
   }
 }

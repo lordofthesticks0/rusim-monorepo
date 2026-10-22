@@ -170,15 +170,75 @@ def make_qr_data_uri(payload_text):
     img.save(buf, format="PNG")
     return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
 
-def get_wlan_ip():
+hotspot_active = False
+
+def get_interface_ip(ifname):
     try:
-        out = subprocess.check_output(["ip", "-4", "-o", "addr", "show", "wlan0"], timeout=1.0).decode()
+        out = subprocess.check_output(["ip", "-4", "-o", "addr", "show", ifname], timeout=1.0).decode()
         for part in out.split():
             if "/" in part and not part.startswith("127."):
                 return part.split("/")[0]
     except Exception:
         pass
+    return None
+
+def get_lan_ip():
+    ip = get_interface_ip("eth0")
+    if ip:
+        return ip
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 1))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip and not ip.startswith("10.42."):
+            return ip
+    except Exception:
+        pass
+    return "Disconnected"
+
+def get_wlan_ip():
+    for _ in range(5):
+        ip = get_interface_ip("wlan0")
+        if ip:
+            return ip
+        time.sleep(0.4)
     return "10.42.0.1"
+
+def disable_wifi_client_and_stop_hotspot():
+    """
+    Reserves wlan0 exclusively for on-demand log download hotspot:
+    - Disables autoconnect and default routing on all 802-11-wireless profiles
+      so wlan0 never joins external Wi-Fi as a client or hijacks eth0 LAN routing.
+    - Brings down the hotspot and turns off the Wi-Fi radio while idle.
+    """
+    global hotspot_active
+    hotspot_active = False
+    try:
+        out = subprocess.check_output(
+            ["nmcli", "-t", "-f", "UUID,TYPE", "connection", "show"],
+            timeout=3.0
+        ).decode("utf-8", errors="ignore")
+        for line in out.splitlines():
+            parts = line.strip().split(":")
+            if len(parts) >= 2 and parts[1] == "802-11-wireless":
+                uuid = parts[0]
+                subprocess.run(
+                    ["sudo", "nmcli", "connection", "modify", uuid,
+                     "connection.autoconnect", "no",
+                     "ipv4.never-default", "yes"],
+                    check=False, timeout=3
+                )
+    except Exception:
+        pass
+
+    try:
+        subprocess.run(["sudo", "nmcli", "con", "down", HOTSPOT_CON_NAME], check=False, timeout=4)
+        subprocess.run(["sudo", "nmcli", "device", "disconnect", "wlan0"], check=False, timeout=4)
+        subprocess.run(["sudo", "nmcli", "radio", "wifi", "off"], check=False, timeout=4)
+        subprocess.run(["sudo", "nmcli", "device", "connect", "eth0"], check=False, timeout=4)
+    except Exception:
+        pass
 
 
 # --- BACKGROUND WORKER 0: ZERO-SUBPROCESS HARDWARE TELEMETRY ---
@@ -450,6 +510,7 @@ def log_data_to_csv():
         pass
 
 
+threading.Thread(target=disable_wifi_client_and_stop_hotspot, daemon=True).start()
 threading.Thread(target=telemetry_worker, daemon=True).start()
 threading.Thread(target=serial_worker, daemon=True).start()
 threading.Thread(target=polling_worker, daemon=True).start()
@@ -596,18 +657,28 @@ def toggle_logging():
 
 @app.route('/hotspot/start', methods=['POST'])
 def start_hotspot():
+    global hotspot_active
     filename = os.path.basename(request.json.get('filename', ''))
     if not filename or not os.path.exists(os.path.join(LOG_DIR, filename)):
         return jsonify({'status': 'error', 'message': 'Select a valid log file first.'}), 400
 
     try:
         subprocess.run(["sudo", "nmcli", "radio", "wifi", "on"], check=False, timeout=4)
+        time.sleep(0.8)
+        subprocess.run(["sudo", "nmcli", "device", "disconnect", "wlan0"], check=False, timeout=4)
         subprocess.run(["sudo", "nmcli", "con", "down", HOTSPOT_CON_NAME], check=False, timeout=4)
         subprocess.run([
             "sudo", "nmcli", "device", "wifi", "hotspot",
             "ifname", "wlan0", "con-name", HOTSPOT_CON_NAME,
             "ssid", HOTSPOT_SSID, "password", HOTSPOT_WIFI_PASS
         ], check=False, timeout=10)
+        # Keep eth0 (LAN) as exclusive default route even while hotspot is running
+        subprocess.run([
+            "sudo", "nmcli", "con", "modify", HOTSPOT_CON_NAME,
+            "connection.autoconnect", "no",
+            "ipv4.never-default", "yes"
+        ], check=False, timeout=4)
+        hotspot_active = True
     except Exception:
         pass
 
@@ -628,7 +699,7 @@ def start_hotspot():
 
 @app.route('/hotspot/stop', methods=['POST'])
 def stop_hotspot():
-    subprocess.Popen(["sudo", "nmcli", "con", "down", HOTSPOT_CON_NAME])
+    threading.Thread(target=disable_wifi_client_and_stop_hotspot, daemon=True).start()
     return jsonify({'status': 'success'})
 
 @app.route('/m/<path:filename>', methods=['GET', 'POST'])
@@ -738,18 +809,9 @@ def export_data():
 
 @app.route('/get_ip')
 def get_ip():
-    ip, ssid = "Unavailable", "Ethernet (LAN)"
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 1))
-        ip = s.getsockname()[0]
-        s.close()
-        out = subprocess.check_output(['iwgetid', '-r'], timeout=0.5).decode('utf-8').strip()
-        if out:
-            ssid = out
-    except Exception:
-        pass
-    return jsonify({'ip': ip, 'ssid': ssid})
+    ip = get_lan_ip()
+    mode_str = "Ethernet (LAN) · Hotspot Active" if hotspot_active else "Ethernet (LAN) · Wi-Fi Reserved"
+    return jsonify({'ip': ip, 'ssid': mode_str})
 
 @app.route('/get_timezones')
 def get_timezones():

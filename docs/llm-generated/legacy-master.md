@@ -7,7 +7,7 @@
 - Non-blocking water-bath temperature acquisition via a DS18B20 sensor.
 - Polling the 4-bottle sensor slave (`#1:PING*` over `Serial1` at 9600 baud) and parsing the returned JSON telemetry to compute average bottle temperature.
 - Hysteresis control of the 300 W heater SSR and circulation pump relay, with per-actuator manual overrides.
-- Non-blocking MOSFET PWM ramping (`analogWrite` on Pin D4 / Timer 0 `OC0B`) for the stirrer motor across all active modes (`CONSTANT ON`, `PULSE`, `TIMED RUN`) to suppress startup inrush current and mechanical shock.
+- Non-blocking MOSFET PWM ramping (`analogWrite` on Pin D4 / Timer 0 `OC0B`) for the stirrer motor across all transitions (`CONSTANT ON`, `PULSE`, `TIMED RUN`, and manual `OFF`) to suppress startup inrush current and smooth motor spin-down.
 - Bidirectional USB serial (`Serial` at 115200 baud) command and status telemetry with the Raspberry Pi Flask backend ([`web_control.py`](../../legacy/pi/water-control-system/web_control.py)).
 
 ## 2. Pin Assignment
@@ -25,30 +25,33 @@
 
 ## 3. Stirrer MOSFET PWM Ramping
 
-To prevent high startup inrush current from overloading the power rail or resetting the microcontroller when the stirrer motor spins up from rest, `STIRRER_PIN` (`D4`) is driven via hardware PWM (`analogWrite`) using [`driveStirrerPwm`](../../legacy/master/master.cpp#L80-L85) and [`computeRampedPwm`](../../legacy/master/master.cpp#L91-L105).
+To prevent high startup inrush current from overloading the power rail and provide consistent mechanical acceleration and deceleration, `STIRRER_PIN` (`D4`) is driven via hardware PWM (`analogWrite`) using [`driveStirrerPwm`](../../legacy/master/master.cpp#L85-L90) and [`slewStirrer`](../../legacy/master/master.cpp#L96-L120).
 
 ### Parameters
 
-- `STIR_RAMP_MS = 3000UL`: 3000 ms (3 seconds) linear ramp duration between `0` and `STIR_MAX_PWM`.
+- `STIR_RAMP_MS = 3000UL`: 3000 ms (3 seconds) full-scale linear ramp duration between `0` and `STIR_MAX_PWM`.
 - `STIR_MAX_PWM = 255U`: 100% duty cycle at full speed.
+
+### Slew-Rate State Tracking
+
+`slewStirrer(bool wantOn, unsigned long now)` tracks `stirTargetOn`, `stirRampOriginPwm`, and `stirRampOriginMs`. Whenever the desired state (`wantOn`) changes, it captures the current `stirrerPwm` and `now`, then ramps linearly from `stirRampOriginPwm` toward `255` (when `wantOn == true`) or `0` (when `wantOn == false`) at a constant rate of `255 / 3000 ms`.
 
 ### Mode Behavior
 
-| `stirMode` | Name | Ramp Profile |
+| `stirMode` / State | Name | Ramp Profile |
 |---|---|---|
-| `0` | `OFF` | Immediate cut to `0` (`analogWrite(STIRRER_PIN, 0)`). Also used by `forceAllOff()` and `MODE_OFF`. |
-| `1` | `CONSTANT ON` | Soft-start: ramps linearly from `1` to `255` over the first `3000 ms` after activation, then holds `255`. |
-| `2` | `PULSE INTERVAL` | Soft-start + soft-stop inside each `onWindowMs = stirPulseSec * 1000UL` window of `periodMs = stirIntervalMin * 60000UL`: ramps linearly `1 -> 255` over the first `3000 ms`, holds `255`, and ramps linearly `255 -> 1` over the final `3000 ms` before dropping to `0`. If `onWindowMs < 6000 ms`, the upward and downward ramps meet symmetrically at `onWindowMs / 2` (`min(upPwm, downPwm)`) without exceeding the maximum ramp slope. |
+| `0` | Manual `OFF` | Soft-stop: ramps linearly from current `stirrerPwm` down to `0` over up to `3000 ms`. |
+| `1` | `CONSTANT ON` | Soft-start: ramps linearly from current `stirrerPwm` up to `255` over up to `3000 ms`, then holds `255`. |
+| `2` | `PULSE INTERVAL` | Soft-start + soft-stop inside each `onWindowMs = stirPulseSec * 1000UL` window of `periodMs = stirIntervalMin * 60000UL`: ramps up over the first `3000 ms`, holds `255`, and begins ramping down `3000 ms` before the end of the pulse (`activeDriveMs = onWindowMs - STIR_RAMP_MS`, or `onWindowMs / 2` for pulses `< 6 s`). |
 | `3` | `TIMED RUN` | Soft-start + soft-stop over `durationMs = stirTimedMin * 60000UL`: ramps up over the first `3000 ms`, holds `255`, ramps down over the final `3000 ms`, and transitions `stirMode` to `0` (`OFF`) when the timer expires. |
-
-Because the ramp calculation uses `millis()` deltas (`now - stirCycleStart`) inside `updateStirrer(now)` without calling `delay()`, temperature sampling, Slave UART reception, and Pi serial commands remain non-blocking.
+| `MODE_OFF` / `forceAllOff()` | System / Emergency Stop | Immediate cut to `0` (`analogWrite(STIRRER_PIN, 0)`) and resets `stirTargetOn = false` and `stirRampOriginPwm = 0`. |
 
 ## 4. Raspberry Pi USB Serial Protocol
 
 Commands are newline-terminated ASCII strings received on `Serial` (115200 baud):
 
 - `STATUS`: Emits a `{"type":"master_status", ...}` JSON line with bath temperature, average bottle temperature, actuator states (`heater`, `pump`, `stirrer`), override modes, stirrer timing parameters, and remaining timed-run seconds.
-- `MODE_AUTO` / `MODE_OFF`: Switches master system mode. Re-entering `MODE_AUTO` from `MODE_OFF` resets `stirCycleStart` so any active stirrer mode soft-starts from `0`.
+- `MODE_AUTO` / `MODE_OFF`: Switches master system mode.
 - `HEATER_AUTO` / `HEATER_ON` / `HEATER_OFF`: Sets heater override mode (`0`, `1`, `2`).
 - `PUMP_AUTO` / `PUMP_ON` / `PUMP_OFF`: Sets circulation pump override mode (`0`, `1`, `2`).
 - `STIR:<mode>:<mins>:<secs>`: Configures stirrer mode (`0`–`3`), interval/timed minutes, and pulse duration seconds, resetting `stirCycleStart` to `now`.
