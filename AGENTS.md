@@ -21,9 +21,9 @@ The dashboard uses `bun` to run things. Stick to it.
 **IMPORTANT**: Never ever, **EVER** read the raw `.env` file. Strictly off limits. The harness should disallow you but you should not test it regardless. Read `.env.example` instead if available.
 
 ### 3. Legacy System Administrator
-If the task at hand mentions any Raspberry Pi, your work will be scoped entirely within `legacy/`. The system is a Raspberry Pi 3B, reachable at `invitro@10.92.128.23`. In short, it uses a self-contained HTML file as a dashboard with Chromium running at kiosk mode and a Python Flask server to process the data. 
+If the task at hand mentions any Raspberry Pi, your work will be scoped entirely within `legacy/`. The system is a Raspberry Pi 3B, reachable at `invitro@10.92.128.23`. Password login has been disabled; the keys from this device were added. In short, what it's doing is that it uses a self-contained HTML file as a dashboard with Chromium running at kiosk mode and a Python Flask server to process the data. 
 
-You should always mirror all changes to this repo and document it.  
+Should you need to make changes, first pull the existing data to this repo, modify, then push to the Pi.  
 
 ## Context and Documentation
 

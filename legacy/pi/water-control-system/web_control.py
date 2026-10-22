@@ -29,6 +29,7 @@ app = Flask(__name__)
 LOG_DIR = 'logs'
 MOUNT_POINT = '/media/usb'
 SLAVE_STALE_SECONDS = 12.0
+RAW_BUFFER_LINES = 500
 
 HOTSPOT_CON_NAME = "invitro-hotspot"
 HOTSPOT_SSID = "InVitro-Hotspot"
@@ -54,6 +55,13 @@ packet_stats = {
     'lost': 0,
     'loss_pct': 0.0
 }
+
+# Every line read from the master is kept here before parsing, including lines
+# that are not JSON. `/raw` serves this buffer so the serial port never has to
+# be opened by a second program.
+raw_lock = threading.Lock()
+raw_lines = deque(maxlen=RAW_BUFFER_LINES)
+raw_seq = 0
 
 current_data = {
     'temp': -999.0,
@@ -87,6 +95,18 @@ def update_packet_metrics():
     lost = max(0, tx - rx_m)
     packet_stats['lost'] = lost
     packet_stats['loss_pct'] = round((lost / tx) * 100.0, 1) if tx > 0 else 0.0
+
+
+def record_raw_line(line):
+    """Store one received serial line with a monotonic sequence number."""
+    global raw_seq
+    with raw_lock:
+        raw_seq += 1
+        raw_lines.append({
+            'seq': raw_seq,
+            'ts': round(time.time(), 3),
+            'line': line
+        })
 
 
 def make_qr_data_uri(payload_text):
@@ -197,6 +217,9 @@ def serial_worker():
             else:
                 time.sleep(0.02)
                 continue
+
+            if raw_line:
+                record_raw_line(raw_line)
 
             if raw_line.startswith('{') and raw_line.endswith('}'):
                 try:
@@ -440,6 +463,48 @@ def status():
     res['packets'] = packet_stats
     res['sys'] = cached_sys_stats
     return jsonify(res)
+
+@app.route('/raw')
+def raw():
+    """Serve the received serial lines without touching the port.
+
+    Without `after`, the newest `limit` lines are returned. With `after`, only
+    lines with a sequence number greater than it are returned, oldest first.
+    `seq` is always the newest sequence number; if it goes backwards the Flask
+    process restarted. A gap between `after + 1` and the first returned `seq`
+    means the ring buffer wrapped and those lines are gone.
+    """
+    after_arg = request.args.get('after', '')
+    limit_arg = request.args.get('limit', '')
+
+    try:
+        after = int(after_arg) if after_arg != '' else None
+        limit = int(limit_arg) if limit_arg != '' else 100
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error', 'message': 'after and limit must be integers'}), 400
+
+    if limit < 1:
+        return jsonify({'status': 'error', 'message': 'limit must be at least 1'}), 400
+    limit = min(limit, RAW_BUFFER_LINES)
+
+    with raw_lock:
+        snapshot = list(raw_lines)
+        latest = raw_seq
+
+    if after is None:
+        selected = snapshot[-limit:]
+    else:
+        selected = [entry for entry in snapshot if entry['seq'] > after][:limit]
+
+    res = jsonify({
+        'seq': latest,
+        'count': len(selected),
+        'buffered': len(snapshot),
+        'connected': serial_conn is not None,
+        'lines': selected
+    })
+    res.headers['Cache-Control'] = 'no-store'
+    return res
 
 @app.route('/sys_stats')
 def sys_stats():

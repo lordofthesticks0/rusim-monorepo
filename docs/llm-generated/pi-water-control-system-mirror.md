@@ -1,16 +1,24 @@
 # Raspberry Pi `water-control-system` mirror
 
-`legacy/pi/water-control-system/` is a read-only copy of the live project at
-`/home/invitro/water-control-system` on the `invitrocontroller` Raspberry Pi 3B,
-pulled over SSH on 2026-10-20.
+`legacy/pi/water-control-system/` mirrors the live project at
+`/home/invitro/water-control-system` on the `invitrocontroller` Raspberry Pi 3B.
+It was first pulled over SSH on 2026-10-20 and is the place to edit before
+copying a change to the Pi.
 
-The pull did not modify the Pi. The copy is of the **working tree**, not of the
-initial commit, so it includes the uncommitted changes described in
+The initial pull did not modify the Pi. The copy is of the **working tree**, not
+of the initial commit, so it includes the uncommitted changes described in
 [`raspi-docs/12-copies-and-git-state.md`](raspi-docs/12-copies-and-git-state.md).
 
 On 2026-10-20 the kiosk text was scaled by 20 % (`--font-scale: 1.2`), applied
 to the mirror and deployed to the Pi. The mirror and the live file are identical
 again; see [pi-kiosk-font-scale.md](pi-kiosk-font-scale.md).
+
+On 2026-10-22 the `/raw` endpoint was added to `web_control.py` (a 500-line ring
+buffer of received serial lines, with an `after` cursor). The change was made
+here first, then copied to `/home/invitro/water-control-system/web_control.py`
+and activated with `pm2 restart water-ui`. The previous live file is backed up
+on the Pi at `/home/invitro/web_control.py.bak-raw-20261022`. Route details:
+[raspi-docs/04-backend-web-control.md](raspi-docs/04-backend-web-control.md).
 
 ## Layout
 
@@ -35,7 +43,7 @@ the Pi, outside the project directory.
 
 | File | MD5 |
 |---|---|
-| `web_control.py` | `d753a91e818d1381af6155bda2320a99` |
+| `web_control.py` | `1fb4f44d959f8ff40a192267e0a9b8d1` |
 | `templates/index.html` | `38c2d2782447cf02116113867048bf5c` |
 | `water_control_arduino/water_control_arduino.ino` | `a2d6f2a9c9d030d296b95feb721b4a48` |
 | `logs/2025-12-12.csv` | `f0015017bf14092087b80083d519977f` |
@@ -54,7 +62,8 @@ the Pi, outside the project directory.
 ## Refreshing the mirror
 
 The pull is read-only on the Pi. Re-running it replaces the local files with the
-current remote working tree; the remote `.git` stays excluded:
+current remote working tree, discarding local edits; the remote `.git` stays
+excluded:
 
 ```sh
 ssh invitro@10.92.128.23 \

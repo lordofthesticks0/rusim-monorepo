@@ -96,10 +96,11 @@ document is the source of truth for anything measured on real hardware.
 
 | Path | Role |
 |---|---|
-| [`legacy/pi/water-control-system/`](../legacy/pi/water-control-system/) | Read-only mirror of the live Pi project: `web_control.py`, `templates/index.html`, `water_control_arduino/`, `logs/`. [pi-water-control-system-mirror.md](llm-generated/pi-water-control-system-mirror.md). The kiosk text is scaled by 20 %; see [pi-kiosk-font-scale.md](llm-generated/pi-kiosk-font-scale.md). |
+| [`legacy/pi/water-control-system/`](../legacy/pi/water-control-system/) | Mirror of the live Pi project: `web_control.py`, `templates/index.html`, `water_control_arduino/`, `logs/`. Edit here, then copy to the Pi. [pi-water-control-system-mirror.md](llm-generated/pi-water-control-system-mirror.md). The kiosk text is scaled by 20 %; see [pi-kiosk-font-scale.md](llm-generated/pi-kiosk-font-scale.md). |
 | [`legacy/pi/captive-portal-login.sh`](../legacy/pi/captive-portal-login.sh) | Bash reimplementation of the master firmware's captive-portal login sequence. [captive-portal-login-script.md](llm-generated/captive-portal-login-script.md). |
 | [`legacy/slave/new-slave.cpp`](../legacy/slave/new-slave.cpp) | ATmega2560 Mega Mini sensor slave: 4 bottles of pH, CH4, temperature, CO2 and pressure, published as JSON over RS485 and USB. [legacy-slave.md](llm-generated/legacy-slave.md). |
 | [`scripts-hardware/read-legacy-slave.ts`](../scripts-hardware/read-legacy-slave.ts) | Bun wrapper that reads the slave's JSON stream and prints a per-bottle table. [legacy-slave-json-wrapper.md](llm-generated/legacy-slave-json-wrapper.md). |
+| [`scripts-hardware/monitor-legacy-pi.ts`](../scripts-hardware/monitor-legacy-pi.ts) | Bun monitor for the master on the Pi over SSH: `/status` polling by default, `--raw` follows the Flask app's `/raw` buffer without stopping the service. [legacy-pi-remote-monitor.md](llm-generated/legacy-pi-remote-monitor.md). |
 
 ## 3b. Raspberry Pi system documentation (`raspi-docs/`)
 
