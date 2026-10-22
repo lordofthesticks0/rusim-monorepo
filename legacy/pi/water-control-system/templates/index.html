@@ -1805,7 +1805,7 @@
                         }
                         if (activeTab === "bottles") {
                             setHTMLIfChanged(`bTemp_${idx}`, fmtMetric(b.temp, "°C", -999));
-                            setHTMLIfChanged(`bPh_${idx}`, fmtMetric(b.ph, "V", -1));
+                            setHTMLIfChanged(`bPh_${idx}`, fmtMetric(b.ph, "", -1));
                             setHTMLIfChanged(`bCh4_${idx}`, fmtMetric(b.methane, "ppm", -1));
                             setHTMLIfChanged(`bCh4Vol_${idx}`, fmtMetric(b.ch4_ml, "mL", -1));
                             setHTMLIfChanged(`bCo2_${idx}`, fmtMetric(b.co2, "ppm", -1));

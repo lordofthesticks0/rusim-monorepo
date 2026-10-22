@@ -65,6 +65,7 @@ document is the source of truth for anything measured on real hardware.
 | [captive-portal-workaround.md](llm-generated/captive-portal-workaround.md) | Plan for headless captive portal authentication on the WT32-ETH01 |
 | [captive-portal-login-script.md](llm-generated/captive-portal-login-script.md) | `scripts-hardware/captive-portal-login.sh`: the firmware login sequence as a one-shot bash script |
 | [legacy-slave.md](llm-generated/legacy-slave.md) | `legacy/slave/new-slave.cpp`: 4-bottle sensor slave, JSON protocol, USB stream, HX711 init trap, known gaps |
+| [legacy-master.md](llm-generated/legacy-master.md) | `legacy/master/master.cpp`: water-bath master firmware, MOSFET PWM stirrer ramping, hysteresis, Pi USB serial commands |
 
 ## 3. Dashboard
 
@@ -99,6 +100,7 @@ document is the source of truth for anything measured on real hardware.
 | [`legacy/pi/water-control-system/`](../legacy/pi/water-control-system/) | Mirror of the live Pi project: `web_control.py`, `templates/index.html`, `water_control_arduino/`, `logs/`. Edit here, then copy to the Pi. [pi-water-control-system-mirror.md](llm-generated/pi-water-control-system-mirror.md). The kiosk text is scaled by 20 %; see [pi-kiosk-font-scale.md](llm-generated/pi-kiosk-font-scale.md). Manual deploy: [`sync_pi.sh`](../sync_pi.sh), also installed at `/home/invitro/sync_pi.sh` on the Pi — [pi-sync-script.md](llm-generated/pi-sync-script.md). |
 | [`legacy/pi/captive-portal-login.sh`](../legacy/pi/captive-portal-login.sh) | Bash reimplementation of the master firmware's captive-portal login sequence. [captive-portal-login-script.md](llm-generated/captive-portal-login-script.md). |
 | [`legacy/slave/new-slave.cpp`](../legacy/slave/new-slave.cpp) | ATmega2560 Mega Mini sensor slave: 4 bottles of pH, CH4, temperature, CO2 and pressure, published as JSON over RS485 and USB. [legacy-slave.md](llm-generated/legacy-slave.md). |
+| [`legacy/master/master.cpp`](../legacy/master/master.cpp) | ATmega2560 Mega Mini water-bath master controller: bath DS18B20, Slave UART poller, heater/pump overrides, and 3-second MOSFET PWM ramping on Pin D4 for the stirrer. [legacy-master.md](llm-generated/legacy-master.md). |
 | [`scripts-hardware/read-legacy-slave.ts`](../scripts-hardware/read-legacy-slave.ts) | Bun wrapper that reads the slave's JSON stream and prints a per-bottle table. [legacy-slave-json-wrapper.md](llm-generated/legacy-slave-json-wrapper.md). |
 | [`scripts-hardware/monitor-legacy-pi.ts`](../scripts-hardware/monitor-legacy-pi.ts) | Bun monitor for the master on the Pi over SSH: `/status` polling by default, `--raw` follows the Flask app's `/raw` buffer without stopping the service. [legacy-pi-remote-monitor.md](llm-generated/legacy-pi-remote-monitor.md). |
 

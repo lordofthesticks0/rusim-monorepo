@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "memory-safety-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/systems-programming/skills/memory-safety-patterns/SKILL.md",
+      "computedHash": "f516e181e086afa8dbd3e18c27a56c2b1271438968a23e5b3fa9261232626699"
+    }
+  }
+}

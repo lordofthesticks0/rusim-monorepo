@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <ArduinoJson.h>
@@ -7,7 +8,7 @@
 // ==========================================
 #define TEMP_SENSOR_PIN   2     // DS18B20 Water bath sensor
 #define PUMP_PIN          3     // Circulation pump relay (Active-LOW)
-#define STIRRER_PIN       4     // Stirrer MOSFET (Formerly FAN_PIN, Active-HIGH)
+#define STIRRER_PIN       4     // Stirrer MOSFET (Formerly FAN_PIN, Active-HIGH, PWM OC0B)
 #define HEATER_PIN        5     // 300W Heater SSR (Active-HIGH trigger, 0V = OFF)
 #define SYSTEM_SWITCH_PIN 6     // Physical AUTO / OFF toggle
 #define WATER_SENSOR_PIN  A7    // Analog water level probe
@@ -23,6 +24,8 @@ float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define SLAVE_TIMEOUT_MS     12000  // Failsafe timeout if Slave stops responding
 #define TEMP_INTERVAL_MS     750    // Non-blocking DS18B20 cadence
 #define SLAVE_POLL_INTERVAL  3500   // Acquisition cadence matching Slave cycle time
+#define STIR_RAMP_MS         3000UL // 3-second soft-start / soft-stop PWM ramp
+#define STIR_MAX_PWM         255U   // Full speed PWM duty cycle (0-255)
 
 enum SystemMode { MODE_OFF, MODE_AUTO };
 SystemMode currentMode = MODE_AUTO;
@@ -47,6 +50,7 @@ float currentBottleTemp = -999.0;
 bool heaterState = false;
 bool pumpState = false;
 bool stirrerState = false;
+uint8_t stirrerPwm = 0;
 bool bottleTelemetryValid = false;
 int waterFaultCounter = 0;
 
@@ -54,6 +58,9 @@ unsigned long lastTempRequest = 0;
 unsigned long lastSlavePollTime = 0;
 unsigned long lastSlavePacketTime = 0;
 String slaveRxBuffer = "";
+
+// Forward declaration
+void sendTelemetryStatus(int waterRaw, unsigned long now);
 
 // ==========================================
 // ACTUATOR DRIVERS
@@ -74,16 +81,37 @@ void driveHeater(bool state) {
   heaterState = state;
 }
 
-void driveStirrer(bool state) {
+void driveStirrerPwm(uint8_t pwm) {
   pinMode(STIRRER_PIN, OUTPUT);
-  digitalWrite(STIRRER_PIN, state ? HIGH : LOW);
-  stirrerState = state;
+  analogWrite(STIRRER_PIN, pwm);
+  stirrerPwm = pwm;
+  stirrerState = (pwm > 0);
+}
+
+void driveStirrer(bool state) {
+  driveStirrerPwm(state ? STIR_MAX_PWM : 0);
+}
+
+static uint8_t computeRampedPwm(unsigned long elapsedMs, unsigned long windowMs, bool softStop) {
+  unsigned long upPwm = (elapsedMs < STIR_RAMP_MS)
+                          ? ((elapsedMs * STIR_MAX_PWM) / STIR_RAMP_MS)
+                          : STIR_MAX_PWM;
+  unsigned long pwm = upPwm;
+  if (softStop) {
+    unsigned long remMs = (windowMs > elapsedMs) ? (windowMs - elapsedMs) : 0;
+    unsigned long downPwm = (remMs < STIR_RAMP_MS)
+                              ? ((remMs * STIR_MAX_PWM) / STIR_RAMP_MS)
+                              : STIR_MAX_PWM;
+    if (downPwm < pwm) pwm = downPwm;
+  }
+  if (pwm == 0 && STIR_MAX_PWM > 0) pwm = 1;
+  return (uint8_t)pwm;
 }
 
 void forceAllOff() {
   driveHeater(false);
   drivePump(false);
-  driveStirrer(false);
+  driveStirrerPwm(0);
 }
 
 // ==========================================
@@ -101,36 +129,42 @@ void sendSlavePing(byte id) {
 // ==========================================
 void updateStirrer(unsigned long now) {
   if (currentMode == MODE_OFF) {
-    driveStirrer(false);
+    driveStirrerPwm(0);
     return;
   }
 
   if (stirMode == 0) {
-    // OFF
-    driveStirrer(false);
+    // OFF (immediate cut to 0)
+    driveStirrerPwm(0);
   } 
   else if (stirMode == 1) {
-    // CONSTANT ON
-    driveStirrer(true);
+    // CONSTANT ON (3s soft-start ramp to 255)
+    unsigned long elapsed = now - stirCycleStart;
+    driveStirrerPwm(computeRampedPwm(elapsed, 0, false));
   } 
   else if (stirMode == 2) {
-    // PULSE INTERVAL (e.g. run for stirPulseSec every stirIntervalMin)
+    // PULSE INTERVAL (e.g. run for stirPulseSec every stirIntervalMin with soft-start + soft-stop)
     unsigned long periodMs = stirIntervalMin * 60000UL;
     unsigned long onWindowMs = stirPulseSec * 1000UL;
     if (periodMs == 0) periodMs = 60000UL;
     if (onWindowMs > periodMs) onWindowMs = periodMs;
 
     unsigned long elapsed = (now - stirCycleStart) % periodMs;
-    driveStirrer(elapsed < onWindowMs);
+    if (elapsed < onWindowMs) {
+      driveStirrerPwm(computeRampedPwm(elapsed, onWindowMs, true));
+    } else {
+      driveStirrerPwm(0);
+    }
   } 
   else if (stirMode == 3) {
-    // TIMED RUN (run continuously for stirTimedMin, then switch to OFF)
+    // TIMED RUN (run continuously for stirTimedMin with soft-start + soft-stop, then switch to OFF)
     unsigned long durationMs = stirTimedMin * 60000UL;
-    if (now - stirCycleStart < durationMs) {
-      driveStirrer(true);
+    unsigned long elapsed = now - stirCycleStart;
+    if (elapsed < durationMs) {
+      driveStirrerPwm(computeRampedPwm(elapsed, durationMs, true));
     } else {
       stirMode = 0;
-      driveStirrer(false);
+      driveStirrerPwm(0);
     }
   }
 }
@@ -292,6 +326,9 @@ void loop() {
       sendTelemetryStatus(waterRaw, now);
     } 
     else if (cmd == "MODE_AUTO") {
+      if (currentMode == MODE_OFF) {
+        stirCycleStart = now;
+      }
       currentMode = MODE_AUTO;
     } 
     else if (cmd == "MODE_OFF") {
