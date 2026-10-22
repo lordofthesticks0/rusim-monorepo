@@ -41,6 +41,12 @@ The relative layout matches the Pi exactly. `legacy/pi/` also holds
 `captive-portal-login.sh`, which lives at `/home/invitro/captive_portal.sh` on
 the Pi, outside the project directory.
 
+`water_control_arduino/water_control_arduino.ino` in this mirror is the
+historical sketch. Since 2026-10-22 [`sync_pi.sh`](../../sync_pi.sh) overwrites
+the Pi's copy with `legacy/master/master.cpp`; the checksum below describes the
+repository snapshot, not the live file. See
+[pi-sync-script.md](pi-sync-script.md#master-firmware-flashing).
+
 ## Checksums
 
 | File | MD5 |

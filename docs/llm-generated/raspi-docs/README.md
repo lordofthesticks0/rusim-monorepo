@@ -28,7 +28,7 @@ Role: kiosk-style controller for a **bioreactor / water-bath experiment rig**. T
 3. [`03-project-overview.md`](03-project-overview.md) — `water-control-system` and its three copies
 4. [`04-backend-web-control.md`](04-backend-web-control.md) — Flask + SocketIO backend, routes, workers, CSV logging
 5. [`05-frontend-ui.md`](05-frontend-ui.md) — kiosk dashboard (tabs, indicators, bottle grid)
-6. [`06-master-firmware.md`](06-master-firmware.md) — Arduino master sketch (`water_control_arduino.ino`)
+6. [`06-master-firmware.md`](06-master-firmware.md) — Arduino master firmware (`legacy/master/master.cpp`), flashing via `sync_pi.sh`
 7. [`07-data-and-logging.md`](07-data-and-logging.md) — CSV schema, logs, USB export
 8. [`08-auxiliary-tools.md`](08-auxiliary-tools.md) — helper scripts, analog tests, rpi-clone
 9. [`09-network-and-services.md`](09-network-and-services.md) — network, enabled services, cloudflared
