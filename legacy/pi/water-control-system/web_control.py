@@ -29,7 +29,6 @@ app = Flask(__name__)
 LOG_DIR = 'logs'
 MOUNT_POINT = '/media/usb'
 SLAVE_STALE_SECONDS = 12.0
-RAW_BUFFER_LINES = 500
 
 HOTSPOT_CON_NAME = "invitro-hotspot"
 HOTSPOT_SSID = "InVitro-Hotspot"
@@ -56,19 +55,21 @@ packet_stats = {
     'loss_pct': 0.0
 }
 
-# Every line read from the master is kept here before parsing, including lines
-# that are not JSON. `/raw` serves this buffer so the serial port never has to
-# be opened by a second program.
-raw_lock = threading.Lock()
-raw_lines = deque(maxlen=RAW_BUFFER_LINES)
-raw_seq = 0
-
 current_data = {
     'temp': -999.0,
     'bottle_avg_temp': -999.0,
     'heater': False,
-    'fan': False,
     'pump': False,
+    'stirrer': False,
+    'heater_mode': 'AUTO',
+    'pump_mode': 'AUTO',
+    'stir_mode': 'OFF',
+    'stir_int_min': 10,
+    'stir_pulse_sec': 30,
+    'stir_timed_min': 15,
+    'stir_rem_sec': 0,
+    'target_temp': 39.0,
+    'hysteresis': 0.3,
     'water_low': False,
     'system_mode': 'AUTO',
     'bottles': []
@@ -84,6 +85,12 @@ cached_sys_stats = {
     "power_ok": True
 }
 
+CACHED_TIMEZONES = []
+try:
+    CACHED_TIMEZONES = subprocess.check_output(['timedatectl', 'list-timezones']).decode('utf-8').splitlines()
+except Exception:
+    CACHED_TIMEZONES = ["Asia/Jakarta", "UTC"]
+
 _prev_cpu_times = None
 
 def update_packet_metrics():
@@ -96,18 +103,18 @@ def update_packet_metrics():
     packet_stats['lost'] = lost
     packet_stats['loss_pct'] = round((lost / tx) * 100.0, 1) if tx > 0 else 0.0
 
-
-def record_raw_line(line):
-    """Store one received serial line with a monotonic sequence number."""
-    global raw_seq
-    with raw_lock:
-        raw_seq += 1
-        raw_lines.append({
-            'seq': raw_seq,
-            'ts': round(time.time(), 3),
-            'line': line
-        })
-
+def send_serial_cmd(cmd_str):
+    """Thread-safe helper to send a command line to the Master Arduino."""
+    if serial_conn:
+        try:
+            with serial_write_lock:
+                serial_conn.write(f"{cmd_str}\n".encode('utf-8'))
+            packet_stats['outgoing'] += 1
+            update_packet_metrics()
+            return True
+        except Exception:
+            pass
+    return False
 
 def make_qr_data_uri(payload_text):
     if not QR_AVAILABLE:
@@ -133,7 +140,6 @@ def get_wlan_ip():
 
 # --- BACKGROUND WORKER 0: ZERO-SUBPROCESS HARDWARE TELEMETRY ---
 def telemetry_worker():
-    """Updates cached_sys_stats in the background every 4s without blocking HTTP requests."""
     global _prev_cpu_times
     while True:
         try:
@@ -180,7 +186,6 @@ def telemetry_worker():
         except Exception:
             pass
 
-        # Pure sysfs undervoltage check (0ms, no subprocess fork)
         try:
             if os.path.exists("/sys/class/hwmon/hwmon1/in0_lcrit_alarm"):
                 with open("/sys/class/hwmon/hwmon1/in0_lcrit_alarm", "r") as f:
@@ -218,9 +223,6 @@ def serial_worker():
                 time.sleep(0.02)
                 continue
 
-            if raw_line:
-                record_raw_line(raw_line)
-
             if raw_line.startswith('{') and raw_line.endswith('}'):
                 try:
                     payload = json.loads(raw_line)
@@ -250,7 +252,16 @@ def serial_worker():
                         current_data['bottle_avg_temp'] = float(payload.get('bottle_temp_avg', current_data['bottle_avg_temp']))
                         current_data['heater'] = bool(payload.get('heater', 0))
                         current_data['pump'] = bool(payload.get('pump', 0))
-                        current_data['fan'] = bool(payload.get('fan', 0))
+                        current_data['stirrer'] = bool(payload.get('stirrer', 0))
+                        current_data['heater_mode'] = payload.get('heater_mode', current_data['heater_mode'])
+                        current_data['pump_mode'] = payload.get('pump_mode', current_data['pump_mode'])
+                        current_data['stir_mode'] = payload.get('stir_mode', current_data['stir_mode'])
+                        current_data['stir_int_min'] = int(payload.get('stir_int_min', current_data['stir_int_min']))
+                        current_data['stir_pulse_sec'] = int(payload.get('stir_pulse_sec', current_data['stir_pulse_sec']))
+                        current_data['stir_timed_min'] = int(payload.get('stir_timed_min', current_data['stir_timed_min']))
+                        current_data['stir_rem_sec'] = int(payload.get('stir_rem_sec', 0))
+                        current_data['target_temp'] = float(payload.get('target_temp', current_data['target_temp']))
+                        current_data['hysteresis'] = float(payload.get('hysteresis', current_data['hysteresis']))
                         current_data['water_low'] = bool(payload.get('water_low', 0))
                         current_data['system_mode'] = payload.get('system_mode', current_data['system_mode'])
 
@@ -276,13 +287,7 @@ def serial_worker():
 def polling_worker():
     while True:
         if serial_conn:
-            try:
-                with serial_write_lock:
-                    serial_conn.write(b"STATUS\n")
-                packet_stats['outgoing'] += 1
-                update_packet_metrics()
-            except Exception:
-                pass
+            send_serial_cmd("STATUS")
         elif logging_active:
             packet_stats['outgoing'] += 1
             update_packet_metrics()
@@ -296,8 +301,8 @@ def polling_worker():
 # --- LEGIBLE, ALIGNED CSV LOGGING ENGINE ---
 CSV_COLUMNS = [
     ("Timestamp",    10), ("Bath_C",        7), ("BAvg_C",        7),
-    ("Mode",          5), ("Heater",        6), ("Pump",          5),
-    ("Fan",           4), ("Water",         6), ("Pkt_Tot",       8),
+    ("Targ_C",        7), ("Heater",        6), ("Pump",          5),
+    ("Stir",          5), ("Water",         6), ("Pkt_Tot",       8),
     ("Pkt_TX",        7), ("Pkt_RX",        7), ("Pkt_Lost",      8),
     ("Loss_%",        7),
 ]
@@ -326,7 +331,7 @@ def format_aligned_row(values):
     padded = []
     for (col_name, width), val in zip(CSV_COLUMNS, values):
         s = str(val)
-        if col_name in ("Timestamp", "Mode", "Heater", "Pump", "Fan", "Water"):
+        if col_name in ("Timestamp", "Heater", "Pump", "Stir", "Water"):
             padded.append(s.ljust(width))
         else:
             padded.append(s.rjust(width))
@@ -356,10 +361,10 @@ def log_data_to_csv():
             datetime.now().strftime("%H:%M:%S"),
             fmt_val(current_data.get('temp'), 2) if master_fresh else "null",
             fmt_val(current_data.get('bottle_avg_temp'), 2) if slave_fresh else "null",
-            current_data.get('system_mode', 'OFF') if master_fresh else "null",
+            fmt_val(current_data.get('target_temp'), 1) if master_fresh else "null",
             "ON" if (master_fresh and current_data.get('heater')) else ("OFF" if master_fresh else "null"),
             "ON" if (master_fresh and current_data.get('pump')) else ("OFF" if master_fresh else "null"),
-            "ON" if (master_fresh and current_data.get('fan')) else ("OFF" if master_fresh else "null"),
+            "ON" if (master_fresh and current_data.get('stirrer')) else ("OFF" if master_fresh else "null"),
             "LOW" if (master_fresh and current_data.get('water_low')) else ("OK" if master_fresh else "null"),
             packet_stats['total'],
             packet_stats['outgoing'],
@@ -464,47 +469,56 @@ def status():
     res['sys'] = cached_sys_stats
     return jsonify(res)
 
-@app.route('/raw')
-def raw():
-    """Serve the received serial lines without touching the port.
+@app.route('/control', methods=['POST'])
+def control_api():
+    """Handles Heater, Pump, Stirrer, and Hysteresis Target updates from the Controls tab."""
+    body = request.json or {}
+    action = body.get('action')
 
-    Without `after`, the newest `limit` lines are returned. With `after`, only
-    lines with a sequence number greater than it are returned, oldest first.
-    `seq` is always the newest sequence number; if it goes backwards the Flask
-    process restarted. A gap between `after + 1` and the first returned `seq`
-    means the ring buffer wrapped and those lines are gone.
-    """
-    after_arg = request.args.get('after', '')
-    limit_arg = request.args.get('limit', '')
+    if action == 'heater':
+        mode = body.get('mode', 'AUTO')
+        if mode in ('AUTO', 'ON', 'OFF'):
+            send_serial_cmd(f"HEATER_{mode}")
+            current_data['heater_mode'] = mode
+            if mode == 'ON': current_data['heater'] = True
+            elif mode == 'OFF': current_data['heater'] = False
+            return jsonify({'status': 'success'})
 
-    try:
-        after = int(after_arg) if after_arg != '' else None
-        limit = int(limit_arg) if limit_arg != '' else 100
-    except (TypeError, ValueError):
-        return jsonify({'status': 'error', 'message': 'after and limit must be integers'}), 400
+    elif action == 'pump':
+        mode = body.get('mode', 'AUTO')
+        if mode in ('AUTO', 'ON', 'OFF'):
+            send_serial_cmd(f"PUMP_{mode}")
+            current_data['pump_mode'] = mode
+            if mode == 'ON': current_data['pump'] = True
+            elif mode == 'OFF': current_data['pump'] = False
+            return jsonify({'status': 'success'})
 
-    if limit < 1:
-        return jsonify({'status': 'error', 'message': 'limit must be at least 1'}), 400
-    limit = min(limit, RAW_BUFFER_LINES)
+    elif action == 'stirrer':
+        mode_str = body.get('mode', 'OFF')
+        mode_map = {'OFF': 0, 'ON': 1, 'PULSE': 2, 'TIMED': 3}
+        m_int = mode_map.get(mode_str, 0)
+        mins = int(body.get('minutes', 10))
+        secs = int(body.get('seconds', 30))
+        send_serial_cmd(f"STIR:{m_int}:{mins}:{secs}")
+        current_data['stir_mode'] = mode_str
+        if mode_str == 'PULSE':
+            current_data['stir_int_min'] = mins
+            current_data['stir_pulse_sec'] = secs
+        elif mode_str == 'TIMED':
+            current_data['stir_timed_min'] = mins
+            current_data['stir_rem_sec'] = mins * 60
+        current_data['stirrer'] = (mode_str != 'OFF')
+        return jsonify({'status': 'success'})
 
-    with raw_lock:
-        snapshot = list(raw_lines)
-        latest = raw_seq
+    elif action == 'temp_target':
+        target = round(float(body.get('target', 39.0)), 1)
+        hyst = round(float(body.get('hysteresis', 0.3)), 1)
+        send_serial_cmd(f"TEMP:{target:.1f}:{hyst:.1f}")
+        current_data['target_temp'] = target
+        current_data['hysteresis'] = hyst
+        return jsonify({'status': 'success'})
 
-    if after is None:
-        selected = snapshot[-limit:]
-    else:
-        selected = [entry for entry in snapshot if entry['seq'] > after][:limit]
-
-    res = jsonify({
-        'seq': latest,
-        'count': len(selected),
-        'buffered': len(snapshot),
-        'connected': serial_conn is not None,
-        'lines': selected
-    })
-    res.headers['Cache-Control'] = 'no-store'
-    return res
+    return jsonify({'status': 'error', 'message': 'Invalid control action'}), 400
 
 @app.route('/sys_stats')
 def sys_stats():
@@ -583,11 +597,7 @@ def mobile_download_portal(filename):
 def set_mode():
     mode = request.json.get('mode')
     if mode in ['AUTO', 'OFF']:
-        if serial_conn:
-            with serial_write_lock:
-                serial_conn.write(f"MODE_{mode}\n".encode('utf-8'))
-            packet_stats['outgoing'] += 1
-            update_packet_metrics()
+        send_serial_cmd(f"MODE_{mode}")
         current_data['system_mode'] = mode
         return jsonify({'status': 'success', 'system_mode': mode})
     return jsonify({'status': 'error'})
@@ -690,10 +700,7 @@ def get_ip():
 
 @app.route('/get_timezones')
 def get_timezones():
-    try:
-        return jsonify(subprocess.check_output(['timedatectl', 'list-timezones']).decode('utf-8').splitlines())
-    except Exception:
-        return jsonify([])
+    return jsonify(CACHED_TIMEZONES)
 
 @app.route('/set_timezone', methods=['POST'])
 def set_timezone():
