@@ -3,21 +3,36 @@
 Manual deploy of `legacy/pi/water-control-system` from the monorepo's `origin`
 branch to the live Raspberry Pi.
 
-The script runs on the development machine, but the Pi does the pull. The Pi
-keeps a clone at `~/rusim-src` with a sparse checkout of
-`legacy/pi/water-control-system`. `sync_pi.sh` SSHes in, fetches `origin`,
-resets that checkout, and rsyncs the files to `~/water-control-system`.
+The same script runs in two modes:
 
-The local working tree is never copied. Only commits that exist on
-`origin/master` can be deployed.
+- **Development machine (default):** checks the local repo, SSHes to the Pi,
+  and runs the script there.
+- **On the Pi (automatic, or `--local`):** fetches `origin` and rsyncs into
+  `~/water-control-system` directly, without the SSH hop.
+
+The Pi keeps a clone at `~/rusim-src` with a sparse checkout of
+`legacy/pi/water-control-system`. The local working tree is never copied. Only
+commits that exist on `origin/master` can be deployed.
 
 ## Usage
+
+On the development machine:
 
 ```bash
 ./sync_pi.sh                 # deploy origin/master
 ./sync_pi.sh --dry-run       # show changes, write nothing, restart nothing
 ./sync_pi.sh --branch X      # deploy origin/X
 ./sync_pi.sh --allow-unpushed
+./sync_pi.sh --install       # copy this script to /home/invitro/sync_pi.sh
+```
+
+On the Pi:
+
+```bash
+cd ~
+./sync_pi.sh --dry-run
+./sync_pi.sh                 # --local is implied by the hostname
+./sync_pi.sh --local         # force local mode on any host
 ```
 
 Environment overrides:
@@ -37,6 +52,8 @@ PI_HOST=invitro@10.92.128.23 ./sync_pi.sh --dry-run
 
 ## What it does
 
+Development-machine mode:
+
 1. Checks the local repository:
    - warns if the current branch differs from the deploy branch;
    - warns if `legacy/pi/water-control-system` has uncommitted changes;
@@ -45,15 +62,22 @@ PI_HOST=invitro@10.92.128.23 ./sync_pi.sh --dry-run
 2. If local commits are unpushed, a real run **aborts**. This prevents
    deploying an older `origin` and rolling the Pi back. `--dry-run` still
    proceeds so the rollback is visible; `--allow-unpushed` bypasses the guard.
-3. Opens one SSH session and, on the Pi:
-   - clones `PI_REPO` to `~/rusim-src` on first use, with a cone-mode sparse
-     checkout of `legacy/pi/water-control-system`;
-   - fetches `origin/<branch>` and hard-resets the checkout to it;
-   - syntax-checks the checkout's `web_control.py` with `compile()`. On
-     failure it exits before writing anything;
-   - rsyncs the tree to `~/water-control-system`.
-4. If `web_control.py` changed, restarts the PM2 app `water-ui`.
-5. If `templates/index.html` changed, prints a reminder to reload the kiosk.
+3. Sends this script over one SSH session and runs it on the Pi with
+   `PI_LOCAL=1`.
+
+Both modes then do the same work on the Pi:
+
+1. Clones `PI_REPO` to `~/rusim-src` on first use, with a cone-mode sparse
+   checkout of `legacy/pi/water-control-system`.
+2. Fetches `origin/<branch>` and hard-resets the checkout to it.
+3. Syntax-checks the checkout's `web_control.py` with `compile()`. On failure
+   it exits before writing anything.
+4. Rsyncs the tree to `~/water-control-system`.
+5. If `web_control.py` content changed, restarts the PM2 app `water-ui`.
+6. If `templates/index.html` changed, prints a reminder to reload the kiosk.
+
+Local mode skips the push checks because the Pi has no development repository.
+It deploys whatever is on `origin/<branch>`.
 
 ## What is and is not touched
 
@@ -88,6 +112,16 @@ credentials are stored. Expect a dry run first:
 ./sync_pi.sh
 ```
 
+Install the Pi-side copy once, and again whenever this script changes:
+
+```bash
+./sync_pi.sh --install
+```
+
+That writes `/home/invitro/sync_pi.sh` over SSH. The development-machine run
+does not need the installed copy; it sends the current script to the Pi each
+time.
+
 ## Failure behaviour
 
 | Failure | Result |
@@ -97,6 +131,7 @@ credentials are stored. Expect a dry run first:
 | `web_control.py` does not compile | aborts before rsync |
 | `rsync` returns non-zero | script exits with the rsync code |
 | PM2 app missing | files still deploy, warning printed |
+| run outside a git repo (dev machine) | warning, push checks skipped |
 
 The checkout reset is destructive only to `~/rusim-src`; it is a cache and can
 be deleted at any time.
@@ -111,6 +146,10 @@ branch tip from `origin`, not an arbitrary local commit.
 
 - Deploys only what is pushed. Uncommitted edits stay local.
 - No automatic trigger. Run it yourself after a push.
+- The Pi's installed copy at `~/sync_pi.sh` does not update itself. Run
+  `./sync_pi.sh --install` after changing the script.
+- Local mode on the Pi cannot detect unpushed development commits; it trusts
+  `origin`.
 - `templates/index.html` changes are served on the next page load; the kiosk
   browser must be reloaded manually.
 - The Pi's old `~/water-control-system/.git` still points at
