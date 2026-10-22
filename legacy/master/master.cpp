@@ -1,17 +1,3 @@
-/*
- * PROJECT: Water Bath Master Controller
- * BOARD:   Arduino Mega 2560 (AVR)
- * ROLE:    Reads the bath DS18B20, polls the sensor slave (#1) over RS485,
- *          drives pump / heater / stirrer, and talks to the Raspberry Pi
- *          over USB serial (115200).
- * SOURCE:  Converted from the live sketch
- *          legacy/pi/water-control-system/water_control_arduino/water_control_arduino.ino.
- *          Behaviour is unchanged; the pin formerly called FAN_PIN is now
- *          STIRRER_PIN (same pin D4), and the telemetry key stays "fan" so the
- *          Pi dashboard and web_control.py keep parsing it.
- */
-
-#include <Arduino.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <ArduinoJson.h>
@@ -20,20 +6,18 @@
 // PIN DEFINITIONS
 // ==========================================
 #define TEMP_SENSOR_PIN   2     // DS18B20 Water bath sensor
-#define PUMP_PIN          3     // Circulation pump relay
-#define STIRRER_PIN       4     // Stirrer
-#define HEATER_PIN        5     // 300W Heater SSR (Active HIGH trigger, 0V = OFF)
-#define SYSTEM_SWITCH_PIN 6     // Optional physical AUTO / OFF toggle
-#define RS485_CTRL_PIN    8     // MAX485 DE/RE control pin
+#define PUMP_PIN          3     // Circulation pump relay (Active-LOW)
+#define STIRRER_PIN       4     // Stirrer MOSFET (Formerly FAN_PIN, Active-HIGH)
+#define HEATER_PIN        5     // 300W Heater SSR (Active-HIGH trigger, 0V = OFF)
+#define SYSTEM_SWITCH_PIN 6     // Physical AUTO / OFF toggle
 #define WATER_SENSOR_PIN  A7    // Analog water level probe
 
 // ==========================================
-// CONTROL PARAMETERS
+// CONTROL PARAMETERS & DYNAMIC TARGETS
 // ==========================================
-#define TARGET_BOTTLE_TEMP   39.0   // Core liquid target (°C)
-#define BOTTLE_HYSTERESIS    0.3    // Heat on < 38.7°C, off >= 39.0°C
-#define MAX_WATER_BATH_TEMP  39.8   // Hard bath ceiling clamp (°C)
-#define FAN_EMERGENCY_TEMP   45.0   // Overheat exhaust threshold (°C)
+float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
+float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
+#define MAX_WATER_BATH_TEMP  41.0   // Hard safety bath ceiling clamp (°C)
 #define WATER_THRESHOLD      500    // Minimum dry-run ADC threshold
 #define WATER_FAULT_LIMIT    5      // 5 consecutive cycles to trip
 #define SLAVE_TIMEOUT_MS     12000  // Failsafe timeout if Slave stops responding
@@ -43,6 +27,17 @@
 enum SystemMode { MODE_OFF, MODE_AUTO };
 SystemMode currentMode = MODE_AUTO;
 
+// Per-Actuator Override Modes: 0 = AUTO, 1 = FORCE ON, 2 = FORCE OFF
+uint8_t heaterOverride = 0;
+uint8_t pumpOverride   = 0;
+
+// Stirrer Modes: 0 = OFF, 1 = CONSTANT ON, 2 = PULSE INTERVAL, 3 = TIMED RUN
+uint8_t stirMode = 0;
+unsigned long stirIntervalMin = 10;   // Default: Pulse every 10 minutes
+unsigned long stirPulseSec    = 30;   // Default: 30-second pulse duration
+unsigned long stirTimedMin    = 15;   // Default: 15-minute timed continuous run
+unsigned long stirCycleStart  = 0;    // Timestamp tracker for Pulse / Timed modes
+
 OneWire oneWire(TEMP_SENSOR_PIN);
 DallasTemperature bathSensor(&oneWire);
 
@@ -51,6 +46,7 @@ float waterTemp = -999.0;
 float currentBottleTemp = -999.0;
 bool heaterState = false;
 bool pumpState = false;
+bool stirrerState = false;
 bool bottleTelemetryValid = false;
 int waterFaultCounter = 0;
 
@@ -60,12 +56,6 @@ unsigned long lastSlavePacketTime = 0;
 String slaveRxBuffer = "";
 
 // ==========================================
-// PROTOTYPES
-// (A .ino gets these generated automatically; a .cpp needs them by hand.)
-// ==========================================
-void sendTelemetryStatus(int waterRaw);
-
-// ==========================================
 // ACTUATOR DRIVERS
 // ==========================================
 void drivePump(bool state) {
@@ -73,7 +63,7 @@ void drivePump(bool state) {
     pinMode(PUMP_PIN, OUTPUT);
     digitalWrite(PUMP_PIN, LOW); // Active-LOW turn ON
   } else {
-    pinMode(PUMP_PIN, INPUT);    // High-Z disconnect (cuts current sink to turn relay OFF)
+    pinMode(PUMP_PIN, INPUT);    // High-Z disconnect to turn relay OFF
   }
   pumpState = state;
 }
@@ -84,29 +74,65 @@ void driveHeater(bool state) {
   heaterState = state;
 }
 
+void driveStirrer(bool state) {
+  pinMode(STIRRER_PIN, OUTPUT);
+  digitalWrite(STIRRER_PIN, state ? HIGH : LOW);
+  stirrerState = state;
+}
+
 void forceAllOff() {
   driveHeater(false);
   drivePump(false);
-  digitalWrite(STIRRER_PIN, LOW);
+  driveStirrer(false);
 }
 
 // ==========================================
-// RS485 POLLER (PROVEN HARDWARE TIMING)
+// DIRECT UART POLLER (Serial1 RX/TX)
 // ==========================================
 void sendSlavePing(byte id) {
   while (Serial1.available()) Serial1.read();
-
-  digitalWrite(RS485_CTRL_PIN, HIGH);
-  delay(2);
-
   Serial1.print("#");
   Serial1.print(id);
   Serial1.print(":PING*");
+}
 
-  Serial1.flush();
-  delay(5); // Stop-bit clearance window
+// ==========================================
+// STIRRER STATE MACHINE
+// ==========================================
+void updateStirrer(unsigned long now) {
+  if (currentMode == MODE_OFF) {
+    driveStirrer(false);
+    return;
+  }
 
-  digitalWrite(RS485_CTRL_PIN, LOW);
+  if (stirMode == 0) {
+    // OFF
+    driveStirrer(false);
+  } 
+  else if (stirMode == 1) {
+    // CONSTANT ON
+    driveStirrer(true);
+  } 
+  else if (stirMode == 2) {
+    // PULSE INTERVAL (e.g. run for stirPulseSec every stirIntervalMin)
+    unsigned long periodMs = stirIntervalMin * 60000UL;
+    unsigned long onWindowMs = stirPulseSec * 1000UL;
+    if (periodMs == 0) periodMs = 60000UL;
+    if (onWindowMs > periodMs) onWindowMs = periodMs;
+
+    unsigned long elapsed = (now - stirCycleStart) % periodMs;
+    driveStirrer(elapsed < onWindowMs);
+  } 
+  else if (stirMode == 3) {
+    // TIMED RUN (run continuously for stirTimedMin, then switch to OFF)
+    unsigned long durationMs = stirTimedMin * 60000UL;
+    if (now - stirCycleStart < durationMs) {
+      driveStirrer(true);
+    } else {
+      stirMode = 0;
+      driveStirrer(false);
+    }
+  }
 }
 
 // ==========================================
@@ -114,10 +140,7 @@ void sendSlavePing(byte id) {
 // ==========================================
 void setup() {
   Serial.begin(115200);  // USB to Raspberry Pi
-  Serial1.begin(9600);   // RS485 to Slave Mega Pro
-
-  pinMode(RS485_CTRL_PIN, OUTPUT);
-  digitalWrite(RS485_CTRL_PIN, LOW);
+  Serial1.begin(9600);   // Direct UART to Slave Mega Pro
 
   pinMode(WATER_SENSOR_PIN, INPUT);
   pinMode(SYSTEM_SWITCH_PIN, INPUT_PULLUP);
@@ -130,6 +153,7 @@ void setup() {
   bathSensor.setWaitForConversion(false);
   bathSensor.requestTemperatures();
   lastTempRequest = millis();
+  stirCycleStart = millis();
 }
 
 // ==========================================
@@ -150,7 +174,7 @@ void loop() {
     lastTempRequest = now;
   }
 
-  // 2. Poll Single Slave Mega Pro (#1)
+  // 2. Poll Slave Mega Pro (#1)
   if (now - lastSlavePollTime >= SLAVE_POLL_INTERVAL) {
     sendSlavePing(1);
     lastSlavePollTime = now;
@@ -216,7 +240,7 @@ void loop() {
     currentMode = MODE_OFF;
   }
 
-// 5. Debounced Water Level Verification (Virtual Bypass)
+  // 5. Water Level Verification (Virtual Bypass)
   int waterRaw = 1023;
   waterFaultCounter = 0;
   bool waterDepleted = false;
@@ -224,28 +248,39 @@ void loop() {
   bool bathSensorOk = (waterTemp > 0.0 && waterTemp < 85.0);
   bool slaveActive = ((now - lastSlavePacketTime) < SLAVE_TIMEOUT_MS);
 
-  // 6. Actuator Logic & Emergency Cutoffs
-  if (currentMode == MODE_OFF || waterDepleted || !bathSensorOk || !slaveActive) {
+  // 6. Master Mode, Overrides & Hysteresis Control
+  if (currentMode == MODE_OFF || waterDepleted) {
     forceAllOff();
-  } 
-  else if (currentMode == MODE_AUTO) {
-    drivePump(true);
-
-    if (waterTemp >= MAX_WATER_BATH_TEMP) {
-      driveHeater(false);
-    } 
-    else if (!heaterState && currentBottleTemp < (TARGET_BOTTLE_TEMP - BOTTLE_HYSTERESIS)) {
-      driveHeater(true);
-    } 
-    else if (heaterState && currentBottleTemp >= TARGET_BOTTLE_TEMP) {
-      driveHeater(false);
-    }
-
-    if (waterTemp >= FAN_EMERGENCY_TEMP) {
-      digitalWrite(STIRRER_PIN, HIGH);
+  } else {
+    // --- PUMP LOGIC ---
+    if (pumpOverride == 1) {
+      drivePump(true);
+    } else if (pumpOverride == 2) {
+      drivePump(false);
     } else {
-      digitalWrite(STIRRER_PIN, LOW);
+      // AUTO Pump: runs when bath & slave sensors are healthy
+      drivePump(bathSensorOk && slaveActive);
     }
+
+    // --- HEATER LOGIC ---
+    bool overTempCeiling = (bathSensorOk && waterTemp >= MAX_WATER_BATH_TEMP);
+    if (overTempCeiling || heaterOverride == 2) {
+      driveHeater(false);
+    } else if (heaterOverride == 1) {
+      driveHeater(true);
+    } else {
+      // AUTO Heater: Hysteresis around targetBottleTemp
+      if (!bathSensorOk || !slaveActive) {
+        driveHeater(false);
+      } else if (!heaterState && currentBottleTemp < (targetBottleTemp - bottleHysteresis)) {
+        driveHeater(true);
+      } else if (heaterState && currentBottleTemp >= targetBottleTemp) {
+        driveHeater(false);
+      }
+    }
+
+    // --- STIRRER LOGIC ---
+    updateStirrer(now);
   }
 
   // 7. Pi USB Interface Commands
@@ -254,7 +289,7 @@ void loop() {
     cmd.trim();
 
     if (cmd == "STATUS") {
-      sendTelemetryStatus(waterRaw);
+      sendTelemetryStatus(waterRaw, now);
     } 
     else if (cmd == "MODE_AUTO") {
       currentMode = MODE_AUTO;
@@ -263,19 +298,74 @@ void loop() {
       currentMode = MODE_OFF;
       forceAllOff();
     }
+    else if (cmd == "HEATER_AUTO") { heaterOverride = 0; }
+    else if (cmd == "HEATER_ON")   { heaterOverride = 1; }
+    else if (cmd == "HEATER_OFF")  { heaterOverride = 2; driveHeater(false); }
+    else if (cmd == "PUMP_AUTO")   { pumpOverride = 0; }
+    else if (cmd == "PUMP_ON")     { pumpOverride = 1; }
+    else if (cmd == "PUMP_OFF")    { pumpOverride = 2; drivePump(false); }
+    else if (cmd.startsWith("STIR:")) {
+      // Format: STIR:<mode_int>:<interval_or_timed_min>:<pulse_sec>
+      int p1 = cmd.indexOf(':');
+      int p2 = cmd.indexOf(':', p1 + 1);
+      int p3 = cmd.indexOf(':', p2 + 1);
+      if (p1 > 0 && p2 > p1 && p3 > p2) {
+        int m = cmd.substring(p1 + 1, p2).toInt();
+        long mins = cmd.substring(p2 + 1, p3).toInt();
+        long secs = cmd.substring(p3 + 1).toInt();
+        stirMode = constrain(m, 0, 3);
+        if (mins > 0) {
+          if (stirMode == 2) stirIntervalMin = mins;
+          if (stirMode == 3) stirTimedMin = mins;
+        }
+        if (secs > 0) stirPulseSec = secs;
+        stirCycleStart = now;
+        updateStirrer(now);
+      }
+    }
+    else if (cmd.startsWith("TEMP:")) {
+      // Format: TEMP:<target_float>:<hyst_float>
+      int p1 = cmd.indexOf(':');
+      int p2 = cmd.indexOf(':', p1 + 1);
+      if (p1 > 0 && p2 > p1) {
+        float t = cmd.substring(p1 + 1, p2).toFloat();
+        float h = cmd.substring(p2 + 1).toFloat();
+        if (t >= 20.0 && t <= 50.0) targetBottleTemp = t;
+        if (h >= 0.1 && h <= 5.0)   bottleHysteresis = h;
+      }
+    }
   }
 }
 
-void sendTelemetryStatus(int waterRaw) {
-  StaticJsonDocument<256> doc;
+void sendTelemetryStatus(int waterRaw, unsigned long now) {
+  StaticJsonDocument<384> doc;
   doc["type"] = "master_status";
   doc["water_temp"] = (waterTemp > -50.0) ? serialized(String(waterTemp, 2)) : serialized(String(-999.0));
   doc["bottle_temp_avg"] = bottleTelemetryValid ? serialized(String(currentBottleTemp, 2)) : serialized(String(-999.0));
   doc["heater"] = heaterState ? 1 : 0;
   doc["pump"] = pumpState ? 1 : 0;
-  doc["fan"] = digitalRead(STIRRER_PIN);
+  doc["stirrer"] = stirrerState ? 1 : 0;
+  doc["heater_mode"] = (heaterOverride == 1) ? "ON" : ((heaterOverride == 2) ? "OFF" : "AUTO");
+  doc["pump_mode"] = (pumpOverride == 1) ? "ON" : ((pumpOverride == 2) ? "OFF" : "AUTO");
+
+  const char* sModes[] = {"OFF", "ON", "PULSE", "TIMED"};
+  doc["stir_mode"] = sModes[stirMode];
+  doc["stir_int_min"] = stirIntervalMin;
+  doc["stir_pulse_sec"] = stirPulseSec;
+  doc["stir_timed_min"] = stirTimedMin;
+
+  // Remaining seconds for Timed Run mode
+  long remSec = 0;
+  if (stirMode == 3) {
+    unsigned long durMs = stirTimedMin * 60000UL;
+    unsigned long el = now - stirCycleStart;
+    if (el < durMs) remSec = (durMs - el) / 1000UL;
+  }
+  doc["stir_rem_sec"] = remSec;
+
+  doc["target_temp"] = serialized(String(targetBottleTemp, 1));
+  doc["hysteresis"] = serialized(String(bottleHysteresis, 1));
   doc["water_low"] = (waterFaultCounter >= WATER_FAULT_LIMIT) ? 1 : 0;
-  doc["water_adc"] = waterRaw;
   doc["system_mode"] = (currentMode == MODE_AUTO) ? "AUTO" : "OFF";
 
   serializeJson(doc, Serial);
