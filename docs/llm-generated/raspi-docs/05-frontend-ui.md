@@ -53,6 +53,10 @@ raises all text by 20 %. Changing the one variable rescales the page. See
 [pi-kiosk-font-scale.md](../pi-kiosk-font-scale.md) for the deploy and reload
 procedure.
 
+### Sidebar navigation buttons
+
+The left CarPlay sidebar tabs (`.nav-btn`) have dimensions of 92×62 px (up from 78×54 px), 25×25 px SVG icons (up from 21×21 px), and `.nav-label` scaled via `calc(11.5px * var(--font-scale))` with font-weight 700 to improve touch target size and legibility on the 7-inch display.
+
 ## pH Metric Display
 
 In the Bottle grid, pH is formatted via `fmtMetric(b.ph, "", -1)` as a dimensionless numerical value (e.g. `6.85`), replacing the former `V` unit display (`2.50 V`).
