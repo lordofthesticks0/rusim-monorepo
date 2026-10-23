@@ -17,6 +17,7 @@
                 --ios-red: #ff3b30;
                 --ios-orange: #ff9500;
                 --divider: #dfe4ec;
+                --font-scale: 1.2;
             }
 
             * {
@@ -57,14 +58,14 @@
                 width: 100%;
             }
             .clock-time {
-                font-size: calc(18px * var(--font-scale));
+                font-size: calc(21px * var(--font-scale));
                 font-weight: 700;
                 color: var(--text-primary);
                 line-height: 1.1;
             }
             .clock-date {
-                font-size: calc(10px * var(--font-scale));
-                font-weight: 600;
+                font-size: calc(9px * var(--font-scale));
+                font-weight: 400;
                 color: var(--text-secondary);
                 text-transform: uppercase;
                 margin-top: 2px;
@@ -141,10 +142,10 @@
                 flex: 1;
                 height: 100vh;
                 overflow: hidden;
-                padding: 12px 20px 16px 20px;
+                padding: 10px 20px;
                 display: flex;
                 flex-direction: column;
-                gap: 12px;
+                gap: 10px;
             }
 
             .telemetry-dock {
@@ -252,6 +253,32 @@
             }
             .btn-mini-glass:active {
                 transform: scale(0.92);
+            }
+
+            .bottom-info-bar {
+                width: 100%;
+                max-width: 1100px;
+                margin: auto auto 0 auto;
+                background: var(--card-bg);
+                border: 1px solid var(--divider);
+                border-radius: 12px;
+                padding: 6px 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 20px;
+                font-size: calc(11px * var(--font-scale));
+                font-weight: 700;
+                color: var(--text-secondary);
+                letter-spacing: 1.5px;
+                text-transform: uppercase;
+                flex-shrink: 0;
+            }
+            .bottom-info-bar .hw-btn-sep {
+                color: var(--text-muted);
+            }
+            .main-viewport.settings-mode .bottom-info-bar {
+                max-width: 960px;
             }
 
             /* ==========================================
@@ -600,7 +627,6 @@
                 border: 1px solid var(--divider);
                 padding: 12px 16px;
                 border-radius: 18px;
-                border-left: 5px solid var(--ios-blue);
             }
             .bottle-title {
                 font-size: 16px;
@@ -608,7 +634,7 @@
                 margin-bottom: 6px;
                 border-bottom: 1px solid var(--divider);
                 padding-bottom: 4px;
-                color: #004799;
+                color: var(--text-primary);
             }
             .data-row {
                 display: flex;
@@ -1056,7 +1082,6 @@
                         <div class="ctrl-card">
                             <div class="ctrl-card-header">
                                 <span class="ctrl-card-title">Heater & Pump Control</span>
-                                <span style="font-size: 11px; color: var(--text-muted); font-weight: 600;">SSR D5 · Relay D3</span>
                             </div>
                             <div class="seg-row">
                                 <span class="seg-label">HEATER</span>
@@ -1079,8 +1104,7 @@
                         <!-- Bottle Avg Hysteresis Target Selector -->
                         <div class="ctrl-card">
                             <div class="ctrl-card-header">
-                                <span class="ctrl-card-title">Bottle Avg Hysteresis Target</span>
-                                <span id="hystBandSummary" style="font-size: 11px; color: #116629; font-weight: 700;">ON &lt; 38.7°C · OFF ≥ 39.0°C</span>
+                                <span class="ctrl-card-title">Bottle Hysteresis Target</span>
                             </div>
 
                             <div class="stepper-row">
@@ -1242,6 +1266,15 @@
                     </div>
                 </div>
             </div>
+
+            <!-- PHYSICAL BUTTONS INFO BAR -->
+            <div id="hwInfoBar" class="bottom-info-bar">
+                <span>STIR</span>
+                <span class="hw-btn-sep">·</span>
+                <span>PUMP</span>
+                <span class="hw-btn-sep">·</span>
+                <span>HEAT</span>
+            </div>
         </main>
 
         <!-- LAN DOWNLOAD MODAL -->
@@ -1374,11 +1407,9 @@
             }
 
             function renderHystSummary() {
-                const onTemp = (ctrlState.targetTemp - ctrlState.hysteresis).toFixed(1);
                 const offTemp = ctrlState.targetTemp.toFixed(1);
                 setText(DOM.uiTargetTemp, `${offTemp}°C`);
                 setText(DOM.uiHystVal, `${ctrlState.hysteresis.toFixed(1)}°C`);
-                setText(DOM.hystBandSummary, `ON < ${onTemp}°C · OFF ≥ ${offTemp}°C`);
             }
 
             function adjustTarget(delta) {
