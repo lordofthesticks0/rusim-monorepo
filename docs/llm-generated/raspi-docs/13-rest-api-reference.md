@@ -5,8 +5,12 @@ served from `legacy/pi/water-control-system/web_control.py` (same file as
 `~/water-control-system/web_control.py`). Server: `0.0.0.0:5000`,
 `debug=False`, `threaded=True`.
 
-All responses are JSON unless stated otherwise. Only `/m/<filename>` has any
-authentication; every other route is open to anyone who can reach port 5000.
+The same process also runs a bare CSV download server on `0.0.0.0:7514`. It has
+no HTML UI and no authentication: every request returns a CSV file.
+
+All responses from port 5000 are JSON unless stated otherwise. Only
+`/m/<filename>` has any authentication; every other route is open to anyone who
+can reach port 5000. The port 7514 server is open to anyone who can reach it.
 
 ## Summary
 
@@ -18,8 +22,8 @@ authentication; every other route is open to anyone who can reach port 5000.
 | 4 | `/sys_stats` | GET | — | No |
 | 5 | `/reset_packets` | POST | — | No |
 | 6 | `/toggle_logging` | POST | — | No |
-| 7 | `/hotspot/start` | POST | `filename` | No |
-| 8 | `/hotspot/stop` | POST | — | No |
+| 7 | `/download/info` | POST | `filename` | No |
+| 8 | `GET http://<pi>:7514/` | GET | — | No (separate server) |
 | 9 | `/m/<filename>` | GET, POST | form `username`, `password` | No |
 | 10 | `/set_mode` | POST | `mode` | **Yes — heater, pump, fan** |
 | 11 | `/command` | POST | `command` | No (powers off the Pi) |
@@ -178,38 +182,47 @@ while logging is on.
 {"status": "success", "logging": true}
 ```
 
-### 7. `POST /hotspot/start`
+### 7. `POST /download/info`
 
-Body: `{"filename": "2026-10-22.csv"}`. The file must exist in `logs/`,
-otherwise HTTP 400 with `{"status":"error","message":"Select a valid log file first."}`.
+Body: `{"filename": "2026-10-22.csv"}`. The file must exist in `logs/` and end
+in `.csv`, otherwise HTTP 400 with
+`{"status":"error","message":"Select a valid log file first."}`. If `eth0` has
+no IPv4 address, HTTP 503 with
+`{"status":"error","message":"No LAN connection available."}`.
 
-Runs, ignoring failures:
-
-1. `sudo nmcli radio wifi on`
-2. `sudo nmcli con down invitro-hotspot`
-3. `sudo nmcli device wifi hotspot ifname wlan0 con-name invitro-hotspot ssid InVitro-Hotspot password invitrowifi`
-
-Then builds `http://<wlan-ip>:5000/m/<filename>` and returns:
+Sets the in-memory `download_target` to the selected basename and returns:
 
 | Field | Value |
 |---|---|
-| `ssid` | `InVitro-Hotspot` |
-| `wifi_pass` | `invitrowifi` |
-| `portal_user` | `invitro` |
-| `portal_pass` | `password` |
-| `url` | Download URL for the selected log |
-| `wifi_qr` | PNG data URI of the WIFI: join string |
-| `url_qr` | PNG data URI of the download URL |
+| `status` | `success` |
+| `filename` | Selected log basename |
+| `ip` | `eth0` IPv4 address |
+| `port` | `7514` |
+| `url` | `http://<eth0-ip>:7514/` |
+| `url_qr` | PNG data URI of `url` |
 
-`wifi_qr` and `url_qr` are empty strings when the `qrcode` package is missing.
+`url_qr` is an empty string when the `qrcode` package is missing. No hotspot is
+started; `wlan0` stays off.
 
-Credentials are constants at the top of `web_control.py` and are returned to
-any unauthenticated caller.
+### 8. `GET http://<pi>:7514/` (separate server)
 
-### 8. `POST /hotspot/stop`
+A `ThreadingHTTPServer` started by `web_control.py` on `0.0.0.0:7514`. It has
+no HTML page, no login form, and no directory listing.
 
-Runs `sudo nmcli con down invitro-hotspot` in the background and returns
-`{"status":"success"}`. It does not report the result of `nmcli`.
+- `GET /` returns the current `download_target` as an attachment. If no target
+  has been selected since the process started, it returns the newest `*.csv` in
+  `logs/`.
+- `GET /<filename>` returns that CSV from `logs/`.
+- Paths are reduced with `os.path.basename` and must end in `.csv`; everything
+  else is HTTP 404.
+- Headers include `Content-Type: text/csv; charset=utf-8`,
+  `Content-Disposition: attachment; filename="<filename>"`, and
+  `Cache-Control: no-store`.
+- `HEAD` returns the same headers without a body.
+- The server streams the file in 64 KiB chunks.
+
+Because there is no authentication, anyone on the same LAN can download any CSV
+in `logs/` by name.
 
 ### 9. `GET|POST /m/<filename>`
 
@@ -326,8 +339,13 @@ Body: `{"datetime": "2026-10-22 14:30:00"}`. Runs
 
 ## Source-level notes
 
-- `PORTAL_USER`, `PORTAL_PASS`, `HOTSPOT_SSID` and `HOTSPOT_WIFI_PASS` are
-  hard-coded at the top of the file.
+- `DOWNLOAD_PORT = 7514` and the in-memory `download_target` control the direct
+  download server.
+- `PORTAL_USER` and `PORTAL_PASS` are used only by the legacy `/m/<filename>`
+  portal. `HOTSPOT_SSID` and `HOTSPOT_WIFI_PASS` are no longer used by the
+  download flow.
+- `disable_wifi_client_and_stop_hotspot()` still runs at startup and turns the
+  Wi-Fi radio off; the download server uses `eth0`.
 - Passwordless sudo is assumed for `nmcli`, `mount`, `shutdown`, `timedatectl`
   and `date`.
 - The serial port is opened once by `serial_worker`; `/raw` reads the in-memory
@@ -335,6 +353,8 @@ Body: `{"datetime": "2026-10-22 14:30:00"}`. Runs
   write to it by hand while Flask runs.
 - `/status`, `/raw`, `/sys_stats` and all control routes have no CSRF or origin
   check. On the LAN, any page can POST to them.
+- The port 7514 server has no authentication. Treat every CSV in `logs/` as
+  readable by anyone on the LAN.
 
 ---
 Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.

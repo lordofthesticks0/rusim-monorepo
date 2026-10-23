@@ -11,6 +11,8 @@ import threading
 import subprocess
 from collections import deque
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote, urlparse
 from flask import (
     Flask, render_template, render_template_string,
     jsonify, request, send_from_directory
@@ -35,6 +37,12 @@ HOTSPOT_SSID = "InVitro-Hotspot"
 HOTSPOT_WIFI_PASS = "invitrowifi"
 PORTAL_USER = "invitro"
 PORTAL_PASS = "password"
+
+# --- DIRECT CSV DOWNLOAD SERVER ---
+# A minimal HTTP server that serves the selected CSV over the LAN.
+# It intentionally has no HTML UI: every request returns the file.
+DOWNLOAD_PORT = 7514
+download_target = None
 
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(MOUNT_POINT, exist_ok=True)
@@ -171,6 +179,65 @@ def make_qr_data_uri(payload_text):
     return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
 
 hotspot_active = False
+
+
+class CsvDownloadHandler(BaseHTTPRequestHandler):
+    """Serve one CSV file. No index page, no login form, no directory listing."""
+
+    def _resolve_filename(self, path):
+        path = unquote(urlparse(path).path)
+        if path in ("", "/"):
+            if download_target:
+                return download_target
+            files = sorted(glob.glob(os.path.join(LOG_DIR, "*.csv")), reverse=True)
+            return os.path.basename(files[0]) if files else None
+        return os.path.basename(path)
+
+    def _send_csv(self, include_body=True):
+        filename = self._resolve_filename(self.path)
+        if not filename or not filename.lower().endswith(".csv"):
+            self.send_error(404, "No CSV selected")
+            return
+
+        filepath = os.path.join(LOG_DIR, filename)
+        if not os.path.isfile(filepath):
+            self.send_error(404, "CSV not found")
+            return
+
+        try:
+            size = os.path.getsize(filepath)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(size))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            if include_body:
+                with open(filepath, "rb") as f:
+                    shutil.copyfileobj(f, self.wfile, length=64 * 1024)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except OSError:
+            pass
+
+    def do_GET(self):
+        self._send_csv(include_body=True)
+
+    def do_HEAD(self):
+        self._send_csv(include_body=False)
+
+    def log_message(self, fmt, *args):
+        pass
+
+
+def start_download_server():
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", DOWNLOAD_PORT), CsvDownloadHandler)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    except OSError:
+        pass
+
 
 def get_interface_ip(ifname):
     try:
@@ -511,6 +578,7 @@ def log_data_to_csv():
 
 
 threading.Thread(target=disable_wifi_client_and_stop_hotspot, daemon=True).start()
+threading.Thread(target=start_download_server, daemon=True).start()
 threading.Thread(target=telemetry_worker, daemon=True).start()
 threading.Thread(target=serial_worker, daemon=True).start()
 threading.Thread(target=polling_worker, daemon=True).start()
@@ -655,52 +723,27 @@ def toggle_logging():
         log_data_to_csv()
     return jsonify({'status': 'success', 'logging': logging_active})
 
-@app.route('/hotspot/start', methods=['POST'])
-def start_hotspot():
-    global hotspot_active
-    filename = os.path.basename(request.json.get('filename', ''))
-    if not filename or not os.path.exists(os.path.join(LOG_DIR, filename)):
+@app.route('/download/info', methods=['POST'])
+def download_info():
+    global download_target
+    filename = os.path.basename((request.json or {}).get('filename', ''))
+    if not filename or not filename.lower().endswith('.csv') or not os.path.exists(os.path.join(LOG_DIR, filename)):
         return jsonify({'status': 'error', 'message': 'Select a valid log file first.'}), 400
 
-    try:
-        subprocess.run(["sudo", "nmcli", "radio", "wifi", "on"], check=False, timeout=4)
-        time.sleep(0.8)
-        subprocess.run(["sudo", "nmcli", "device", "disconnect", "wlan0"], check=False, timeout=4)
-        subprocess.run(["sudo", "nmcli", "con", "down", HOTSPOT_CON_NAME], check=False, timeout=4)
-        subprocess.run([
-            "sudo", "nmcli", "device", "wifi", "hotspot",
-            "ifname", "wlan0", "con-name", HOTSPOT_CON_NAME,
-            "ssid", HOTSPOT_SSID, "password", HOTSPOT_WIFI_PASS
-        ], check=False, timeout=10)
-        # Keep eth0 (LAN) as exclusive default route even while hotspot is running
-        subprocess.run([
-            "sudo", "nmcli", "con", "modify", HOTSPOT_CON_NAME,
-            "connection.autoconnect", "no",
-            "ipv4.never-default", "yes"
-        ], check=False, timeout=4)
-        hotspot_active = True
-    except Exception:
-        pass
+    ip = get_lan_ip()
+    if ip == "Disconnected":
+        return jsonify({'status': 'error', 'message': 'No LAN connection available.'}), 503
 
-    wlan_ip = get_wlan_ip()
-    download_url = f"http://{wlan_ip}:5000/m/{filename}"
-    wifi_qr_str = f"WIFI:T:WPA;S:{HOTSPOT_SSID};P:{HOTSPOT_WIFI_PASS};;"
-
+    download_target = filename
+    url = f"http://{ip}:{DOWNLOAD_PORT}/"
     return jsonify({
         'status': 'success',
-        'ssid': HOTSPOT_SSID,
-        'wifi_pass': HOTSPOT_WIFI_PASS,
-        'portal_user': PORTAL_USER,
-        'portal_pass': PORTAL_PASS,
-        'url': download_url,
-        'wifi_qr': make_qr_data_uri(wifi_qr_str),
-        'url_qr': make_qr_data_uri(download_url)
+        'filename': filename,
+        'ip': ip,
+        'port': DOWNLOAD_PORT,
+        'url': url,
+        'url_qr': make_qr_data_uri(url)
     })
-
-@app.route('/hotspot/stop', methods=['POST'])
-def stop_hotspot():
-    threading.Thread(target=disable_wifi_client_and_stop_hotspot, daemon=True).start()
-    return jsonify({'status': 'success'})
 
 @app.route('/m/<path:filename>', methods=['GET', 'POST'])
 def mobile_download_portal(filename):

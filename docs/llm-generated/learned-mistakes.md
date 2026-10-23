@@ -118,6 +118,16 @@
   payload is rejected by the phone with no diagnostic. Put the size in a shared
   constant so the header, the screen, and the serial command cannot disagree.
   (display-v9 `provision_ap`)
+- Do not install or enable a new system service to work around a hardware or
+  driver failure without confirming the approach first. On the Pi 3B
+  `brcmfmac43430`, NetworkManager's `nmcli device wifi hotspot` fails with
+  `key setting validation failed`; hostapd brought the AP up, but the user
+  wanted a same-LAN HTTP download instead. The hostapd package was left
+  installed and masked, not purged. Check whether a simpler LAN service fits
+  before changing the radio. (water-control-system hotspot)
+- "No UI" for a download endpoint means the HTTP response is the file, not an
+  HTML index or login page. Keep the kiosk-side QR, but do not add a web page
+  on the download port. (water-control-system port 7514)
 
 ---
 Model credit is unnecessary here.

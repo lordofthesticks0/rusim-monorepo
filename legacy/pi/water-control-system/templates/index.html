@@ -787,7 +787,7 @@
                 border: 1px solid var(--divider);
                 border-radius: 20px;
                 padding: 18px 22px;
-                max-width: 660px;
+                max-width: 380px;
                 width: 100%;
                 display: flex;
                 flex-direction: column;
@@ -802,7 +802,7 @@
             }
             .qr-steps-grid {
                 display: grid;
-                grid-template-columns: 1fr 1fr;
+                grid-template-columns: 1fr;
                 gap: 14px;
             }
             .qr-step-card {
@@ -1190,8 +1190,8 @@
                         <h2>LOGS & EXPORT</h2>
                         <div class="section-title">1. Tap Log to Select</div>
                         <div class="file-list-container" id="fileList">Loading...</div>
-                        <div class="section-title">2. Phone Wi-Fi Download</div>
-                        <button id="btnHotspotDownload" class="btn-blue" onclick="openHotspotModal()" disabled>DOWNLOAD VIA HOTSPOT</button>
+                        <div class="section-title">2. Phone Download (LAN)</div>
+                        <button id="btnHotspotDownload" class="btn-blue" onclick="openHotspotModal()" disabled>DOWNLOAD VIA LAN</button>
                         <div class="section-title">3. USB Drive Export</div>
                         <select id="driveSelect"><option value="">Scanning...</option></select>
                         <button id="btnExport" class="btn-green" onclick="exportSelected()" disabled>EXPORT TO USB</button>
@@ -1244,26 +1244,21 @@
             </div>
         </main>
 
-        <!-- HOTSPOT MODAL -->
+        <!-- LAN DOWNLOAD MODAL -->
         <div class="modal-backdrop" id="hotspotModal">
             <div class="hotspot-modal">
                 <div class="hotspot-modal-header">
                     <div>
-                        <div style="font-size: 17px; font-weight: 700;" id="hsModalTitle">Download Log via Phone Hotspot</div>
-                        <div style="font-size: 12px; color: var(--text-muted);" id="hsModalStatus">Starting Raspberry Pi Hotspot...</div>
+                        <div style="font-size: 17px; font-weight: 700;" id="hsModalTitle">Download Log via LAN</div>
+                        <div style="font-size: 12px; color: var(--text-muted);" id="hsModalStatus">Preparing download link...</div>
                     </div>
                     <button class="btn-danger" style="width: auto; margin: 0; padding: 7px 14px;" onclick="closeHotspotModal()">CLOSE</button>
                 </div>
                 <div class="qr-steps-grid">
                     <div class="qr-step-card">
-                        <span class="qr-step-badge">Step 1 · Connect Wi-Fi</span>
-                        <div class="qr-img-box" id="hsWifiQrBox"><span style="font-size: 11px;">Starting AP...</span></div>
-                        <div class="qr-meta">SSID: <strong id="hsSsidText">InVitro-Hotspot</strong><br />Key: <strong id="hsWifiPassText">invitrowifi</strong></div>
-                    </div>
-                    <div class="qr-step-card">
-                        <span class="qr-step-badge">Step 2 · Login & Download</span>
+                        <span class="qr-step-badge">Scan to Download CSV</span>
                         <div class="qr-img-box" id="hsUrlQrBox"><span style="font-size: 11px;">Generating QR...</span></div>
-                        <div class="qr-meta">User: <strong id="hsUserText">invitro</strong> | Pass: <strong id="hsPassText">password</strong><br /><span id="hsUrlText" style="font-size: 11px; color: var(--ios-blue);">http://10.42.0.1:5000</span></div>
+                        <div class="qr-meta">Phone must be on the same network.<br /><span id="hsUrlText" style="font-size: 11px; color: var(--ios-blue);">http://10.92.128.23:7514/</span></div>
                     </div>
                 </div>
             </div>
@@ -1301,7 +1296,7 @@
                 "btnHotspotDownload", "exportMsg", "inspectorFileTitle", "inspectorRowCount",
                 "logPreContent", "btnLiveTail", "btnExpandLog", "logsSplitLayout", "wifiName", "ipAddress",
                 "tzSelect", "timeInput", "timeMsg", "hotspotModal", "hsModalTitle", "hsModalStatus",
-                "hsWifiQrBox", "hsUrlQrBox", "hsSsidText", "hsWifiPassText", "hsUserText", "hsPassText", "hsUrlText",
+                "hsUrlQrBox", "hsUrlText",
                 "btnHeatAuto", "btnHeatOn", "btnHeatOff", "btnPumpAuto", "btnPumpOn", "btnPumpOff",
                 "uiTargetTemp", "uiHystVal", "hystBandSummary", "stirLiveBadge",
                 "btnStirOff", "btnStirOn", "btnStirPulse", "btnStirTimed",
@@ -1586,11 +1581,10 @@
                 if (!selectedFile) return;
                 DOM.hotspotModal.classList.add("open");
                 setText(DOM.hsModalTitle, `Download ${selectedFile}`);
-                setText(DOM.hsModalStatus, "Activating Wi-Fi Hotspot on wlan0...");
-                DOM.hsWifiQrBox.innerHTML = '<span style="font-size: 11px;">Starting AP...</span>';
+                setText(DOM.hsModalStatus, "Preparing download link...");
                 DOM.hsUrlQrBox.innerHTML = '<span style="font-size: 11px;">Generating QR...</span>';
 
-                fetch("/hotspot/start", {
+                fetch("/download/info", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ filename: selectedFile }),
@@ -1598,24 +1592,18 @@
                     .then((r) => r.json())
                     .then((d) => {
                         if (d.status !== "success") {
-                            setText(DOM.hsModalStatus, d.message || "Failed to start hotspot.");
+                            setText(DOM.hsModalStatus, d.message || "Failed to prepare download.");
                             return;
                         }
-                        setText(DOM.hsModalStatus, "Hotspot Active · Scan Step 1 then Step 2");
-                        setText(DOM.hsSsidText, d.ssid);
-                        setText(DOM.hsWifiPassText, d.wifi_pass);
-                        setText(DOM.hsUserText, d.portal_user);
-                        setText(DOM.hsPassText, d.portal_pass);
+                        setText(DOM.hsModalStatus, "Scan to download · same network required");
                         setText(DOM.hsUrlText, d.url);
-                        DOM.hsWifiQrBox.innerHTML = d.wifi_qr ? `<img src="${d.wifi_qr}" />` : "Install python3-qrcode";
-                        if (d.url_qr) DOM.hsUrlQrBox.innerHTML = `<img src="${d.url_qr}" />`;
+                        DOM.hsUrlQrBox.innerHTML = d.url_qr ? `<img src="${d.url_qr}" />` : "Install python3-qrcode";
                     })
-                    .catch(() => setText(DOM.hsModalStatus, "Error starting hotspot."));
+                    .catch(() => setText(DOM.hsModalStatus, "Error preparing download."));
             }
 
             function closeHotspotModal() {
                 DOM.hotspotModal.classList.remove("open");
-                fetch("/hotspot/stop", { method: "POST" }).catch(() => {});
             }
 
             function loadDrives() {
