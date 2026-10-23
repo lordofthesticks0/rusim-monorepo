@@ -6,7 +6,7 @@
 // PIN DEFINITIONS
 // ==========================================
 #define TEMP_SENSOR_PIN   2     // DS18B20 Water bath sensor
-#define PUMP_PIN          3     // Circulation pump relay
+#define PUMP_PIN          3     // Circulation pump MOSFET (Active-HIGH, R385 12VDC diaphragm pump)
 #define FAN_PIN           4     // Exhaust fan
 #define HEATER_PIN        5     // 300W Heater SSR (Active HIGH trigger, 0V = OFF)
 #define SYSTEM_SWITCH_PIN 6     // Optional physical AUTO / OFF toggle
@@ -49,12 +49,8 @@ String slaveRxBuffer = "";
 // ACTUATOR DRIVERS
 // ==========================================
 void drivePump(bool state) {
-  if (state) {
-    pinMode(PUMP_PIN, OUTPUT);
-    digitalWrite(PUMP_PIN, LOW); // Active-LOW turn ON
-  } else {
-    pinMode(PUMP_PIN, INPUT);    // High-Z disconnect (cuts current sink to turn relay OFF)
-  }
+  pinMode(PUMP_PIN, OUTPUT);
+  digitalWrite(PUMP_PIN, state ? HIGH : LOW);
   pumpState = state;
 }
 

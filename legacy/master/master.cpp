@@ -7,7 +7,7 @@
 // PIN DEFINITIONS
 // ==========================================
 #define TEMP_SENSOR_PIN   2     // DS18B20 Water bath sensor
-#define PUMP_PIN          3     // Circulation pump relay (Active-LOW)
+#define PUMP_PIN          3     // Circulation pump MOSFET (Active-HIGH, R385 12VDC diaphragm pump)
 #define STIRRER_PIN       4     // Stirrer MOSFET (Formerly FAN_PIN, Active-HIGH, PWM OC0B)
 #define HEATER_PIN        5     // 300W Heater SSR (Active-HIGH trigger, 0V = OFF)
 #define SYSTEM_SWITCH_PIN 6     // Physical AUTO / OFF toggle
@@ -71,12 +71,8 @@ void sendTelemetryStatus(int waterRaw, unsigned long now);
 // ACTUATOR DRIVERS
 // ==========================================
 void drivePump(bool state) {
-  if (state) {
-    pinMode(PUMP_PIN, OUTPUT);
-    digitalWrite(PUMP_PIN, LOW); // Active-LOW turn ON
-  } else {
-    pinMode(PUMP_PIN, INPUT);    // High-Z disconnect to turn relay OFF
-  }
+  pinMode(PUMP_PIN, OUTPUT);
+  digitalWrite(PUMP_PIN, state ? HIGH : LOW);
   pumpState = state;
 }
 
@@ -199,8 +195,12 @@ void setup() {
 
   pinMode(WATER_SENSOR_PIN, INPUT);
   pinMode(SYSTEM_SWITCH_PIN, INPUT_PULLUP);
+  pinMode(PUMP_PIN, OUTPUT);
+  digitalWrite(PUMP_PIN, LOW);
   pinMode(STIRRER_PIN, OUTPUT);
   digitalWrite(STIRRER_PIN, LOW);
+  pinMode(HEATER_PIN, OUTPUT);
+  digitalWrite(HEATER_PIN, LOW);
 
   forceAllOff();
 
