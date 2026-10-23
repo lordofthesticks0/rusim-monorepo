@@ -853,7 +853,7 @@ def export_data():
 @app.route('/get_ip')
 def get_ip():
     ip = get_lan_ip()
-    mode_str = "Ethernet (LAN) · Hotspot Active" if hotspot_active else "Ethernet (LAN) · Wi-Fi Reserved"
+    mode_str = "Ethernet (LAN) · Hotspot Active" if hotspot_active else "Ethernet (LAN)"
     return jsonify({'ip': ip, 'ssid': mode_str})
 
 @app.route('/get_timezones')

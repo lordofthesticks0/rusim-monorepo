@@ -59,7 +59,7 @@ The left CarPlay sidebar tabs (`.nav-btn`) have dimensions of 92×62 px (up from
 
 ## Physical Buttons Info Bar
 
-An on-screen bottom legend bar (`#hwInfoBar`, class `.bottom-info-bar`) is fixed at the bottom of the main viewport across all tabs with text `STIR · PUMP · HEAT`. It aligns with the external physical buttons mounted beneath the display enclosure to label their hardware actions.
+An on-screen bottom legend bar (`#hwInfoBar`, class `.bottom-info-bar`) is displayed at the bottom of the main viewport exclusively on the Home (`water`) and Settings (`settings`) tabs with text `STIR · PUMP · HEAT`. It is hidden on Controls, Bottle, and Logs tabs to provide maximum vertical space for data grids and controls.
 
 ## Bottle Cards Styling
 

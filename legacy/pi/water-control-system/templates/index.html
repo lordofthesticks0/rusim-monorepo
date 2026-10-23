@@ -256,6 +256,7 @@
             }
 
             .bottom-info-bar {
+                display: none;
                 width: 100%;
                 max-width: 1100px;
                 margin: auto auto 0 auto;
@@ -263,7 +264,6 @@
                 border: 1px solid var(--divider);
                 border-radius: 12px;
                 padding: 6px 16px;
-                display: flex;
                 align-items: center;
                 justify-content: center;
                 gap: 20px;
@@ -273,6 +273,10 @@
                 letter-spacing: 1.5px;
                 text-transform: uppercase;
                 flex-shrink: 0;
+            }
+            #pageWater.active ~ .bottom-info-bar,
+            #pageSettings.active ~ .bottom-info-bar {
+                display: flex;
             }
             .bottom-info-bar .hw-btn-sep {
                 color: var(--text-muted);
@@ -1329,7 +1333,7 @@
                 "btnHotspotDownload", "exportMsg", "inspectorFileTitle", "inspectorRowCount",
                 "logPreContent", "btnLiveTail", "btnExpandLog", "logsSplitLayout", "wifiName", "ipAddress",
                 "tzSelect", "timeInput", "timeMsg", "hotspotModal", "hsModalTitle", "hsModalStatus",
-                "hsUrlQrBox", "hsUrlText",
+                "hsUrlQrBox", "hsUrlText", "hwInfoBar",
                 "btnHeatAuto", "btnHeatOn", "btnHeatOff", "btnPumpAuto", "btnPumpOn", "btnPumpOff",
                 "uiTargetTemp", "uiHystVal", "hystBandSummary", "stirLiveBadge",
                 "btnStirOff", "btnStirOn", "btnStirPulse", "btnStirTimed",
@@ -1371,6 +1375,9 @@
                 document.querySelectorAll(".nav-btn").forEach((el) => el.classList.remove("active"));
                 document.getElementById("page" + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add("active");
                 document.getElementById("tab" + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add("active");
+                if (DOM.hwInfoBar) {
+                    DOM.hwInfoBar.style.display = (tab === "water" || tab === "settings") ? "flex" : "none";
+                }
 
                 if (tab === "data") {
                     loadFiles();
@@ -1681,7 +1688,8 @@
                     .then((r) => r.json())
                     .then((d) => {
                         setText(DOM.ipAddress, d.ip);
-                        setText(DOM.wifiName, d.ssid);
+                        const cleanSsid = (d.ssid || "").replace(/\s*·?\s*(?:Wi-Fi\s+Reserved|Reserved\s+for\s+Wi-Fi)/gi, "").trim();
+                        setText(DOM.wifiName, cleanSsid || "Ethernet (LAN)");
                     });
             }
             function loadTimezones() {
