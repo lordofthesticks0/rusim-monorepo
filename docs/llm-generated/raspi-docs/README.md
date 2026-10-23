@@ -35,6 +35,8 @@ Role: kiosk-style controller for a **bioreactor / water-bath experiment rig**. T
 10. [`10-security-and-caveats.md`](10-security-and-caveats.md) — risks, offline state, observations
 11. [`11-key-paths.md`](11-key-paths.md) — quick path reference
 12. [`12-copies-and-git-state.md`](12-copies-and-git-state.md) — the three project copies and their uncommitted changes
+13. [`13-rest-api-reference.md`](13-rest-api-reference.md) — every Flask route with request/response shapes, heater-off procedure, stopping the service safely
+14. [`14-leaf-reader.md`](14-leaf-reader.md) — `leaf` terminal reader: aarch64 cross-compile on the dev machine, rebuild script
 
 ## Architecture at a glance
 

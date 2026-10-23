@@ -124,6 +124,7 @@ Agent-written documentation of the live `invitrocontroller` Raspberry Pi 3B syst
 | [raspi-docs/11-key-paths.md](llm-generated/raspi-docs/11-key-paths.md) | Quick path reference |
 | [raspi-docs/12-copies-and-git-state.md](llm-generated/raspi-docs/12-copies-and-git-state.md) | The three project copies and their uncommitted changes |
 | [raspi-docs/13-rest-api-reference.md](llm-generated/raspi-docs/13-rest-api-reference.md) | Every Flask route with request/response shapes, heater-off procedure, stopping the service safely |
+| [raspi-docs/14-leaf-reader.md](llm-generated/raspi-docs/14-leaf-reader.md) | `leaf` 0.2.0 terminal reader: aarch64 cross-compile on the dev machine, verification, rebuild script |
 
 ## 4. Hardware references
 
