@@ -46,6 +46,11 @@ bool stirTargetOn = false;
 uint8_t stirRampOriginPwm = 0;
 unsigned long stirRampOriginMs = 0;
 
+// Pump non-blocking slew-rate ramp state
+bool pumpTargetOn = false;
+uint8_t pumpRampOriginPwm = 0;
+unsigned long pumpRampOriginMs = 0;
+
 OneWire oneWire(TEMP_SENSOR_PIN);
 DallasTemperature bathSensor(&oneWire);
 
@@ -54,6 +59,7 @@ float waterTemp = -999.0;
 float currentBottleTemp = -999.0;
 bool heaterState = false;
 bool pumpState = false;
+uint8_t pumpPwm = 0;
 bool stirrerState = false;
 uint8_t stirrerPwm = 0;
 bool bottleTelemetryValid = false;
@@ -70,10 +76,11 @@ void sendTelemetryStatus(int waterRaw, unsigned long now);
 // ==========================================
 // ACTUATOR DRIVERS
 // ==========================================
-void drivePump(bool state) {
+void drivePumpPwm(uint8_t pwm) {
   pinMode(PUMP_PIN, OUTPUT);
-  digitalWrite(PUMP_PIN, state ? HIGH : LOW);
-  pumpState = state;
+  analogWrite(PUMP_PIN, pwm);
+  pumpPwm = pwm;
+  pumpState = (pwm > 0);
 }
 
 void driveHeater(bool state) {
@@ -120,9 +127,38 @@ void slewStirrer(bool wantOn, unsigned long now) {
   driveStirrerPwm(nextPwm);
 }
 
+void slewPump(bool wantOn, unsigned long now) {
+  if (wantOn != pumpTargetOn) {
+    pumpTargetOn = wantOn;
+    pumpRampOriginPwm = pumpPwm;
+    pumpRampOriginMs = now;
+  }
+
+  unsigned long elapsed = now - pumpRampOriginMs;
+  unsigned long delta = (elapsed * STIR_MAX_PWM) / STIR_RAMP_MS;
+
+  uint8_t nextPwm = 0;
+  if (pumpTargetOn) {
+    unsigned long target = (unsigned long)pumpRampOriginPwm + delta;
+    if (target > STIR_MAX_PWM) target = STIR_MAX_PWM;
+    if (target == 0 && STIR_MAX_PWM > 0) target = 1;
+    nextPwm = (uint8_t)target;
+  } else {
+    if (delta >= pumpRampOriginPwm) {
+      nextPwm = 0;
+    } else {
+      nextPwm = (uint8_t)(pumpRampOriginPwm - delta);
+    }
+  }
+
+  drivePumpPwm(nextPwm);
+}
+
 void forceAllOff() {
   driveHeater(false);
-  drivePump(false);
+  pumpTargetOn = false;
+  pumpRampOriginPwm = 0;
+  drivePumpPwm(0);
   stirTargetOn = false;
   stirRampOriginPwm = 0;
   driveStirrerPwm(0);
@@ -309,12 +345,12 @@ void loop() {
   } else {
     // --- PUMP LOGIC ---
     if (pumpOverride == 1) {
-      drivePump(true);
+      slewPump(true, now);
     } else if (pumpOverride == 2) {
-      drivePump(false);
+      slewPump(false, now);
     } else {
       // AUTO Pump: runs when bath & slave sensors are healthy
-      drivePump(bathSensorOk && slaveActive);
+      slewPump(bathSensorOk && slaveActive, now);
     }
 
     // --- HEATER LOGIC ---
@@ -361,7 +397,7 @@ void loop() {
     else if (cmd == "HEATER_OFF")  { heaterOverride = 2; driveHeater(false); }
     else if (cmd == "PUMP_AUTO")   { pumpOverride = 0; }
     else if (cmd == "PUMP_ON")     { pumpOverride = 1; }
-    else if (cmd == "PUMP_OFF")    { pumpOverride = 2; drivePump(false); }
+    else if (cmd == "PUMP_OFF")    { pumpOverride = 2; }
     else if (cmd.startsWith("STIR:")) {
       // Format: STIR:<mode_int>:<interval_or_timed_min>:<pulse_sec>
       int p1 = cmd.indexOf(':');
