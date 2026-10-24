@@ -76,9 +76,9 @@ The following inventories name every table and view found in the persistent proj
 
 ## Exposure and scope
 
-The dashboard's local Supabase configuration exposes `public`, `graphql_public`, and `device_data` through the API; it adds `public`, `extensions`, and `device_data` to the request search path. `device_data` must also be listed in the deployed project's API exposed schemas, which is a project setting rather than something migrations control. Without it, PostgREST resolves `device_data.*` against `public` and returns `PGRST205`.
+The dashboard's local Supabase configuration exposes only `device_data` through the API (`schemas = ["device_data"]`); it adds `public`, `extensions`, and `device_data` to the request search path. `device_data` must also be listed in the deployed project's API exposed schemas, which is a project setting rather than something migrations control. Without it, PostgREST resolves `device_data.*` against `public` and returns `PGRST205`.
 
-RLS being enabled is a table property and does not, by itself, describe the policies or grants. The legacy `public` tables still carry their original broad read policies, so they remain reachable by any caller who can query them even though the dashboard no longer reads them. Treat that schema as dead-but-exposed until it is dropped.
+RLS being enabled is a table property and does not, by itself, describe the policies or grants. `20261001000000_lock_down_public_schema_for_public_deploy.sql` drops the legacy `public` read policies, revokes all client grants, and removes those tables from the Realtime publication, so `public` is deny-by-default even though it still exists for rollback.
 
 The inventory records schema structure, not a general operational health assessment. It does not include every column of Supabase-managed internals, routine definitions, grants/policies, extension package versions, logs, or database contents. Use the live catalogs/MCP again before relying on this snapshot for migrations or access-control decisions.
 
@@ -104,7 +104,7 @@ Device `0` is provisioned by migration `20260930162100` with `bottle_count = 24`
 |---|---|---|
 | `device_id` | `integer` | Required foreign key to `device_data.devices.device_id`. |
 | `bottle_id` | `integer` | Required internal bottle id, currently `0..7` for the eight reporting channels on a 24-chamber device. Supabase and ESP32 values stay unchanged. The dashboard displays an id as chamber number `bottle_id + 1`; configured channels without rows remain no-data/disconnected. The column keeps its historical name. |
-| `experiment_id` | `integer` | Required, non-negative; `0` is the testing experiment and `1+` are regular experiments. There is no experiments table. **Not part of the primary key.** |
+| `experiment_id` | `integer` | Required, non-negative; `0` is the testing experiment and `1+` are regular experiments. Grouping column, not a foreign key. **Not part of the primary key.** |
 | `timestamp` | `timestamptz` | Required, timezone-aware sample time. **Part of the primary key.** |
 | `ph`, `pressure`, `temp`, `co2`, `ch4` | `real` | Nullable four-byte floating-point sensor values. A null means the bottle reported but that sensor produced no value, which differs from the bottle being absent from the sample entirely (disconnected). |
 
@@ -123,7 +123,7 @@ Supabase and ESP32 keep their existing 0-based ids. The dashboard maps an intern
 | `session_token` | `text` | Primary key; 64 lowercase hex characters (256 bits of randomness). |
 | `device_id` | `integer` | Required foreign key to `devices.device_id`, cascading on delete. |
 | `created_at` | `timestamptz` | Required, defaults to `now()`. |
-| `expires_at` | `timestamptz` | Required, must be later than `created_at`. Currently set to 24 hours after login. |
+| `expires_at` | `timestamptz` | Required, must be later than `created_at`. Set to 12 hours after login by the lockdown migration. |
 
 ### `device_data.experiments`
 

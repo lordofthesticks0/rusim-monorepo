@@ -13,8 +13,8 @@ readings, and a USB-serial line protocol lets a human mutate it. All open
 questions from the notes are parked; each stub carries a `TODO(WT32|HW)`.
 
 Locked decisions honoured: no staleness UI, no PIN on Control,
-hold-to-confirm 500 ms on binary toggles, no local log storage, 41 °C warn /
-45 °C breaker two-tier overheat, 30 s backlight sleep, duration 1–99 h,
+hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
+45 °C breaker two-tier overheat, 60 s backlight sleep, duration 1–99 h,
 5 sensors + trend per bottle, NULL-field bell with live list and no history.
 
 ## 2. Hardware / platform notes
@@ -32,30 +32,29 @@ hold-to-confirm 500 ms on binary toggles, no local log storage, 41 °C warn /
 
 | File | Role |
 |---|---|
-| `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_serial_init()` + `ui_init()`; `loop()` = USB serial poll → link poll → boot-gate poll → sleep tick → `lv_timer_handler()` |
+| `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_serial_init()` + `ui_init()`; `loop()` = USB serial poll → link poll → setup/home/control/info polls → clock → SoftAP poll → sleep tick → `lv_timer_handler()`, with all LVGL work suspended while the `PASSTH` tunnel is open |
 | `lv_conf.h` | Enables vs stock: `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART, BUTTONMATRIX, QRCODE (+CANVAS, required by qrcode)` = 1; fonts +12/+20/+28. `KEYBOARD` is now 0 (credential entry moved to QR, §12). **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
 | `link_serial.h/.cpp` | `rusim-line` v1 peer on `Serial1` (RX 18 / TX 17, 115200 8N1). Line parser, 5 s heartbeats, all inbound/outbound words, log forwarding, `PASSTH` tunnel. `Serial` stays USB debug only. Full wire spec in §10 and `link-serial-protocol.md` |
-| `screen_setup.h/.cpp` | `/setup` first-class route: 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + Start/Stop button. Shown first on boot and on WT32 `LOGINREQ`; leaves the gate on `RESULT OK`. No keyboard (§12); duration/exp number/run live on `/control`. It owns the SoftAP except while `/info` is up (§13). `RESULT FAIL` puts the wrong-password text on the panel, and the phone sees the same verdict (§12) |
+| `screen_setup.h/.cpp` | `/setup` first-class route (route 6): 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + Start/Stop button. `ui_init()` opens it first; WT32 `LOGINREQ` re-raises it; `RESULT OK` routes home. No keyboard (§12); duration/exp number/run live on `/control`. The SoftAP stays up while either `/setup` or `/info` is showing (§13). `RESULT FAIL` puts the wrong-password text on the panel, and the phone sees the same verdict (§12) |
 | `touch.h` | Unchanged GT911 glue |
-| `ui_config.h` | Counts (6 clusters × 4 bottles, 2 online), ranges, 500 ms / 30 s / 5 min timings, thresholds, pins, light palette (§13), `FW_VERSION`, `IS_DEBUG` debug gate (§14) |
+| `ui_config.h` | Counts (6 clusters × 4 bottles, 2 online), ranges, 2000 ms / 60 s / 5 min timings, thresholds, pins, light palette (§13), `FW_VERSION`, `IS_DEBUG` debug gate (§14) |
 | `fake_data.h/.cpp` | `AppState g`: experiment, setpoint, stirrer, POST, chamber temp, 6×4 bottles × 5 sensors + NULL flags + temp trend ring; `fake_init()` seeds 2 online / 4 offline; `fake_wt32_push()` jitters online values every 5 min (lv_timer) |
 | `serial_cmd.h/.cpp` | Human-typeable debug protocol over USB serial (see §5). Display-local only. Also `CREDS` and `AP` (§12) |
 | `provision_ap.h/.cpp` | SoftAP + web credential form on the display, staging into the same link pair as the `CREDS` serial command (§12). `/status` leads with a `waiting`/`success`/`fail` token and a reject gets the error page with a retry link |
 | `ui_shell.h/.cpp` | Status bar, content router, single blocking-modal primitive, bell logic, overheat eval, `ui_mk_*` styled helpers (no LVGL theme is enabled, so all styling is explicit) |
-| `screen_boot.h/.cpp` | `/boot` blocking gate: spinbox 1–99 h ±1 h + confirm; must confirm every boot |
 | `screen_home.h/.cpp` | `/home`: DATA / CONTROL / INFO nav + run summary + serial hint |
 | `screen_data.h/.cpp` | `/data` picker (6 clusters, offline greyed), `/data/X` 2×2 bottle grid ("node offline" inline), `/data/X/bottle_Y` 5 sensor rows + `lv_chart` temp trend (values ×10, range 300–450) |
-| `screen_control.h/.cpp` | `/control`: setpoint −/+ 0.1 °C (35.0–40.0, logs `[FAKE->WT32]`), stirrer + POST switches with hold-to-confirm progress bars, plus a `PUSH EXP` button that sends one immediate `EXPERIMENT` line for bench testing |
+| `screen_control.h/.cpp` | `/control`: setpoint −/+ 0.1 °C (35.0–40.0, logs `[FAKE->WT32]`), duration/experiment-number steppers, and stirrer + run switches built from `ui_hold_button` (2000 ms hold, progress ring), plus a button that sends one immediate `EXPERIMENT` line for bench testing |
 | `screen_info.h/.cpp` | `/info`: rebuilt on every open; fake storage/IP/HTTP/FW rows + real heap/PSRAM rows + fetch timestamp + a 180 px network QR with its own Start/Stop (§13). `screen_info_poll()` keeps the QR in step each loop |
 | `screen_sleep.h/.cpp` | Idle timer on last-touch millis; backlight off after 30 s, on at next touch tick |
 
 ## 4. Screen tree / state machine (as built)
 
 ```
-/boot (blocking gate, spinbox 1-99h, confirm) -> /home
+/setup (first route after boot; QR credential form) -> /home on RESULT OK
 /home -> /data (picker) -> /data/X (grid) -> /data/X/bottle_Y (5 sensors + chart)
-/home -> /control (setpoint, stirrer hold-500ms, POST hold-500ms)
-/home -> /info (fresh on open; network QR + Start/Stop, raises the same SoftAP as /setup)
+/home -> /control (setpoint, duration, run/stirrer hold-2000ms)
+/home -> /info (fresh on open; network QR + Start/Stop, shares the SoftAP with /setup)
 [any, post-confirm]  chamber>=41 -> warn modal (ack; re-arms <41)
                      chamber>=45 -> trip modal (stirrer fake-OFF; re-arms <45)
 [any]  30 s no touch -> backlight off -> touch -> back on
@@ -63,11 +62,12 @@ hold-to-confirm 500 ms on binary toggles, no local log storage, 41 °C warn /
 5-min lv_timer -> fake_wt32_push() -> bell + content refresh
 ```
 
-Boot gate is an overlay on the active screen (not in the content container),
-so it blocks all routes until confirmed. Overheat modals reuse the same
-single-modal primitive and can stack over any screen. `ui_refresh_current()`
-re-runs the current route builder after pushes/serial edits; the modal
-overlay is a sibling of the content container so refreshes never dismiss it.
+There is no boot gate. `ui_init()` calls `ui_show_setup()` and that route
+remains up until credentials are accepted or `IS_DEBUG` bypasses it.
+Overheat modals reuse the single-modal primitive and can stack over any
+screen. `ui_refresh_current()` re-runs the current route builder after
+pushes/serial edits; the modal overlay is a sibling of the content container
+so refreshes never dismiss it.
 
 ## 5. Fake-data serial protocol
 
@@ -77,7 +77,7 @@ USB serial, 115200, newline-terminated, case-insensitive command word:
 HELP | STATUS | PUSH | LINK
 TEMP 38.3            chamber temp (drives 41/45 UI; TRY: TEMP 41.5, TEMP 45.2, TEMP 37.0)
 SETPOINT 37.5        35.0-40.0, mirrors the /control stepper
-DURATION 24          1-99 whole hours, quick-polled by the master
+DURATION 24          1-99 whole hours; pushes EXPERIMENT to the WT32
 RUN ON|OFF           start/stop the experiment; each start increments EXP
 EXP 3                set the experiment number
 STIRRER ON|OFF       also logs [FAKE->WT32] like the on-screen toggle
@@ -85,6 +85,11 @@ POST ON|OFF
 NODE <0-5> ON|OFF    OFF nulls the whole node; ON clears its NULLs
 NULL <c> <b> <s>     set one field NULL   (s: 0 CO2,1 CH4,2 Press,3 pH,4 Temp)
 UNNULL <c> <b> <s>   clear one field NULL
+CREDS <user> <pass>  stage a portal pair (bench path; echoed scrollback)
+AP                   toggle the credential SoftAP, print both QR payloads
+MEM                  heap/PSRAM free, low-water and largest block
+PASSTH ON|OFF        raw USB <-> IO17/IO18 tunnel (§10)
+W32CMD <line>        send one arbitrary line to the WT32 (IS_DEBUG builds)
 ```
 
 There are deliberately **no on-screen debug buttons/modals for faking** —
@@ -107,10 +112,12 @@ live `C/B/sensor` lines plus a "+N more" tail. Offline clusters render inline
 
 ## 7. Hold-to-confirm implementation
 
-`screen_control.cpp` `HoldCtx` per toggle: `PRESSED` arms a 50 ms progress
-timer + records `t0`; `VALUE_CHANGED` commits only if `now - t0 >= 500 ms`,
-else reverts the switch to the committed `*flag` (guarded against recursive
-events) and shows a hint. Early release with no value change just disarms.
+`ui_hold_button.cpp` owns every binary toggle. `PRESSED` starts a 20 ms
+progress timer and records the start tick; the timer fills the arc and calls
+the commit callback once `lv_tick_elaps(start) >= UI_HOLD_TO_CONFIRM_MS`
+(2000 ms). `RELEASED` before that deletes the timer and leaves the state
+unchanged. The widget keeps its own `state`, so the caller only reacts to the
+commit callback.
 
 ## 8. Verify without hardware signals
 
@@ -122,7 +129,7 @@ On device (USB serial 115200): confirm the gate at 24 h → walk
 Home → Data → Cluster 0 → Bottle → back; open Cluster 4 (offline); tap bell;
 `/control` step setpoint, hold a toggle; `/info` twice (timestamps differ);
 `TEMP 41.5` → warn modal → ack; `TEMP 45.2` → trip modal; `TEMP 37` → re-arm;
-`NODE 2 ON` → bell count drops; wait 30 s → backlight off → touch → on.
+`NODE 2 ON` → bell count drops; wait 60 s → backlight off → touch → on.
 
 ## 9. Known gaps / next pass
 
@@ -248,9 +255,10 @@ Credentials remain RAM-only on both boards; nothing reaches NVS or flash.
 A rejected pair is visible in three places (`display-provisioning-ap.md` §7.1):
 the phone's result page turns red with an **Enter them again** link, the form
 that link returns to carries a banner until the next pair is staged, and the
-`/setup` status line carries the same wording. Retrying stages the pair and
-pulses the poll-request line (§10), so the WT32 re-reads it on the next loop
-pass instead of on its next 5 s cycle.
+`/setup` status line carries the same wording. Retrying calls
+`link_serial_set_credentials()`, which sends `CREDS` immediately, so the WT32
+acts on the corrected pair on its next loop pass instead of on its next 5 s
+heartbeat.
 
 Full detail: the WIFI: payload format and escaping rules, the cloaked-network
 tradeoff, the single-canvas re-encode, the `/status` state machine, and the
@@ -309,7 +317,7 @@ Branch on the existing flag instead of adding a new one, mark debug UI
 with a `DEBUG:` prefix, and never enable it in a production flash.
 
 ---
-Content generated by `opencode/muse-spark-1.3-contributor-free` in `opencode`.
+Content generated by `codebuff/deepseek-v4.1-flash` in `freebuff`.
 
 Update by `opencode/glm-5.3-flash-free` in `opencode`: LVGL version references corrected
 v9.3.0 -> v9.6.0, matching `platformio.ini` (`lvgl/lvgl@9.6.0`) and the 9.6 port.

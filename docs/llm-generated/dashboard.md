@@ -12,32 +12,32 @@ This document explains what the dashboard is, what it does from page load to sig
 
 It is **read-only**. There is no write path in the application. It talks to Supabase over PostgREST and RPC only.
 
-There is no UI framework, no state library, and no chart library. The chart is hand-built SVG path data computed in a 20-line function. The whole client is about 1,100 lines across five modules.
+There is no UI framework, no state library, and no chart library. The chart is hand-built SVG path data computed in a 20-line function. The client and its pure modules are about 1,600 lines; the tests add about 340.
 
 ### 1.1 File map
 
 | File | Lines | Responsibility |
 |---|---|---|
 | `index.tsx` | 5 | Mounts `<App/>` into `#root`, imports the stylesheet |
-| `src/App.tsx` | 697 | Everything visible: login screen, both views, all components, all chart math |
+| `src/App.tsx` | 696 | Everything visible: login screen, both views, all components, all chart math |
 | `src/data.ts` | 275 | Every Supabase read, the auth RPCs, and the non-numbering domain logic |
-| `src/chambers.ts` | 54 | Maps stored 0-based bottle ids to displayed chamber numbers and splits current presence |
+| `src/chambers.ts` | 58 | Maps stored 0-based bottle ids to displayed chamber numbers and splits current presence |
 | `src/auth.ts` | 110 | Session lifecycle: localStorage persistence, expiry timer, retry backoff |
 | `src/supabase.ts` | 72 | Client construction, schema pinning, session header injection |
-| `src/csv.ts` | 94 | RFC 4180 CSV serialisation and download |
-| `src/styles.css` | 53 | All styling, one declaration block per line |
+| `src/csv.ts` | 95 | RFC 4180 CSV serialisation and download |
+| `src/styles.css` | 244 | All styling, one declaration block per line |
 | `scripts/dev-db.ts` | 694 | Dev-only database seeding and token provisioning |
 | `supabase/migrations/*.sql` | 17 files | Schema, authentication, lockdown |
 | `netlify.toml` | 23 | Build config and security headers |
 | `src/types/domain.ts` | 60 | Hand-written domain types and experiment-id helpers |
 | `src/types/database.ts` | 840 | Supabase-generated schema types for `device_data` and legacy `public` |
-| `src/*.test.ts` | 318 | `bun test` suites for history grouping, monitoring isolation, chamber numbering, and CSV output |
+| `src/*.test.ts` | 338 | `bun test` suites for history grouping, monitoring isolation, chamber numbering, and CSV output |
 
 ### 1.2 What it is not
 
 - **Not a device control surface.** There is no write RPC, no command queue, no configuration UI. It observes.
 - **Not realtime.** No websocket, no subscription. See §5.4.
-- **Not fed by firmware.** See §11.
+- **Only indirectly fed by firmware.** Devices can push through `push_readings()` (§11), but the firmware's sensor poll does not enqueue yet, so the rows on screen are still synthetic unless something else writes them.
 
 ---
 
@@ -292,15 +292,15 @@ There is **no device filter in the query**. `fetchExperimentReadings` documents 
 
 ```js
 useEffect(() => {
-  if (view !== "monitoring" || pollSuspended || !liveExperiment) return;
+  if (!isMonitoringPollingEligible(view, pollSuspended)) return;
   const timer = window.setInterval(() => void loadData(), POLL_INTERVAL_MS);
   return () => window.clearInterval(timer);
 }, [view, pollSuspended, liveExperiment?.experiment_id, loadData]);
 ```
 
-`POLL_INTERVAL_MS` is 5 minutes 30 seconds — deliberately longer than the 10-minute staleness threshold, so each tick re-decides from fresh data rather than assuming continuity.
+`POLL_INTERVAL_MS` is 5 minutes 30 seconds — deliberately longer than the 10-minute staleness threshold, so each tick re-decides from fresh data rather than assuming continuity. `isMonitoringPollingEligible()` (`monitoring.ts`) only requires the Monitoring view and an unsuspended feed, so a newly started experiment is discovered without a page reload.
 
-Polling stops when: the view is not Monitoring, no experiment looks live, or a fetch has failed. `pollSuspended` is set on any error and cleared only on the next success, so a transient failure halts the live feed until the operator clicks "Refresh data". The inline comment frames this as intent: *"A failed fetch is treated as the end of the live feed, so polling stops until the operator refreshes by hand."*
+Polling stops when the view is not Monitoring or a fetch has failed. `pollSuspended` is set on any error and cleared only on the next success, so a transient failure halts the live feed until the operator clicks "Refresh data". The inline comment frames this as intent: *"A failed fetch is treated as the end of the live feed, so polling stops until the operator refreshes by hand."*
 
 **Realtime is deliberately unused.** The `x-device-session` custom header cannot be sent over a websocket, so a subscription could not be scoped to a device. Migration `20261001000000` explicitly removed the legacy `public` tables from the `supabase_realtime` publication to match.
 
@@ -310,7 +310,9 @@ The consequence is a worst-case latency of 5m30s for a device that samples every
 
 The default view, reached by the "Monitoring" nav tab.
 
-**Top bar** — connection status (`Loading` / `Unable to load` / `Data loaded` / `No readings`), the latest sample's localised timestamp, `Auto-refreshing` or `No live experiment`, and a sign-out link. The green `.pulse` dot beside the status is a static CSS colour and does not reflect state.
+**Top bar** — connection status (`Loading` / `Unable to load` / `Data loaded` / `No readings`), the latest sample's localised timestamp, `Auto-refreshing` or `No live experiment`, and a sign-out button. The `.pulse` dot tone follows the view state: `pending` while loading, `error` on failure, `ok` with data, `idle` with none.
+
+**Empty state** — when no experiment looks live, the body is replaced by a panel headed `Tidak ada eksperimen aktif` ("no active experiment") pointing at Experiment History. The poll keeps running, so starting an experiment repopulates the view.
 
 **Chamber selector** — a `<select>` with `bottleCount` options numbered `1` through `bottleCount`, defaulting to Chamber 1. Options retain internal values from `internalChamberIds(bottleCount)` and use `displayChamberNumber` for visible labels. This is the only client-side drill-down control in the whole app.
 
@@ -320,13 +322,13 @@ The default view, reached by the "Monitoring" nav tab.
 
 **Disconnection banner** — rendered only when a latest sample exists *and* at least one configured chamber is missing from it. With the default dev configuration (24 configured, chambers 1–8 reporting) this reads: "Disconnected at …: chambers Chamber 9, Chamber 10, … Chamber 24 sent no data."
 
-**Five metric cards** — pH, Temp, CO2, CH4, Pressure, read from the selected chamber's newest sample. Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as `-` with no unit and no "Latest" tag.
+**Five metric cards** — pH, Temp, CO2, CH4, Pressure, read from the selected chamber's newest sample in the active experiment. Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as `-` with "No reading".
 
-**One chart** — with a parameter picker defaulting to CH4, plotting the selected chamber's **entire** history across all experiments, which is why the panel heading reads "Across experiments". Fewer than two rows renders "Not enough data for chart."
+**One chart** — with a parameter picker defaulting to CH4, plotting the selected chamber's rows for the **active experiment only**; the panel heading still reads "Across experiments", which is the one label that no longer matches the data. Fewer than two rows renders "Not enough data for chart."
 
 ### 5.6 Live vs concluded is inferred, never stored
 
-There is no `experiments` table and no status column. `concluded` is derived purely from sample time:
+There is an `experiments` table for configuration (written through the device pull path), but no status column. `concluded` is derived purely from sample time:
 
 ```js
 export const CONCLUDED_AFTER_MS = 10 * 60 * 1000;
@@ -347,13 +349,13 @@ Reached by the "Experiment History" nav tab. Two-stage drill-down.
 
 **Stage 1 — the list.** Built from the *same* in-memory `readings` array as the Monitoring view, not a separate query. Each item shows the formatted experiment id, its reading count, a `Testing experiment` marker when the id is 0, Concluded/Live, and the last sample time.
 
-Selection defaults to the newest: `selectedExperimentId ?? experiments[0]?.experiment_id ?? null`.
+Selection starts empty; clicking the selected item clears it (`toggleExperimentSelection()`), and choosing another replaces it. A notice asks the operator to select an experiment until one is chosen.
 
 **Stage 2 — the detail.** A `useEffect` keyed on `activeExperimentId` fires `fetchExperimentReadings`, which pages identically but adds `.eq("experiment_id", id)` and orders by `bottle_id` ascending then `timestamp` ascending. A `cancelled` closure flag prevents state updates from a superseded request or an unmounted component.
 
 That ordering is load-bearing, and the comment says so: it keeps a multi-page read contiguous, so each chamber's samples stay together.
 
-**"Chamber Readings" sub-panel** — a chamber selector, five metric cards read from the selected chamber's newest sample (`selectedChamberReadings.at(-1)`), and five per-parameter charts in a grid.
+**"Chamber Readings" sub-panel** — a chamber selector, five metric cards read from the selected chamber's newest sample (`selectedChamberReadings.at(-1)`), and five per-parameter charts in a grid. The charts are interactive: each sample is a focusable circle, and hovering, focusing or clicking it shows a tooltip with timestamp, chamber, experiment, parameter and value (`getHistoryPointDetails()`).
 
 **"Results" sub-panel** — three sections: a four-card overview (Experiment, Status, Chambers, Readings), one Min/Avg/Max block per parameter inside each chamber card, and one card per chamber produced by `groupReadingsByChamber`.
 
@@ -571,13 +573,13 @@ It is retained for rollback, and `seed.sql` plus `config.toml` still seed it, so
 
 ---
 
-## 11. The missing writer
+## 11. The writer
 
-A grep of `firmware/` for `supabase`, `postgrest`, `readings`, `device_data`, and `https://` returns **no database integration**. The firmware targets are sensor calibration sketches and a display/UI project.
+`firmware/network-master/main.cpp` is the device side: it authenticates with the device token, fetches the latest experiment, and contains a bounded push queue that POSTs to `device_data.push_readings(jsonb)`. The migration `20261016000000_add_push_readings_and_device_tables.sql` grants that RPC and keeps direct `INSERT` on `readings` denied.
 
-**Nothing in this repository writes readings except `scripts/dev-db.ts`.** The dashboard is fully built on the read side, but every row it displays is synthetic.
+What is missing is the enqueue caller. The firmware's Mega poll decodes a sensor round and logs it (`migration-plan.md` §6) but does not build the `BottleReading[4]` that `pushEnqueueRound()` expects, so the queue stays dormant. The display still shows fake sensor values (`fake_data.cpp`).
 
-This is consistent with the unchecked root README item *"Integrate to data collection system"*, and with the `device_data.readings` design: `real` columns, nullable sensors, a real time-series primary key, and comments anticipating that *"a device can report that a sensor produced no value"* all describe an expected hardware ingest path that does not exist yet.
+So the write path exists end to end but has nothing feeding it: `scripts/dev-db.ts` remains the only thing that inserts rows today. The schema anticipates the real path — `real` columns, nullable sensors, a time-series primary key — and the RPC is ready for it.
 
 ---
 
@@ -589,18 +591,17 @@ The History list is derived from the same in-memory `readings` array, which is c
 
 The truncation notice only appears in the *detail* pane, so a vanished experiment is never explained. Only the Monitoring view has a per-experiment path to the full data, and it is the path that cannot reach the older rows.
 
-### 12.2 The status dot does not reflect state
+### 12.2 The chart heading says "Across experiments"
 
-The `.pulse` element beside the connection status is a hardcoded green in `styles.css`. It is purely decorative, yet it sits immediately left of a label that *does* reflect state (`Unable to load` next to a green "live" dot).
+The Monitoring chart is now filtered to the active experiment (`selectMonitoringReadings()`), but its eyebrow still reads "Across experiments". The label describes the previous behaviour.
 
 ### 12.3 Dead code
 
 | Symbol | Location | Status |
 |---|---|---|
-| `fetchDevice` | `data.ts:147` | Exported, never imported |
-| `ReadingWithStatus` | `data.ts:36` | Exported, never imported |
+| `ReadingWithStatus` | `data.ts` | Exported, never imported |
 | `Metadata` | `types/domain.ts:1` | Exported, never imported |
-| `getMetricValue` | `App.tsx:460` | Pure pass-through wrapper over `getParameterValue` |
+| `getMetricValue` | `App.tsx` | Pure pass-through wrapper over `getParameterValue` |
 | `.session-list`, `.session-item` | `styles.css:24-27` | No matching JSX |
 | `.experiment-status-card`, `.status-label`, `.experiment-code`, `.experiment-name` | `styles.css:6-10` | No matching JSX |
 | `.line-secondary` | `styles.css` | No matching JSX |
@@ -614,9 +615,7 @@ The `.pulse` element beside the connection status is a hardcoded green in `style
 | `auth.ts:80` — *"server throttle in `device_data.authenticate` (30 failures / 5 min globally)"* | No such throttle exists. It was dropped because a failed call rolls back its own counter. |
 | `data.ts:113` — handles `42900` "too many attempts" | No migration raises `42900`. The branch is dead. |
 | `signOut` comment — *"the session expires on its own within a day"* | TTL is now 12 hours. |
-| `docs/llm-generated/database.md` — "Currently set to 24 hours after login" | 12 hours. |
-| `docs/llm-generated/database.md` — "exposes `public`, `graphql_public`, and `device_data` through the API" | `config.toml` now lists only `device_data`. |
-| `docs/llm-generated/database.md` — "The legacy `public` tables still carry their original broad read policies" | Dropped by the lockdown migration. |
+
 
 ### 12.5 Security posture
 
@@ -675,9 +674,9 @@ Open items:
 | Session token | 64 hex / 256 bits | `sha256(uuid ‖ uuid)` |
 | Server `max_rows` | 1,000 | `supabase/config.toml` |
 | Exposed schemas | `["device_data"]` | `supabase/config.toml` |
-| Chart viewBox | `0 0 800 220` | `App.tsx:439` |
-| Chart plot band | y ∈ [30, 190] | `App.tsx:491` |
-| Flat-series y | 110 | `App.tsx:491` |
+| Chart viewBox | `0 0 800 220` | `Chart()` in `App.tsx` |
+| Chart plot band | y ∈ [30, 190] | `createChartPoints()` in `App.tsx` |
+| Flat-series y | 110 | `createChartPoints()` in `App.tsx` |
 | localStorage key | `rusim.device_session` | `auth.ts:5` |
 | Session header | `x-device-session` | `supabase.ts:26` |
 
@@ -704,11 +703,11 @@ Open items:
 
 Paste a device token → Postgres SHA-512s it, matches the digest against a stored hash, and returns a 256-bit session token scoped to that one device, valid 12 hours. The browser stores it in localStorage and sends it as `x-device-session` on every request. RLS resolves the header back to a `device_id`, and the query returns that device's rows and nothing else.
 
-The app pulls up to 5,000 rows newest-first, derives an experiment list by grouping on `experiment_id` — there is no experiments table — infers Live versus Concluded purely from whether the newest sample is under 10 minutes old, works out which configured chambers are missing from the newest sample and calls them disconnected, then renders four status cards, five metric cards, and one hand-built SVG chart for the selected chamber. It re-polls every 5m30s only while an experiment looks live, and halts permanently on any fetch error until Refresh is pressed.
+The app pulls up to 5,000 rows newest-first, derives an experiment list by grouping on `experiment_id`, infers Live versus Concluded purely from whether the newest sample is under 10 minutes old, selects the first live experiment, works out which configured chambers are missing from its newest sample and calls them disconnected, then renders four status cards, five metric cards, and one hand-built SVG chart for the selected chamber. It re-polls every 5m30s whenever Monitoring is open, and halts permanently on any fetch error until Refresh is pressed.
 
-The History tab reuses the same in-memory array to list experiments, then issues a second paged read for the selected one and shows per-parameter charts, cross-chamber min/average/max, and a CSV export of exactly the rows on screen.
+The History tab reuses the same in-memory array to list experiments, then issues a second paged read for the selected one and shows a chamber selector, per-parameter charts, per-chamber min/average/max, and a CSV export of exactly the rows on screen.
 
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.
+Content generated by `codebuff/deepseek-v4.1-flash` in `freebuff`.

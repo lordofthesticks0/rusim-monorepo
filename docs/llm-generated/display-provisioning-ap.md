@@ -6,7 +6,7 @@ that replace on-screen typing for the campus captive portal login. Source is
 `screen_setup.cpp` and the serial side in `serial_cmd.cpp`.
 
 The portal login itself is unchanged and still lives on the WT32:
-`network-master.md` §5. `display-wt32-link.md` describes the wire. This
+`network-master.md` §5. `link-serial-protocol.md` describes the wire. This
 document covers only where the credentials come from.
 
 ## 1. Why
@@ -102,7 +102,7 @@ explicitly rather than left to the widget's defaults.
 | 10 minutes with no HTTP request | AP torn down |
 | Tap "Stop", or send `AP` again | AP torn down |
 | Navigate off `/setup` | AP torn down |
-| `RESULT=success`, run starts | AP torn down |
+| `RESULT OK`, run starts | AP torn down |
 
 The AP is never started automatically. A board sitting on a bench with a
 reachable credential endpoint is a worse default than a board that has to be
@@ -493,7 +493,7 @@ Worth checking by hand:
 - Stop and restart the AP with the phone still attached. The screen returns to
   step 1, but no popup appears: the count never fell to zero, so this is not a
   new arrival.
-- Complete the login to RESULT=success while the popup is still up. The home
+- Complete the login to `RESULT OK` while the popup is still up. The home
   screen must come up clean, with no popup stranded over it.
 - `POST /creds` without `t` returns 403.
 - A phone left idle for 10 minutes finds the AP gone.
