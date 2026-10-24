@@ -1,7 +1,7 @@
 #include "screen_control.h"
 
 #include "fake_data.h"
-#include "link_modbus.h"
+#include "link_serial.h"
 #include "ui_config.h"
 #include "ui_hold_button.h"
 #include "ui_shell.h"
@@ -24,7 +24,7 @@ static lv_obj_t *s_intHint = nullptr;
 static bool s_dbSuggested = false;
 
 static void exp_mirror_link() {
-  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
 }
 
 static void setpoint_show() {
@@ -51,7 +51,7 @@ static void exp_show() {
 static void db_refresh_warn() {
   if (!ui_is_control()) return;
   if (s_expDesc == nullptr) return;
-  int latest = link_modbus_get_db_latest();
+  int latest = link_serial_get_db_latest();
   if (latest == -2) {
     lv_label_set_text(s_expDesc, "DB: waiting for sync");
     lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_DIM), LV_PART_MAIN);
@@ -182,10 +182,10 @@ static void on_exp_up(lv_event_t *e) {
 
 static void on_int_test(lv_event_t *e) {
   (void)e;
-  link_notify_pulse();
-  Serial.println("[INT] poll request -> WT32 IO14 (watch the WT32 serial)");
+  link_serial_emit_experiment();
+  Serial.println("[LINK] EXPERIMENT pushed to the WT32 now");
   if (s_intHint != nullptr) {
-    lv_label_set_text(s_intHint, "asked WT32 to poll now");
+    lv_label_set_text(s_intHint, "sent EXPERIMENT now");
   }
 }
 
@@ -261,10 +261,10 @@ void screen_control_show(lv_obj_t *parent) {
                              LV_PART_MAIN);
   exp_show();
 
-  // INT test left column
-  ui_mk_label(parent, "INT test (IO11 -> WT32 IO14)", 16, 96, 180, UI_COL_TEXT,
+  // Link push test, left column
+  ui_mk_label(parent, "Link test (EXPERIMENT push)", 16, 96, 180, UI_COL_TEXT,
               &lv_font_montserrat_14);
-  s_intBtn = ui_mk_button(parent, "PULSE INT", 16, 136, 160, 42, UI_COL_CARD);
+  s_intBtn = ui_mk_button(parent, "PUSH EXP", 16, 136, 160, 42, UI_COL_CARD);
   lv_obj_add_event_cb(s_intBtn, on_int_test, LV_EVENT_CLICKED, nullptr);
   s_intHint = ui_mk_label(parent, "", 16, 184, 180, UI_COL_DIM, &lv_font_montserrat_14);
 

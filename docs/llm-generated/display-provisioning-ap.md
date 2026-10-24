@@ -20,8 +20,9 @@ device now shows a QR code, and the phone does the typing.
 The design constraint that shaped the choice: the display cannot reach the
 portal. It has no wired network of its own, and `network-master` is the only
 board that talks to the campus network. So the display does not authenticate
-anything. It hosts a form, and whatever arrives is staged onto the existing
-Modbus registers. `network-master` required no changes at all.
+anything. It hosts a form, and whatever arrives is staged into the same serial
+link pair the touchscreen and the USB `CREDS` command use. `network-master`
+required no changes at all.
 
 ## 2. The two-step flow
 
@@ -225,14 +226,14 @@ Field handling on `POST /creds`:
 - `user` and `pass` are both required and non-empty after trimming. Phone
   keyboards add trailing spaces, which the portal rejects as a wrong password
   rather than as a typo.
-- Length is capped at `LINK_USER_MAX - 1` / `LINK_PASS_MAX - 1`, matching what
-  the Modbus registers hold. Over-long input is refused rather than silently
+- Length is capped at `LINK_USER_MAX - 1` / `LINK_PASS_MAX - 1`, matching the
+  link `CREDS` field caps. Over-long input is refused rather than silently
   truncated, because a truncated password fails at the portal with no useful
   diagnostic.
-- On success the handler calls `link_modbus_set_credentials()` and replies with
+- On success the handler calls `link_serial_set_credentials()` and replies with
   a page that polls `/status` every 1500 ms. Duration and experiment number
   are no longer part of the login form; they live on `/control` and are
-  quick-polled by the master.
+  quick-polled by the WT32.
 
 `/status` reports one of four states:
 
@@ -249,7 +250,7 @@ the page prints: `waiting:`, `success:`, or `fail:`.
 The page stops or retries on the token, not on a substring of the message, so
 re-wording a message cannot strand the page mid-poll. A reject also gets a link
 back to `/`, which is served with the matching banner (§7.1). The handler reads
-`link_modbus_result()`, not `link_modbus_take_result()`: the latter consumes
+`link_serial_result()`, not `link_serial_take_result()`: the latter consumes
 the pending flag and `screen_setup_poll()` owns it. If `/status` consumed it,
 the display would never route to `/home`.
 
@@ -266,9 +267,9 @@ is staged. That is what makes it survive the page navigation and clear itself on
 the retry; `creds_ready` is checked with it so a retry already in flight cannot
 put a stale banner over the new attempt.
 
-Submitting that retry stages the pair and pulses the poll-request line
-(`display-wt32-link.md` §4.3), so the WT32 re-reads it on its next loop pass
-rather than on its next 5 s cycle. The loop is: wrong password, red verdict,
+Submitting that retry stages the pair and sends `CREDS` immediately
+(`link-serial-protocol.md` §4.2), so the WT32 acts on it at once rather than
+on its next 5 s heartbeat. The loop is: wrong password, red verdict,
 correct it, immediate re-poll.
 
 No user-supplied text is interpolated into any HTML. The staged username is
@@ -276,21 +277,24 @@ never echoed to a page; the form reports state, not values.
 
 ## 8. Credential lifetime
 
-Unchanged from the RAM-only rule in `network-master.md` §6 and
-`display-wt32-link.md` §4.1:
+Unchanged from the RAM-only rule in `network-master.md` §3.3 and
+`link-serial-protocol.md` §4.3:
 
 1. The phone sends the pair over the AP.
-2. The display holds it in `link_modbus`'s `s_user` / `s_pass`, sets
-   `CREDS_READY`.
-3. The WT32 reads it, logs in, overwrites its own copy in `clearCreds()`.
-4. The WT32 writes `CREDS_READY=0`.
+2. The display holds it in `link_serial`'s `s_user` / `s_pass` and sends
+   `CREDS` immediately, repeating it every heartbeat until a verdict arrives.
+3. The WT32 decodes it, runs the login, then overwrites its working copy in
+   `clearCreds()`.
+4. `RESULT OK`/`FAIL` stops the re-push; the display keeps its copy so a
+   rebooted WT32 can be re-sent the pair.
 
 Nothing is written to NVS or flash on either board. The `arg()` Strings hold
 the password in heap for the duration of the handler; the handler assigns
 `String()` to them after staging to release the buffers early. That is
 best-effort, not a guarantee: the ESP32 heap is not scrubbed, so a password
 handled this way can survive in free heap until overwritten. The same is
-already true of the Modbus staging path, so this introduces nothing new, but
+already true of the touchscreen and USB staging paths, so this introduces
+nothing new, but
 it is why the rule is stated as "RAM only" rather than "erased".
 
 The USB serial `CREDS` command (`CREDS <user> <pass>`) is a third entry point
@@ -456,13 +460,13 @@ Wrong password, end to end (WT32 attached):
    display in 5 s (or at once on a poll request)`. The panel's `/setup` status
    line carries the same verdict.
 3. Tap **Enter them again**. The form comes back with the red banner above it.
-4. Send the correct pair. The display pulses IO11, the WT32 prints `[INT]
-   display staged new credentials; polling now` at once rather than up to 5 s
-   later, and the page turns green.
+4. Send the correct pair. The display sends `CREDS` at once, the WT32 logs
+   `[LINK] captured creds user='...'` immediately rather than on its next 5 s
+   heartbeat, and the page turns green.
 
-Without a WT32 attached, short display RX to TX to loop back Modbus frames
-(`display-wt32-link.md` §6), then `CREDS alice s3cret` over USB serial and
-`LINK` to confirm the registers took the values.
+Without a WT32 attached, short display IO18 to IO17 to loop back link lines
+(`link-serial-protocol.md` §10), then `CREDS alice s3cret` over USB serial and
+`LINK` to confirm the pair was staged.
 
 `AP` over USB serial prints both payloads without needing the screen, which is
 the fastest way to confirm the payload string on the bench:
@@ -500,8 +504,8 @@ Worth checking by hand:
 
 ## 13. Related documents
 
-- `display-docs.md` §10, §12 — the Modbus link and the `/setup` route.
-- `display-wt32-link.md` — the register map and both flows.
+- `display-docs.md` §10, §12 — the serial link and the `/setup` route.
+- `link-serial-protocol.md` — the wire spec and both flows.
 - `network-master.md` §5 — the portal login that consumes these credentials.
 - `captive-portal-workaround.md` §2.2, Phase 4 — the original plan for a
   SoftAP, written for the WT32. This is the same idea moved to the display.
@@ -509,3 +513,5 @@ Worth checking by hand:
 
 ---
 Content generated by `deepseek/deepseek-v4.1-flash` in `freebuff`.
+
+Update by `opencode/deepseek-v4.1-flash-free` in `opencode`: Modbus register staging replaced by the `CREDS` line; retry now sends `CREDS` immediately instead of pulsing IO11.

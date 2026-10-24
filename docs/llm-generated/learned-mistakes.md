@@ -131,3 +131,25 @@
 
 ---
 Model credit is unnecessary here.
+
+### 2026-10-24
+- The WT32-ETH01 has no USB port. Flashing uses a USB-UART adapter on 5V, GND,
+  RX and TX only, with `IO0` jumpered to GND during the upload and a power
+  cycle afterwards to run. That drill is the normal one, not a workaround for
+  the `PASSTH` tunnel. Do not write that the adapter auto-resets the board or
+  that the tunnel "loses a reset path" the adapter has: there is no RTS/DTR
+  reset on either path, so bootloader entry is manual in both cases.
+- A host serial open can reset a board and silently destroy a runtime-only
+  tunnel. The Sunton display's USB is a CH340 on UART0 (`GPIO43`/`GPIO44`), and
+  pyserial's `open()` drives DTR/RTS and reboots it within 50 ms, even with
+  `dtr=False, rts=False` set before `open()`; `dsrdtr=True` or `os.open()` plus
+  termios does not. Check for a fresh `ESP-ROM` banner before blaming the link.
+  `--before no_reset` does not help: it skips esptool's explicit reset sequence,
+  not the reset done by the serial library while opening the port.
+- When a helper starts returning raw bytes instead of a yes/no, move the marker
+  comparison with it. A caller that tested a capitalised marker
+  (`b"passthrough ON"`) against lowered output never matched, so a working
+  tunnel was reported as "did not confirm" and the upload was cancelled before
+  esptool ran. Lowercase both sides in one shared helper, and print the bytes
+  actually received on failure: the log showed the confirmation was there.
+  (scripts-hardware `network-master-passthrough.py`)

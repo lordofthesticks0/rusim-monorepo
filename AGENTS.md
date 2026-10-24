@@ -8,6 +8,8 @@ Do not open any documentation files unless you think it is relevant. There is pl
 
 This project requires mainly two things: `bun` and `pio`. Both need to be available in the terminal. Install them for the user if they are not yet installed.
 
+Before touching anything, always make sure you have the latest version of the code by pulling from the remote.
+
 ## Roles
 
 As an AI agent, your job scope will be limited to a small subset of this repo. This monorepo contains both firmware and the dashboard, as well as documentation. Your primary task will most likely fall to be one of the two:

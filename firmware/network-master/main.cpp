@@ -5,7 +5,7 @@
 #include <WiFiClientSecure.h>
 #include <time.h>
 
-#include <atomic>
+#include <cstdarg>
 #include <cstring>
 
 #include "supabase_ca.h"
@@ -14,94 +14,41 @@
 //
 // - Brings up the LAN8720 over RMII (variant defaults: ADDR 1, PWR 16,
 //   MDC 23, MDIO 18).
-// - Acts as Modbus RTU master (slave ID 1, 9600 8N1) over Serial1 to the
-//   display: AT-header TXD (IO17) = Serial1 TX, AT-header RXD (IO5) =
-//   Serial1 RX. Display IO17 (TX) -> WT32 IO5 (RX),
-//   Display IO18 (RX) <- WT32 IO17 (TX), plus common GND.
-//   Serial (USB-UART debug header, TX0/RX0) is debug only and never
-//   carries Modbus frames.
+// - Is a peer on the rusim-line v1 link to the display over UART0:
+//   Debug-header TXD (IO1) -> display IO18 (RX),
+//   Debug-header RXD (IO3) <- display IO17 (TX), 115200 8N1, common GND.
+//   Serial is therefore both the link and the log sink: every log line is
+//   emitted as "LOG <text>" and the display re-prints it on its own USB.
+//   Serial1 (IO5/IO17) is not opened; that pair is reserved for RS485.
 // - Gets the captive portal username/password from the display instead of
-//   the serial console. While credentials are missing the main loop pauses
-//   its network work and polls the display every 5 s. Each poll writes
-//   LOGIN_REQ=1, which raises the login gate on the display.
-// - Experiment state (duration, experiment number, running flag) is NOT
-//   captured at login; the master quick-polls 0x0060/0x0003/0x0004 so
-//   post-login edits on /control take effect without re-login.
+//   the serial console. Both ends declare their state every 5 s and push
+//   changes immediately; there is no master and no polling.
+// - Experiment state (duration, experiment number, running flag) arrives as
+//   EXPERIMENT lines, so post-login edits on /control take effect without
+//   re-login.
 // - Runs the proven ping-test portal login (trigger -> login page scan
 //   -> POST -> data-fetch verify), then loops ping of 1.1.1.1 plus an
 //   HTTPS fetch. A WALLED fetch in RUN falls back to NEED_CREDS for
 //   re-auth instead of halting.
 // - Credentials live in RAM only and are zeroed after use.
 //
-// Register map (must match firmware/display-v9/link_modbus.h):
-//   0x0000 LOGIN_REQ   master WR  1 = show the login gate
-//   0x0001 CREDS_READY slave set  master WR 0 to ack after reading
-//   0x0002 RESULT      master WR  0=none 1=success 2=fail
-//   0x0003 EXP_RUNNING slave RD  1 = experiment under way
-//   0x0004 EXP_NUM     slave RD  current experiment number
-//   0x0010-0x002F USERNAME 32 regs = 64 bytes ASCII NUL-padded
-//   0x0030-0x004F PASSWORD 32 regs = 64 bytes ASCII NUL-padded
-//   0x0060 DURATION_H 1 reg, 1-99
-//   0x0005 DB_LATEST  master WR. Latest experiment_id in DB, 0xFFFF = unknown
-//   0x0006 TIME_OK    master WR. 1 = NTP synced, 0 = no valid time yet
-//   0x0007 DB_BOTTLES master WR. bottle_count from authenticate(), 0xFFFF = unknown
-//   0x0008 PUSH_DROPS master WR. Buffered push rows dropped on overflow
-//                        (oldest-drop), saturated at 0xFFFF
-//   0x0070-0x0077 IP_ADDR 8 regs = 16 bytes ASCII NUL-padded, master WR
-//   0x0078 PING_MS 1 reg, master WR. Avg ping to 1.1.1.1 in ms,
-//                        0xFFFF = no data / ping failed
-//   0x0079 NET_UP 1 reg, master WR. 1 = WT32 has DHCP IP, 0 = link down
-// Pushed every RUN cycle so /info on the display shows the real IP and
-// the latest ping latency.
+// Wire protocol (must match firmware/display-v9/link_serial.h):
+//   display -> WT32: HELLO, EXPERIMENT run num dur, CREDS user pass, DUMP
+//   WT32 -> display: HELLO, LOGINREQ, RESULT OK|FAIL, NET ip up ping, DB ...
+// See docs/llm-generated/link-serial-protocol.md.
 
-#define LINK_RX_PIN 5   // AT-header RXD <- Display IO17 (TX)
-#define LINK_TX_PIN 17  // AT-header TXD -> Display IO18 (RX)
-#define LINK_BAUD 9600
-#define LINK_SLAVE_ID 1
+#define LINK_LINE_MAX 1024
+#define LINK_GAP_MS 50
+#define LINK_BEAT_MS 5000
+#define LINK_IP_MAX 16
+#define LINK_USER_MAX 64
+#define LINK_PASS_MAX 64
 
-// Poll-request line from the display. Display IO11 -> WT32 IO14 + common GND.
-// A HIGH pulse (20 ms, driven by the display's link_modbus) means "a new
-// credential pair is staged, poll now" and cuts the 5 s credential wait.
-// IO14 is non-strapping, so the display may pulse across a WT32 reboot.
-//
-// The ISR does nothing but set a flag: the Modbus transaction and its logs stay
-// in loop(). The flag is consumed in STAGE_NEED_CREDS, the only stage that can
-// poll for credentials, so a pulse that arrives while the master is mid-login
-// is worth one early poll afterwards and is never lost.
-//
-// TEST_LED is an optional external LED+1k to GND on IO2 (pulled low at boot,
-// safe for strapping). It blinks briefly on each request as a bench
-// confirmation that the line arrived; the onboard RX/TX LEDs (IO5/IO17) also
-// blink on traffic.
-#define POLL_REQ_PIN 14
+// Optional external LED + 1k to GND on IO2 (pulled low at boot, safe for
+// strapping). It blinks briefly on any line received from the display as a
+// bench confirmation that the link arrived.
 #define TEST_LED_PIN 2
 #define TEST_LED_MS 300
-// Atomic flag: set in the ISR, peeked for the bench LED, consumed in
-// STAGE_NEED_CREDS. Atomic store/load/exchange removes the data race of the
-// previous volatile bool (set in ISR, cleared in loop).
-static std::atomic<bool> s_pollRequest{false};
-static uint32_t s_ledOffMs = 0;
-static void IRAM_ATTR onPollRequest() { s_pollRequest.store(true); }
-
-#define LINK_REG_LOGIN_REQ 0x0000
-#define LINK_REG_CREDS_READY 0x0001
-#define LINK_REG_RESULT 0x0002
-#define LINK_REG_EXP_RUNNING 0x0003
-#define LINK_REG_EXP_NUM 0x0004
-#define LINK_REG_USER_BASE 0x0010
-#define LINK_REG_USER_REGS 32
-#define LINK_REG_PASS_BASE 0x0030
-#define LINK_REG_PASS_REGS 32
-#define LINK_REG_DURATION 0x0060
-#define LINK_REG_DB_LATEST 0x0005
-#define LINK_REG_TIME_OK 0x0006
-#define LINK_REG_DB_BOTTLES 0x0007
-#define LINK_REG_PUSH_DROPS 0x0008
-#define LINK_REG_IP_BASE 0x0070
-#define LINK_REG_IP_REGS 8
-#define LINK_REG_PING_MS 0x0078
-#define LINK_REG_NET_UP 0x0079
-#define LINK_PING_NONE 0xFFFF
 
 static const IPAddress kPingTarget(1, 1, 1, 1);
 static const uint8_t kPingCount = 3;
@@ -157,34 +104,51 @@ static const uint32_t kMinSampleUnix = 1735689600UL;
 static const uint32_t kCredPollMs = 5000;
 // Re-probe for an already-valid portal session while waiting for creds.
 // Without this the gate deadlocks when no login is needed: the display
-// waits for RESULT=success, but doLogin() (which detects "already through")
+// waits for RESULT OK, but doLogin() (which detects "already through")
 // is only reached after staged credentials arrive, which never come.
 static const uint32_t kAuthProbeMs = 30000;
 static uint32_t lastAuthProbeMs = (uint32_t)-30000;
 
 enum Stage { STAGE_WAIT_IP, STAGE_NEED_CREDS, STAGE_LOGIN, STAGE_RUN };
 static Stage stage = STAGE_WAIT_IP;
-// Fixed-size credential buffers (32 regs * 2 bytes = 64 chars + NUL).
-// No Arduino String here: avoids heap fragmentation from repeated
-// concat/realloc, and the password can be zeroed deterministically.
-static const size_t kCredCap = LINK_REG_USER_REGS * 2 + 1;
+static uint32_t stageAtMs = 0;
+static uint32_t lastBeatMs = 0;
+
+// Fixed-size credential buffers. No Arduino String here: avoids heap
+// fragmentation from repeated concat/realloc, and the password can be zeroed
+// deterministically.
+static const size_t kCredCap = LINK_USER_MAX + 1;
 static char username[kCredCap];
 static char password[kCredCap];
+// Last attempted pair, kept for the "same pair -> re-emit the verdict" rule.
+// RAM only, never a register, never flash.
+static char lastUser[kCredCap];
+static char lastPass[kCredCap];
+static bool haveVerdict = false;
+static bool lastVerdict = false;
+
 static int durationH = 24;
 static int expNum = 0;
 static bool expRunning = false;
-static uint32_t lastCredPollMs = 0;
-// Last values reported by the display's quick poll, so changes are logged
-// once instead of every cycle.
+// Last values received from the display, so changes are logged once.
 static int lastDurH = -1;
 static int lastExpNum = -1;
 static int lastExpRunning = -1;
 
 static volatile bool eth_connected = false;
+static volatile int ethEventCode = 0;  // set by the event task, logged in loop()
+static volatile bool netDirty = false;
+static int lastPingMs = -1;  // -1 = no measurement yet / failed
 
-// --- Modbus RTU master (minimal, FC 0x03 read / FC 0x06 write) ---
+static uint32_t ledOffMs = 0;
+// Push-queue counters live here because the DB line and the DUMP snapshot
+// report them; the queue itself is defined further down.
+static size_t s_pushCount = 0;    // rows held
+static uint32_t s_pushDrops = 0;  // saturating overflow counter
 
-static uint16_t mbCrc(const uint8_t* data, size_t len) {
+// CRC16-Modbus, unused on the line link by design. Kept for the phase-2
+// Modbus RTU master on the freed IO5/IO17 pair (MAX485, 9600 8N1).
+static uint16_t __attribute__((unused)) linkCrc16(const uint8_t* data, size_t len) {
   uint16_t crc = 0xFFFF;
   for (size_t i = 0; i < len; i++) {
     crc ^= data[i];
@@ -198,259 +162,319 @@ static uint16_t mbCrc(const uint8_t* data, size_t len) {
   return crc;
 }
 
-static void mbDrain() {
-  while (Serial1.available()) Serial1.read();
-}
+// --- line link -------------------------------------------------------------
 
-// Reads one Modbus response frame with a 1 s timeout. Returns the
-// payload length, or 0 on timeout / CRC error / exception.
-static size_t mbReadFrame(uint8_t* buf, size_t cap) {
-  uint32_t deadline = millis() + 1000;
-  size_t n = 0;
-  uint32_t lastByte = millis();
-  while (millis() < deadline) {
-    while (Serial1.available()) {
-      int c = Serial1.read();
-      if (c < 0) break;
-      if (n < cap) buf[n++] = (uint8_t)c;
-      lastByte = millis();
+static char linkRx[LINK_LINE_MAX + 1];
+static size_t linkRxLen = 0;
+static bool linkRxOverflow = false;
+static uint32_t linkLastByteMs = 0;
+
+// Every log line becomes one "LOG " line. Embedded CR/LF are escaped so one
+// entry is always one line. Fixed static buffers: no heap, no String.
+static void logf(const char* fmt, ...) {
+  static char msg[LINK_LINE_MAX];
+  static char escaped[2 * LINK_LINE_MAX];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(msg, sizeof(msg), fmt, ap);
+  va_end(ap);
+  size_t o = 0;
+  for (size_t i = 0; msg[i] != '\0' && o + 3 < sizeof(escaped); i++) {
+    if (msg[i] == '\n') {
+      escaped[o++] = '\\';
+      escaped[o++] = 'n';
+    } else if (msg[i] == '\r') {
+      escaped[o++] = '\\';
+      escaped[o++] = 'r';
+    } else {
+      escaped[o++] = msg[i];
     }
-    // End of frame: 8 ms of silence after at least the 5-byte minimum.
-    if (n >= 5 && millis() - lastByte >= 8) break;
-    delay(2);
   }
-  if (n < 5) return 0;
-  uint16_t crcRx = (uint16_t)buf[n - 2] | ((uint16_t)buf[n - 1] << 8);
-  if (mbCrc(buf, n - 2) != crcRx) {
-    Serial.println("[MB] CRC error, frame dropped");
-    return 0;
-  }
-  if (buf[0] != LINK_SLAVE_ID) return 0;
-  if (buf[1] & 0x80) {
-    Serial.printf("[MB] exception fn=0x%02X code=%d\n", buf[1] & 0x7F, buf[2]);
-    return 0;
-  }
-  return n;
+  escaped[o] = '\0';
+  Serial.print("LOG ");
+  Serial.println(escaped);
 }
 
-static bool mbReadHolding(uint16_t addr, uint16_t count, uint16_t* out) {
-  uint8_t req[8];
-  req[0] = LINK_SLAVE_ID;
-  req[1] = 0x03;
-  req[2] = addr >> 8;
-  req[3] = addr & 0xFF;
-  req[4] = count >> 8;
-  req[5] = count & 0xFF;
-  uint16_t crc = mbCrc(req, 6);
-  req[6] = crc & 0xFF;
-  req[7] = crc >> 8;
-  mbDrain();
-  delay(2);
-  Serial1.write(req, 8);
-  Serial1.flush();
-  uint8_t rsp[5 + 128];
-  size_t n = mbReadFrame(rsp, sizeof(rsp));
-  if (n < 5 || rsp[1] != 0x03 || rsp[2] != count * 2) return false;
-  for (uint16_t i = 0; i < count; i++) {
-    out[i] = ((uint16_t)rsp[3 + i * 2] << 8) | rsp[4 + i * 2];
-  }
-  return true;
+static void link_emit_hello() { Serial.println("HELLO"); }
+
+static void link_emit_loginreq() { Serial.println("LOGINREQ"); }
+
+static void link_emit_result(bool ok) {
+  Serial.println(ok ? "RESULT OK" : "RESULT FAIL");
 }
 
-static bool mbWriteSingle(uint16_t addr, uint16_t value) {
-  uint8_t req[8];
-  req[0] = LINK_SLAVE_ID;
-  req[1] = 0x06;
-  req[2] = addr >> 8;
-  req[3] = addr & 0xFF;
-  req[4] = value >> 8;
-  req[5] = value & 0xFF;
-  uint16_t crc = mbCrc(req, 6);
-  req[6] = crc & 0xFF;
-  req[7] = crc >> 8;
-  mbDrain();
-  delay(2);
-  Serial1.write(req, 8);
-  Serial1.flush();
-  uint8_t rsp[8];
-  size_t n = mbReadFrame(rsp, sizeof(rsp));
-  if (n != 8 || rsp[1] != 0x06) return false;
-  return true;
-}
-
-// FC 0x10 write multiple holding registers. Returns true on valid echo.
-static bool mbWriteMultiple(uint16_t addr, uint16_t count, const uint16_t* values) {
-  if (count == 0 || count > 16) return false;
-  uint8_t req[9 + 32];
-  req[0] = LINK_SLAVE_ID;
-  req[1] = 0x10;
-  req[2] = addr >> 8;
-  req[3] = addr & 0xFF;
-  req[4] = count >> 8;
-  req[5] = count & 0xFF;
-  req[6] = (uint8_t)(count * 2);
-  for (uint16_t i = 0; i < count; i++) {
-    req[7 + i * 2] = values[i] >> 8;
-    req[8 + i * 2] = values[i] & 0xFF;
-  }
-  size_t reqlen = 7 + count * 2;
-  uint16_t crc = mbCrc(req, reqlen);
-  req[reqlen] = crc & 0xFF;
-  req[reqlen + 1] = crc >> 8;
-  mbDrain();
-  delay(2);
-  Serial1.write(req, reqlen + 2);
-  Serial1.flush();
-  uint8_t rsp[8];
-  size_t n = mbReadFrame(rsp, sizeof(rsp));
-  if (n != 8 || rsp[1] != 0x10) return false;
-  uint16_t echoAddr = ((uint16_t)rsp[2] << 8) | rsp[3];
-  uint16_t echoCnt = ((uint16_t)rsp[4] << 8) | rsp[5];
-  return echoAddr == addr && echoCnt == count;
-}
-
-static void regsToString(const uint16_t* regs, uint16_t count, char* out, size_t cap) {
-  if (out == nullptr || cap == 0) return;
-  size_t pos = 0;
-  for (uint16_t i = 0; i < count; i++) {
-    char hi = (char)(regs[i] >> 8);
-    char lo = (char)(regs[i] & 0xFF);
-    if (hi == '\0') break;
-    if (pos + 1 >= cap) break;
-    out[pos++] = hi;
-    if (lo == '\0') break;
-    if (pos + 1 >= cap) break;
-    out[pos++] = lo;
-  }
-  out[pos] = '\0';
-}
-
-// One credential poll: request the gate, then read staged credentials.
-// Returns true when a fresh username/password pair was captured.
-static bool pollDisplayCreds() {
-  // Best effort: the gate is already up on display boot, so a lost
-  // LOGIN_REQ write only delays the popup to the next poll.
-  if (!mbWriteSingle(LINK_REG_LOGIN_REQ, 1)) {
-    Serial.println("[MB] LOGIN_REQ write failed (retry in 5 s)");
-  }
-  uint16_t ready = 0;
-  if (!mbReadHolding(LINK_REG_CREDS_READY, 1, &ready)) {
-    Serial.println("[MB] CREDS_READY read failed (retry in 5 s)");
-    return false;
-  }
-  if (ready == 0) {
-    Serial.println("[MB] display has no staged credentials yet");
-    return false;
-  }
-  uint16_t uregs[LINK_REG_USER_REGS];
-  uint16_t pregs[LINK_REG_PASS_REGS];
-  if (!mbReadHolding(LINK_REG_USER_BASE, LINK_REG_USER_REGS, uregs)) {
-    Serial.println("[MB] USERNAME read failed");
-    return false;
-  }
-  if (!mbReadHolding(LINK_REG_PASS_BASE, LINK_REG_PASS_REGS, pregs)) {
-    Serial.println("[MB] PASSWORD read failed");
-    return false;
-  }
-  char u[kCredCap];
-  char p[kCredCap];
-  regsToString(uregs, LINK_REG_USER_REGS, u, sizeof(u));
-  regsToString(pregs, LINK_REG_PASS_REGS, p, sizeof(p));
-  // Trim leading/trailing ASCII whitespace without a String temp.
-  auto trimInPlace = [](char* s) {
-    if (!s) return;
-    size_t len = strlen(s);
-    size_t start = 0;
-    while (start < len && (s[start] == ' ' || s[start] == '\t' ||
-                           s[start] == '\r' || s[start] == '\n'))
-      start++;
-    while (len > start && (s[len - 1] == ' ' || s[len - 1] == '\t' ||
-                           s[len - 1] == '\r' || s[len - 1] == '\n'))
-      len--;
-    if (start > 0) memmove(s, s + start, len - start);
-    s[len - start] = '\0';
-  };
-  trimInPlace(u);
-  if (u[0] == '\0' || p[0] == '\0') {
-    Serial.println("[MB] staged credentials are empty, waiting for Confirm");
-    return false;
-  }
-  strncpy(username, u, sizeof(username) - 1);
-  username[sizeof(username) - 1] = '\0';
-  strncpy(password, p, sizeof(password) - 1);
-  password[sizeof(password) - 1] = '\0';
-  // Wipe stack copies immediately; the RAM copy is cleared after login.
-  memset(u, 0, sizeof(u));
-  memset(p, 0, sizeof(p));
-  Serial.printf("[MB] captured creds user='%s'\n", username);
-  return true;
-}
-
-// Quick poll of the experiment state registers. Duration, experiment number
-// and the running flag change on the display without a login round-trip, so
-// the master re-reads them instead of capturing them once at credential
-// pickup. Logs only when something actually changed.
-static void pollExpState() {
-  uint16_t d = 0, n = 0, r = 0;
-  if (!mbReadHolding(LINK_REG_DURATION, 1, &d)) {
-    Serial.println("[MB] DURATION read failed");
+static void link_emit_net() {
+  bool up = eth_connected;
+  if (!up) {
+    // up=0 carries an empty ip= and no ping= field.
+    Serial.println("NET ip= up=0");
     return;
   }
-  if (!mbReadHolding(LINK_REG_EXP_NUM, 1, &n)) {
-    Serial.println("[MB] EXP_NUM read failed");
+  IPAddress a = ETH.localIP();
+  char ip[24];
+  snprintf(ip, sizeof(ip), "%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
+  if (lastPingMs >= 0) {
+    Serial.printf("NET ip=%s up=1 ping=%d\n", ip, lastPingMs);
+  } else {
+    Serial.printf("NET ip=%s up=1 ping=-\n", ip);
+  }
+}
+
+static void link_emit_db() {
+  char latest[16];
+  if (dbLatest >= 0) {
+    snprintf(latest, sizeof(latest), "%d", dbLatest);
+  } else if (dbLatest == -1) {
+    snprintf(latest, sizeof(latest), "0");  // no rows yet -> display suggests 1
+  } else {
+    snprintf(latest, sizeof(latest), "-");
+  }
+  char bottles[16];
+  if (dbBottleCount > 0) {
+    snprintf(bottles, sizeof(bottles), "%d", dbBottleCount);
+  } else {
+    snprintf(bottles, sizeof(bottles), "-");
+  }
+  Serial.printf("DB latest=%s time=%d bottles=%s drops=%u\n", latest,
+                ntpSynced ? 1 : 0, bottles, (unsigned)s_pushDrops);
+}
+
+// Full current truth, sent once per heartbeat. RESULT is deliberately not
+// repeated here: it marks a login attempt, and the HELLO snapshot covers the
+// "already running" case.
+static void link_emit_truth() {
+  link_emit_net();
+  link_emit_db();
+  if (stage == STAGE_NEED_CREDS) link_emit_loginreq();
+}
+
+// Answer to a display HELLO: the same truth, plus RESULT OK when logged in so
+// a display that rebooted mid-run can leave the login gate.
+static void link_send_snapshot() {
+  link_emit_net();
+  link_emit_db();
+  if (stage == STAGE_NEED_CREDS) link_emit_loginreq();
+  if (stage == STAGE_RUN) link_emit_result(true);
+}
+
+// Reads key=value out of a space-separated argument string. Bounded copy.
+static bool arg_lookup(const char* args, const char* key, char* out, size_t cap) {
+  if (args == nullptr || key == nullptr || out == nullptr || cap == 0) return false;
+  size_t keyLen = strlen(key);
+  const char* p = args;
+  while (p != nullptr && *p != '\0') {
+    const char* end = strchr(p, ' ');
+    size_t len = (end != nullptr) ? (size_t)(end - p) : strlen(p);
+    if (len > keyLen && strncmp(p, key, keyLen) == 0 && p[keyLen] == '=') {
+      size_t vlen = len - keyLen - 1;
+      if (vlen >= cap) vlen = cap - 1;
+      memcpy(out, p + keyLen + 1, vlen);
+      out[vlen] = '\0';
+      return true;
+    }
+    p = (end != nullptr) ? end + 1 : nullptr;
+  }
+  return false;
+}
+
+static int hexVal(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return -1;
+}
+
+// Decodes the percent-escaped user/pass values. Truncates safely at cap - 1.
+static void pct_decode(const char* in, char* out, size_t cap) {
+  size_t o = 0;
+  for (size_t i = 0; in[i] != '\0' && o + 1 < cap; i++) {
+    if (in[i] == '%' && in[i + 1] != '\0' && in[i + 2] != '\0') {
+      int hi = hexVal(in[i + 1]);
+      int lo = hexVal(in[i + 2]);
+      if (hi >= 0 && lo >= 0) {
+        out[o++] = (char)((hi << 4) | lo);
+        i += 2;
+        continue;
+      }
+    }
+    out[o++] = in[i];
+  }
+  out[o] = '\0';
+}
+
+static void trimInPlace(char* s) {
+  if (s == nullptr) return;
+  size_t len = strlen(s);
+  size_t start = 0;
+  while (start < len && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r' ||
+                         s[start] == '\n'))
+    start++;
+  while (len > start && (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\r' ||
+                         s[len - 1] == '\n'))
+    len--;
+  if (start > 0) memmove(s, s + start, len - start);
+  s[len - start] = '\0';
+}
+
+static void clearCreds() {
+  // Overwrite before clearing so the password never lingers in RAM.
+  memset(password, 'x', sizeof(password) - 1);
+  memset(password, 0, sizeof(password));
+  memset(username, 0, sizeof(username));
+}
+
+static void handle_experiment(const char* args) {
+  char runRaw[8], numRaw[12], durRaw[8];
+  if (!arg_lookup(args, "run", runRaw, sizeof(runRaw)) ||
+      !arg_lookup(args, "num", numRaw, sizeof(numRaw)) ||
+      !arg_lookup(args, "dur", durRaw, sizeof(durRaw))) {
+    logf("[LINK] malformed EXPERIMENT ignored");
     return;
   }
-  if (!mbReadHolding(LINK_REG_EXP_RUNNING, 1, &r)) {
-    Serial.println("[MB] EXP_RUNNING read failed");
-    return;
-  }
-  durationH = (int)d;
-  if (durationH < 1) durationH = 1;
-  if (durationH > 99) durationH = 99;
+  int run = atoi(runRaw) != 0 ? 1 : 0;
+  long n = strtol(numRaw, nullptr, 10);
+  long d = strtol(durRaw, nullptr, 10);
+  if (n < 0) n = 0;
+  if (n > 65535) n = 65535;
+  if (d < 1) d = 1;
+  if (d > 99) d = 99;
+  expRunning = (run != 0);
   expNum = (int)n;
-  expRunning = (r != 0);
+  durationH = (int)d;
   if (durationH != lastDurH || expNum != lastExpNum ||
       (int)expRunning != lastExpRunning) {
-    Serial.printf("[MB] exp state: run=%d exp=%d dur=%dh\n", expRunning ? 1 : 0,
-                  expNum, durationH);
+    logf("[LINK] exp state: run=%d exp=%d dur=%dh", expRunning ? 1 : 0, expNum,
+         durationH);
     lastDurH = durationH;
     lastExpNum = expNum;
     lastExpRunning = expRunning ? 1 : 0;
   }
 }
 
-static void consumeDisplayCreds(int result) {
-  // Order matters: the display clears RESULT when LOGIN_REQ is written to 0,
-  // so RESULT must be written last or a SUCCESS verdict is wiped to NONE
-  // before the display polls it.
-  mbWriteSingle(LINK_REG_CREDS_READY, 0);
-  if (result == 1) mbWriteSingle(LINK_REG_LOGIN_REQ, 0);
-  mbWriteSingle(LINK_REG_RESULT, (uint16_t)result);
+// New pair -> stage LOGIN. Identical in-flight pair -> ignore (the display
+// re-pushes every heartbeat until it hears a verdict). Same pair as the last
+// attempt -> re-emit that verdict instead of logging in again.
+static void handle_creds(const char* args) {
+  char userEnc[3 * LINK_USER_MAX + 1];
+  char passEnc[3 * LINK_PASS_MAX + 1];
+  if (!arg_lookup(args, "user", userEnc, sizeof(userEnc)) ||
+      !arg_lookup(args, "pass", passEnc, sizeof(passEnc))) {
+    logf("[LINK] malformed CREDS ignored");
+    return;
+  }
+  char u[kCredCap];
+  char p[kCredCap];
+  pct_decode(userEnc, u, sizeof(u));
+  pct_decode(passEnc, p, sizeof(p));
+  trimInPlace(u);
+  trimInPlace(p);
+  if (u[0] == '\0' || p[0] == '\0') {
+    memset(p, 0, sizeof(p));
+    logf("[LINK] CREDS empty, ignored");
+    return;
+  }
+  if (stage == STAGE_WAIT_IP) {
+    memset(p, 0, sizeof(p));
+    logf("[LINK] CREDS ignored: no IP yet");
+    return;
+  }
+  if (stage == STAGE_LOGIN && strcmp(u, username) == 0 && strcmp(p, password) == 0) {
+    memset(p, 0, sizeof(p));
+    logf("[LINK] CREDS duplicate while logging in, ignored");
+    return;
+  }
+  if (haveVerdict && strcmp(u, lastUser) == 0 && strcmp(p, lastPass) == 0) {
+    memset(p, 0, sizeof(p));
+    logf("[LINK] CREDS same pair, answering %s", lastVerdict ? "OK" : "FAIL");
+    link_emit_result(lastVerdict);
+    return;
+  }
+
+  strncpy(username, u, sizeof(username) - 1);
+  username[sizeof(username) - 1] = '\0';
+  strncpy(password, p, sizeof(password) - 1);
+  password[sizeof(password) - 1] = '\0';
+  strncpy(lastUser, u, sizeof(lastUser) - 1);
+  lastUser[sizeof(lastUser) - 1] = '\0';
+  strncpy(lastPass, p, sizeof(lastPass) - 1);
+  lastPass[sizeof(lastPass) - 1] = '\0';
+  haveVerdict = false;
+  // Wipe the decoded stack copies; the working pair is wiped after login.
+  memset(u, 0, sizeof(u));
+  memset(p, 0, sizeof(p));
+  logf("[LINK] captured creds user='%s' (password in RAM only)", username);
+  stage = STAGE_LOGIN;
 }
 
-// Pushes the current IP + ping latency to the display for /info.
-// pingMs: averaged Ping.averageTime(), or -1 for no data / failed ping.
-// netUp: false clears the display's IP verdict to "link down".
-static void pushNetStatus(int pingMs, bool netUp) {
-  String ip = netUp ? ETH.localIP().toString() : String("");
-  uint16_t regs[LINK_REG_IP_REGS] = {0};
-  for (uint16_t i = 0; i < LINK_REG_IP_REGS; i++) {
-    size_t o = (size_t)i * 2;
-    uint8_t hi = o < ip.length() ? (uint8_t)ip[o] : 0;
-    uint8_t lo = o + 1 < ip.length() ? (uint8_t)ip[o + 1] : 0;
-    regs[i] = ((uint16_t)hi << 8) | lo;
+static void link_log_dump() {
+  IPAddress a = ETH.localIP();
+  char ip[24];
+  snprintf(ip, sizeof(ip), "%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
+  logf("[DUMP] stage=%d eth=%d ip=%s exp=%d run=%d dur=%d dbLatest=%d ntp=%d "
+       "bottles=%d queued=%u drops=%u verdict=%d",
+       (int)stage, eth_connected ? 1 : 0, ip, expNum, expRunning ? 1 : 0, durationH,
+       dbLatest, ntpSynced ? 1 : 0, dbBottleCount, (unsigned)s_pushCount,
+       (unsigned)s_pushDrops, haveVerdict ? (lastVerdict ? 1 : 2) : 0);
+}
+
+static void handle_line(char* line) {
+  char* args = strchr(line, ' ');
+  if (args != nullptr) {
+    *args++ = '\0';
+    while (*args == ' ') args++;
   }
-  if (!mbWriteMultiple(LINK_REG_IP_BASE, LINK_REG_IP_REGS, regs)) {
-    Serial.println("[MB] IP_ADDR write failed");
+  if (strcmp(line, "HELLO") == 0) {
+    logf("[LINK] HELLO from display, sending snapshot");
+    link_send_snapshot();
+  } else if (strcmp(line, "EXPERIMENT") == 0 && args != nullptr) {
+    handle_experiment(args);
+  } else if (strcmp(line, "CREDS") == 0 && args != nullptr) {
+    handle_creds(args);
+  } else if (strcmp(line, "DUMP") == 0) {
+    // Read-only, so accepted ungated: the debug gate lives on the display
+    // sender (W32CMD).
+    link_log_dump();
   }
-  uint16_t pingReg =
-      (pingMs >= 0 && pingMs < LINK_PING_NONE) ? (uint16_t)pingMs : LINK_PING_NONE;
-  if (!mbWriteSingle(LINK_REG_PING_MS, pingReg)) {
-    Serial.println("[MB] PING_MS write failed");
+  // Unknown and WT32-direction words are ignored, which also swallows the
+  // boot ROM text and a looped-back command.
+}
+
+static void link_line_pull() {
+  while (Serial.available() > 0) {
+    int c = Serial.read();
+    if (c < 0) break;
+    linkLastByteMs = millis();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      if (!linkRxOverflow && linkRxLen > 0) {
+        linkRx[linkRxLen] = '\0';
+        digitalWrite(TEST_LED_PIN, HIGH);
+        ledOffMs = millis() + TEST_LED_MS;
+        handle_line(linkRx);
+      }
+      linkRxLen = 0;
+      linkRxOverflow = false;
+      continue;
+    }
+    if (linkRxOverflow) continue;
+    if (linkRxLen >= LINK_LINE_MAX) {
+      linkRxLen = 0;
+      linkRxOverflow = true;
+      continue;
+    }
+    linkRx[linkRxLen++] = (char)c;
   }
-  if (!mbWriteSingle(LINK_REG_NET_UP, netUp ? 1 : 0)) {
-    Serial.println("[MB] NET_UP write failed");
+  // A stalled partial line never wedges the parser.
+  if (linkRxLen > 0 && (millis() - linkLastByteMs) > LINK_GAP_MS) {
+    linkRxLen = 0;
+    linkRxOverflow = false;
   }
+}
+
+static void link_heartbeat_tick() {
+  if (millis() - lastBeatMs < LINK_BEAT_MS) return;
+  lastBeatMs = millis();
+  link_emit_truth();
 }
 
 // --- Ethernet + portal login (ported from wt32-eth01_ping-test) ---
@@ -458,31 +482,53 @@ static void pushNetStatus(int pingMs, bool netUp) {
 void onEthEvent(WiFiEvent_t event) {
   switch (event) {
     case ARDUINO_EVENT_ETH_START:
-      Serial.println("[ETH] Started");
       ETH.setHostname("rusim-master");
+      ethEventCode = 1;
       break;
     case ARDUINO_EVENT_ETH_CONNECTED:
-      Serial.println("[ETH] Link up");
+      ethEventCode = 2;
       break;
     case ARDUINO_EVENT_ETH_GOT_IP:
-      Serial.println("[ETH] Got IP");
-      Serial.print("[ETH] IP address: ");
-      Serial.println(ETH.localIP());
-      Serial.print("[ETH] Gateway: ");
-      Serial.println(ETH.gatewayIP());
-      Serial.print("[ETH] Netmask: ");
-      Serial.println(ETH.subnetMask());
-      Serial.print("[ETH] MAC: ");
-      Serial.println(ETH.macAddress());
       eth_connected = true;
+      lastPingMs = -1;
+      ethEventCode = 3;
+      netDirty = true;
       break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
-      Serial.println("[ETH] Link down");
-      eth_connected = false;
-      break;
     case ARDUINO_EVENT_ETH_STOP:
-      Serial.println("[ETH] Stopped");
       eth_connected = false;
+      lastPingMs = -1;
+      ethEventCode = 4;
+      netDirty = true;
+      break;
+    default:
+      break;
+  }
+}
+
+// Logged from loop(), not from the event task, so a LOG line is never split by
+// another task writing to the same UART.
+static void log_eth_event() {
+  int code = ethEventCode;
+  ethEventCode = 0;
+  switch (code) {
+    case 1:
+      logf("[ETH] Started");
+      break;
+    case 2:
+      logf("[ETH] Link up");
+      break;
+    case 3: {
+      IPAddress ip = ETH.localIP();
+      IPAddress gw = ETH.gatewayIP();
+      IPAddress mask = ETH.subnetMask();
+      logf("[ETH] Got IP %u.%u.%u.%u gw %u.%u.%u.%u mask %u.%u.%u.%u mac %s",
+           ip[0], ip[1], ip[2], ip[3], gw[0], gw[1], gw[2], gw[3], mask[0],
+           mask[1], mask[2], mask[3], ETH.macAddress().c_str());
+      break;
+    }
+    case 4:
+      logf("[ETH] Link down");
       break;
     default:
       break;
@@ -684,28 +730,25 @@ String fetchPortalUrl() {
   const char* headerKeys[] = {"Location"};
   http.collectHeaders(headerKeys, 1);
 
-  Serial.print("[LOGIN] GET trigger ");
-  Serial.println(kCaptiveProbeUrl);
+  logf("[LOGIN] GET trigger %s", kCaptiveProbeUrl);
   int code = http.GET();
-  Serial.print("[LOGIN] trigger status: ");
-  Serial.println(code);
+  logf("[LOGIN] trigger status: %d", code);
   String portalUrl;
   if (code == 204) {
-    Serial.println("[LOGIN] portal URL: (none, 204 online)");
+    logf("[LOGIN] portal URL: (none, 204 online)");
   } else if (code == 301 || code == 302 || code == 303 || code == 307 ||
              code == 308) {
     portalUrl = http.header("Location");
-    Serial.print("[LOGIN] portal URL: ");
-    Serial.println(portalUrl.length() ? portalUrl : "(redirect without Location)");
+    logf("[LOGIN] portal URL: %s",
+         portalUrl.length() ? portalUrl.c_str() : "(redirect without Location)");
   } else if (code == 200) {
     portalUrl = extractWindowLocation(readBody(http));
-    Serial.print("[LOGIN] portal URL: ");
-    Serial.println(portalUrl.length() ? portalUrl : "(200 without redirect URL)");
+    logf("[LOGIN] portal URL: %s",
+         portalUrl.length() ? portalUrl.c_str() : "(200 without redirect URL)");
   } else if (code > 0) {
-    Serial.println("[LOGIN] unexpected trigger status (treating as walled)");
+    logf("[LOGIN] unexpected trigger status (treating as walled)");
   } else {
-    Serial.print("[LOGIN] trigger error: ");
-    Serial.println(http.errorToString(code));
+    logf("[LOGIN] trigger error: %s", http.errorToString(code).c_str());
   }
   http.end();
   return portalUrl;
@@ -720,15 +763,12 @@ bool fetchLoginPage(const String& portalUrl, PageScan& scan) {
   http.begin(client, portalUrl);
   http.setTimeout(8000);
 
-  Serial.print("[LOGIN] GET login page ");
-  Serial.println(portalUrl);
+  logf("[LOGIN] GET login page %s", portalUrl.c_str());
   int code = http.GET();
-  Serial.print("[LOGIN] login page status: ");
-  Serial.println(code);
+  logf("[LOGIN] login page status: %d", code);
   if (code != 200) {
     if (code < 0) {
-      Serial.print("[LOGIN] login page error: ");
-      Serial.println(http.errorToString(code));
+      logf("[LOGIN] login page error: %s", http.errorToString(code).c_str());
     }
     http.end();
     return false;
@@ -736,12 +776,9 @@ bool fetchLoginPage(const String& portalUrl, PageScan& scan) {
   scanPage(http, scan);
   http.end();
 
-  Serial.print("[LOGIN] form action: ");
-  Serial.println(scan.hasForm ? scan.formAction : "(no form found)");
-  Serial.print("[LOGIN] 4Tredir: ");
-  Serial.println(scan.redir[0] ? scan.redir : "(not found)");
-  Serial.print("[LOGIN] magic: ");
-  Serial.println(scan.magic[0] ? scan.magic : "(not found)");
+  logf("[LOGIN] form action: %s", scan.hasForm ? scan.formAction : "(no form found)");
+  logf("[LOGIN] 4Tredir: %s", scan.redir[0] ? scan.redir : "(not found)");
+  logf("[LOGIN] magic: %s", scan.magic[0] ? scan.magic : "(not found)");
   return scan.hasForm && scan.magic[0] != '\0';
 }
 
@@ -766,26 +803,20 @@ bool postCredentials(const String& pageUrl, const PageScan& scan) {
   const char* headerKeys[] = {"Location", "Set-Cookie"};
   http.collectHeaders(headerKeys, 2);
 
-  Serial.print("[LOGIN] POST ");
-  Serial.println(postUrl);
-  Serial.print("[LOGIN] body length: ");
-  Serial.println(body.length());
+  logf("[LOGIN] POST %s", postUrl.c_str());
+  logf("[LOGIN] body length: %u", (unsigned)body.length());
   int code = http.POST(body);
-  Serial.print("[LOGIN] POST status: ");
-  Serial.println(code);
+  logf("[LOGIN] POST status: %d", code);
 
   bool accepted = false;
   if (code > 0) {
-    Serial.print("[LOGIN] Location: ");
-    Serial.println(http.header("Location"));
+    logf("[LOGIN] Location: %s", http.header("Location").c_str());
     if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
       accepted = true;
     }
     String resp = readBody(http);
-    Serial.print("[LOGIN] response bytes: ");
-    Serial.println(resp.length());
-    Serial.println("[LOGIN] response head:");
-    Serial.println(resp.substring(0, 800));
+    logf("[LOGIN] response bytes: %u", (unsigned)resp.length());
+    logf("[LOGIN] response head: %s", resp.substring(0, 800).c_str());
     // A success page echoes a meta-refresh or a link to the 4Tredir target;
     // an error page names the failure. Either way the verifier decides.
     if (resp.indexOf("success") >= 0 || resp.indexOf("Success") >= 0 ||
@@ -793,8 +824,7 @@ bool postCredentials(const String& pageUrl, const PageScan& scan) {
       accepted = true;
     }
   } else {
-    Serial.print("[LOGIN] POST error: ");
-    Serial.println(http.errorToString(code));
+    logf("[LOGIN] POST error: %s", http.errorToString(code).c_str());
   }
   http.end();
   return accepted;
@@ -809,62 +839,44 @@ bool fetchData() {
   http.begin(client, kDataUrl);
   http.setTimeout(8000);
 
-  Serial.print("[HTTP] GET ");
-  Serial.println(kDataUrl);
+  logf("[HTTP] GET %s", kDataUrl);
   int code = http.GET();
-  Serial.print("[HTTP] status: ");
-  Serial.println(code);
+  logf("[HTTP] status: %d", code);
 
   bool genuine = false;
   if (code > 0) {
     String body = readBody(http);
     if (extractWindowLocation(body).length() > 0) {
-      Serial.println("[HTTP] body is the portal interception page (WALLED)");
+      logf("[HTTP] body is the portal interception page (WALLED)");
     } else {
       genuine = true;
-      Serial.println("[HTTP] body is genuine content (AUTHENTICATED):");
-      Serial.println(body);
+      logf("[HTTP] body is genuine content (AUTHENTICATED): %s", body.c_str());
     }
   } else {
-    Serial.print("[HTTP] error: ");
-    Serial.println(http.errorToString(code));
+    logf("[HTTP] error: %s", http.errorToString(code).c_str());
   }
   http.end();
   return genuine;
 }
 
-static void clearCreds() {
-  // Overwrite before clearing so the password never lingers in RAM.
-  memset(password, 'x', sizeof(password) - 1);
-  memset(password, 0, sizeof(password));
-  memset(username, 0, sizeof(username));
-}
-
 // --- NTP (backlog #12): UTC via pool.ntp.org. Call after DHCP. ---
 static void ensureNtpSync() {
   if (ntpSynced) return;
-  if (String(SUPABASE_URL).length() == 0) {
-    // Still sync time even without Supabase config; portal checks need it less,
-    // but DB timestamps are meaningless on a 1970 clock.
-  }
   configTime(0, 0, kNtp1, kNtp2);
-  Serial.println("[NTP] syncing UTC via pool.ntp.org...");
+  logf("[NTP] syncing UTC via pool.ntp.org...");
   for (int i = 0; i < 10; i++) {
     time_t now = time(nullptr);
     if (now > 1700000000) {
       ntpSynced = true;
       struct tm tmv;
       gmtime_r(&now, &tmv);
-      Serial.printf("[NTP] synced: %04d-%02d-%02d %02d:%02d:%02d UTC\n",
-                    tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
-                    tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
-      mbWriteSingle(LINK_REG_TIME_OK, 1);
+      logf("[NTP] synced: %04d-%02d-%02d %02d:%02d:%02d UTC", tmv.tm_year + 1900,
+           tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
       return;
     }
     delay(1000);
   }
-  Serial.println("[NTP] sync failed, will retry next cycle");
-  mbWriteSingle(LINK_REG_TIME_OK, 0);
+  logf("[NTP] sync failed, will retry next cycle");
 }
 
 // --- Supabase TLS + auth metadata + push queue (esp-db-sync plan) ---
@@ -919,8 +931,7 @@ static bool sbParseStrField(const char* resp, const char* key, char* out, size_t
 }
 
 // Keeps bottle_count + owner contact from authenticate() instead of
-// discarding them. bottle_count feeds the new DB_BOTTLES display register;
-// owner fields are log/info only.
+// discarding them. bottle_count feeds the DB line; owner fields are log only.
 static void sbParseAuthMeta(const String& resp) {
   const char* c = resp.c_str();
   int bottles = -1;
@@ -963,8 +974,6 @@ struct BottleReading {
 static PushRow s_pushQueue[kPushQueueRows];
 static size_t s_pushHead = 0;   // oldest row
 static size_t s_pushTail = 0;   // next write slot
-static size_t s_pushCount = 0;  // rows held
-static uint32_t s_pushDrops = 0;  // saturating overflow counter -> PUSH_DROPS reg
 static char s_pushBody[kPushBodyCap];
 
 // Queues one sample round (up to 24 bottles). Rejects while NTP is unsynced
@@ -973,12 +982,12 @@ static char s_pushBody[kPushBodyCap];
 static bool pushEnqueueRound(time_t sampleUnix, int experimentId,
                              const BottleReading* readings, size_t n) {
   if (!ntpSynced) {
-    Serial.println("[PUSH] refused: NTP unsynced (TIME_OK=0)");
+    logf("[PUSH] refused: NTP unsynced (time=0)");
     return false;
   }
   if (readings == nullptr || n == 0 || n > 24) return false;
   if (sampleUnix < (time_t)kMinSampleUnix) {
-    Serial.println("[PUSH] refused: sample time predates 2025-01-01");
+    logf("[PUSH] refused: sample time predates 2025-01-01");
     return false;
   }
   for (size_t i = 0; i < n; i++) {
@@ -1008,7 +1017,7 @@ static bool pushEnqueueRound(time_t sampleUnix, int experimentId,
 static bool sbAuthenticate() {
   if (String(SUPABASE_URL).length() == 0 || String(SUPABASE_ANON_KEY).length() == 0 ||
       String(DEVICE_TOKEN).length() == 0) {
-    Serial.println("[DB] Supabase not configured (SUPABASE_URL/ANON_KEY/DEVICE_TOKEN empty)");
+    logf("[DB] Supabase not configured (SUPABASE_URL/ANON_KEY/DEVICE_TOKEN empty)");
     return false;
   }
   String url = String(SUPABASE_URL) + "/rest/v1/rpc/authenticate";
@@ -1040,14 +1049,14 @@ static bool sbAuthenticate() {
       if (hexStart >= 0) {
         dbSession = resp.substring(hexStart, hexStart + 64);
         sbParseAuthMeta(resp);
-        Serial.printf("[DB] authenticated, session cached (RAM only), bottles=%d owner='%s'\n",
-                      dbBottleCount, dbOwnerName);
+        logf("[DB] authenticated, session cached (RAM only), bottles=%d owner='%s'",
+             dbBottleCount, dbOwnerName);
         ok = true;
       }
     }
-    if (!ok) Serial.println("[DB] authenticate: no session_token in reply (wrong token?)");
+    if (!ok) logf("[DB] authenticate: no session_token in reply (wrong token?)");
   } else {
-    Serial.printf("[DB] authenticate HTTP %d\n", code);
+    logf("[DB] authenticate HTTP %d", code);
   }
   http.end();
   return ok;
@@ -1080,10 +1089,10 @@ static int sbFetchLatestExp() {
       String resp = http.getString();
       http.end();
       int latest = sbParseLatestExp(resp);
-      Serial.printf("[DB] latest experiment_id=%d (raw %d chars)\n", latest, resp.length());
+      logf("[DB] latest experiment_id=%d (raw %d chars)", latest, resp.length());
       return latest;
     }
-    Serial.printf("[DB] readings HTTP %d (attempt %d)\n", code, attempt);
+    logf("[DB] readings HTTP %d (attempt %d)", code, attempt);
     http.end();
     if (code == 401 || code == 403) {
       dbSession = "";  // session expired, re-login once
@@ -1162,7 +1171,7 @@ static bool sbPushOneRound() {
   if (dbSession.length() == 0 && !sbAuthenticate()) return false;
   size_t rows = pushFormatHeadRound();
   if (rows == 0) {
-    Serial.println("[PUSH] format failed (queue inconsistent or body cap)");
+    logf("[PUSH] format failed (queue inconsistent or body cap)");
     return false;
   }
   String url = String(SUPABASE_URL) + "/rest/v1/rpc/push_readings";
@@ -1182,12 +1191,12 @@ static bool sbPushOneRound() {
       http.end();
       s_pushHead = (s_pushHead + rows) % kPushQueueRows;
       s_pushCount -= rows;
-      Serial.printf("[PUSH] flushed %u rows (server says %s, %u left)\n",
-                    (unsigned)rows, resp.c_str(), (unsigned)s_pushCount);
+      logf("[PUSH] flushed %u rows (server says %s, %u left)", (unsigned)rows,
+           resp.c_str(), (unsigned)s_pushCount);
       return true;
     }
-    Serial.printf("[PUSH] push_readings HTTP %d (attempt %d, %u queued)\n",
-                  code, attempt, (unsigned)s_pushCount);
+    logf("[PUSH] push_readings HTTP %d (attempt %d, %u queued)", code, attempt,
+         (unsigned)s_pushCount);
     http.end();
     if (code == 401 || code == 403) {
       dbSession = "";
@@ -1214,27 +1223,6 @@ static void sbPushReadings() {
   }
 }
 
-// Pushes DB latest + time state to the display (backlog #9).
-static void pushDbState() {
-  uint16_t latestReg = (dbLatest >= 0) ? (uint16_t)dbLatest : (dbLatest == -1 ? 0 : 0xFFFF);
-  // -1 (no rows yet) reports 0 so the display suggests 1; unknown stays 0xFFFF.
-  if (dbLatest == -2) latestReg = 0xFFFF;
-  if (!mbWriteSingle(LINK_REG_DB_LATEST, latestReg)) {
-    Serial.println("[MB] DB_LATEST write failed");
-  }
-  if (!mbWriteSingle(LINK_REG_TIME_OK, ntpSynced ? 1 : 0)) {
-    Serial.println("[MB] TIME_OK write failed");
-  }
-  uint16_t bottlesReg = (dbBottleCount > 0) ? (uint16_t)dbBottleCount : 0xFFFF;
-  if (!mbWriteSingle(LINK_REG_DB_BOTTLES, bottlesReg)) {
-    Serial.println("[MB] DB_BOTTLES write failed");
-  }
-  uint16_t dropsReg = (s_pushDrops > 0xFFFFu) ? 0xFFFF : (uint16_t)s_pushDrops;
-  if (!mbWriteSingle(LINK_REG_PUSH_DROPS, dropsReg)) {
-    Serial.println("[MB] PUSH_DROPS write failed");
-  }
-}
-
 static void syncDbLatest(bool force) {
   if (millis() - lastDbPollMs < kDbPollMs && !force) return;
   lastDbPollMs = millis();
@@ -1242,60 +1230,52 @@ static void syncDbLatest(bool force) {
   int latest = sbFetchLatestExp();
   if (latest != -2) {
     if (latest != dbLatest) {
-      Serial.printf("[DB] latest %d -> %d, next=%d\n", dbLatest, latest, latest + 1);
+      logf("[DB] latest %d -> %d, next=%d", dbLatest, latest, latest + 1);
     }
     dbLatest = latest;
   } else {
-    Serial.println("[DB] fetch failed, keeping last known value");
+    logf("[DB] fetch failed, keeping last known value");
   }
-  pushDbState();
+  // Every DB pass declares the result, including a failed one: the display
+  // shows the last known truth with a fresh age stamp.
+  link_emit_db();
   // Drain buffered sample rounds (no-op until the sensor chain enqueues).
-  // Clock gating lives inside sbPushReadings: TIME_OK reporting above is
-  // unaffected, so the display keeps showing unsynced state.
+  // Clock gating lives inside sbPushReadings: time= state above is unaffected,
+  // so the display keeps showing unsynced state.
   sbPushReadings();
 }
 
-// Returns true on authenticated, false otherwise. Reports the verdict to
-// the display and consumes the staged credentials.
+// Returns true on authenticated, false otherwise. The caller emits RESULT and
+// wipes the working pair.
 bool doLogin() {
-  Serial.printf("[LOGIN] user='%s' from display (password in RAM only)\n",
-                username);
+  logf("[LOGIN] user='%s' from display (password in RAM only)", username);
 
   String portalUrl = fetchPortalUrl();
   if (portalUrl.length() == 0) {
-    Serial.println("[LOGIN] No interception. Checking whether we are already through...");
+    logf("[LOGIN] No interception. Checking whether we are already through...");
     if (fetchData()) {
-      Serial.println("[LOGIN] Already authenticated, skipping POST.");
-      consumeDisplayCreds(1);
-      clearCreds();
+      logf("[LOGIN] Already authenticated, skipping POST.");
       return true;
     }
-    Serial.println("[LOGIN] No portal and no internet. Will re-poll display.");
-    consumeDisplayCreds(2);
-    clearCreds();
+    logf("[LOGIN] No portal and no internet. Will re-poll display.");
     return false;
   }
 
   PageScan scan;
   if (!fetchLoginPage(portalUrl, scan)) {
-    Serial.println("[LOGIN] Could not read the login page. Will re-poll display.");
-    consumeDisplayCreds(2);
-    clearCreds();
+    logf("[LOGIN] Could not read the login page. Will re-poll display.");
     return false;
   }
 
   postCredentials(portalUrl, scan);
 
-  Serial.println("[LOGIN] Verifying with a real data fetch...");
+  logf("[LOGIN] Verifying with a real data fetch...");
   bool ok = fetchData();
   if (ok) {
-    Serial.println("[LOGIN] SUCCESS: port is authenticated.");
-    consumeDisplayCreds(1);
+    logf("[LOGIN] SUCCESS: port is authenticated.");
   } else {
-    Serial.println("[LOGIN] FAILED: still walled (wrong credentials or portal changed).");
-    consumeDisplayCreds(2);
+    logf("[LOGIN] FAILED: still walled (wrong credentials or portal changed).");
   }
-  clearCreds();
   return ok;
 }
 
@@ -1303,30 +1283,28 @@ void setup() {
   Serial.begin(115200);
   // Give the USB-serial monitor time to attach, then push the ROM
   // bootloader's boot message (printed at 74880 baud, so it shows as
-  // garbage at 115200) off screen with a few blank lines.
+  // garbage at 115200) off screen with a few blank lines. Blank lines are
+  // ignored by the display parser and stay useful for a bare adapter.
   delay(1000);
   for (int i = 0; i < 5; i++) Serial.println();
   Serial.flush();
 
-  Serial.println();
-  Serial.println("network-master (production WT32 portal + Modbus master)");
-  Serial.println("Ping target: 1.1.1.1");
-  Serial.print("Data URL: ");
-  Serial.println(kDataUrl);
-  Serial.println("Credentials come from the display over Modbus RTU, never stored.");
-
-  Serial1.begin(LINK_BAUD, SERIAL_8N1, LINK_RX_PIN, LINK_TX_PIN);
-  delay(20);
-  mbDrain();
-  Serial.printf("[MB] master on Serial1 RX=%d TX=%d %d 8N1 slave=%d\n", LINK_RX_PIN,
-                LINK_TX_PIN, LINK_BAUD, LINK_SLAVE_ID);
+  logf("network-master (production WT32 portal + rusim-line peer)");
+  logf("Ping target: 1.1.1.1");
+  logf("Data URL: %s", kDataUrl);
+  logf("Credentials come from the display over UART0, never stored.");
 
   pinMode(TEST_LED_PIN, OUTPUT);
   digitalWrite(TEST_LED_PIN, LOW);
-  pinMode(POLL_REQ_PIN, INPUT_PULLDOWN);
-  attachInterrupt(digitalPinToInterrupt(POLL_REQ_PIN), onPollRequest, RISING);
-  Serial.printf("[INT] poll request on IO%d (display IO11); a staged pair is "
-                "polled at once\n", POLL_REQ_PIN);
+
+  // UART0 is the link: Debug-header TXD (IO1) and RXD (IO3), 115200 8N1.
+  // Serial.begin() above already owns it; Serial1 is deliberately not opened.
+  linkRxLen = 0;
+  linkRxOverflow = false;
+  linkLastByteMs = millis();
+  lastBeatMs = millis();
+  link_emit_hello();
+  logf("[LINK] rusim-line v1 on UART0 IO1/IO3 115200 8N1");
 
   WiFi.onEvent(onEthEvent);
 
@@ -1334,128 +1312,130 @@ void setup() {
   // PHY addr 1, power pin 16, MDC 23, MDIO 18, LAN8720, 50 MHz clock in on GPIO0.
   if (!ETH.begin(ETH_PHY_ADDR, ETH_PHY_POWER, ETH_PHY_MDC, ETH_PHY_MDIO,
                  ETH_PHY_TYPE, ETH_CLK_MODE)) {
-    Serial.println("[ETH] ERROR: ETH.begin() failed");
+    logf("[ETH] ERROR: ETH.begin() failed");
   } else {
-    Serial.println("[ETH] Waiting for link + DHCP...");
+    logf("[ETH] Waiting for link + DHCP...");
   }
 }
 
 void loop() {
-  // Blink the bench LED on a request, and take it down when the window ends.
-  // The request flag itself is left for STAGE_NEED_CREDS to consume (peek here,
-  // consume there).
-  if (s_ledOffMs == 0 && s_pollRequest.load()) {
-    digitalWrite(TEST_LED_PIN, HIGH);
-    s_ledOffMs = millis() + TEST_LED_MS;
+  // Consume the link before anything that can block: a heartbeat that waits
+  // in the UART FIFO would otherwise age /info and delay LOG draining.
+  link_line_pull();
+  if (netDirty) {
+    netDirty = false;
+    link_emit_net();
   }
-  if (s_ledOffMs != 0 && (int32_t)(millis() - s_ledOffMs) >= 0) {
+  if (ethEventCode != 0) log_eth_event();
+  link_heartbeat_tick();
+
+  if (ledOffMs != 0 && (int32_t)(millis() - ledOffMs) >= 0) {
     digitalWrite(TEST_LED_PIN, LOW);
-    s_ledOffMs = 0;
+    ledOffMs = 0;
   }
+
   switch (stage) {
     case STAGE_WAIT_IP:
       if (eth_connected) {
-        Serial.println("[MB] link up, polling display for credentials");
-        lastCredPollMs = 0;  // poll immediately
+        logf("[LINK] link up, waiting for credentials from the display");
         stage = STAGE_NEED_CREDS;
-      } else {
-        Serial.println("[ETH] Waiting for IP address (DHCP)...");
-        delay(2000);
+        stageAtMs = 0;  // run the first cred tick immediately
+      } else if (millis() - stageAtMs >= 2000) {
+        stageAtMs = millis();
+        logf("[ETH] Waiting for IP address (DHCP)...");
       }
       break;
 
     case STAGE_NEED_CREDS: {
-      // The whole network loop pauses here: nothing but the display poll
-      // runs until credentials arrive.
+      // Nothing but link work and the auth probe runs until credentials
+      // arrive. The display sends LOGINREQ back on every heartbeat.
       if (!eth_connected) {
-        Serial.println("[ETH] link lost while waiting for creds");
-        pushNetStatus(-1, false);
+        logf("[ETH] link lost while waiting for creds");
+        link_emit_net();
         stage = STAGE_WAIT_IP;
+        stageAtMs = millis();
         break;
       }
-      // The display pulses the poll-request line when a pair is staged. Honour
-      // it before the 5 s gate: a corrected password must not sit unread while
-      // the user watches the page. The flag is consumed here because this is the
-      // only stage that can use it.
-      if (s_pollRequest.exchange(false)) {
-        Serial.println("[INT] display staged new credentials; polling now");
-        lastCredPollMs = 0;
-      }
-      if (millis() - lastCredPollMs >= kCredPollMs) {
-        lastCredPollMs = millis();
-        if (pollDisplayCreds()) {
-          stage = STAGE_LOGIN;
-        } else if (millis() - lastAuthProbeMs >= kAuthProbeMs) {
+      if (millis() - stageAtMs >= kCredPollMs) {
+        stageAtMs = millis();
+        link_emit_net();
+        link_emit_db();
+        link_emit_loginreq();
+        syncDbLatest(false);
+        if (millis() - lastAuthProbeMs >= kAuthProbeMs) {
           // No staged creds: check whether the port is already through
           // before asking the user for a login they don't need.
           lastAuthProbeMs = millis();
-          Serial.println("[LOGIN] no creds staged; probing for existing session...");
+          logf("[LOGIN] no creds staged; probing for existing session...");
           String portalUrl = fetchPortalUrl();
           if (portalUrl.length() == 0 && fetchData()) {
-            Serial.println("[LOGIN] session already valid; releasing display gate.");
-            consumeDisplayCreds(1);
+            logf("[LOGIN] session already valid; releasing display gate.");
+            haveVerdict = true;
+            lastVerdict = true;
+            link_emit_result(true);
             stage = STAGE_RUN;
+            stageAtMs = 0;
           }
         }
-        // Keep /info live while waiting: real IP now, ping comes in RUN.
-        pushNetStatus(-1, true);
-        pollExpState();
-        syncDbLatest(false);
-      } else {
-        delay(100);
       }
       break;
     }
 
-    case STAGE_LOGIN:
-      if (doLogin()) {
+    case STAGE_LOGIN: {
+      bool ok = doLogin();
+      haveVerdict = true;
+      lastVerdict = ok;
+      link_emit_result(ok);
+      clearCreds();
+      if (ok) {
         syncDbLatest(true);
         stage = STAGE_RUN;
+        stageAtMs = 0;
       } else {
-        Serial.println("[LOGIN] will re-poll display in 5 s (or at once on a poll request)");
-        lastCredPollMs = millis();
+        logf("[LOGIN] will wait for a corrected pair from the display");
         stage = STAGE_NEED_CREDS;
+        stageAtMs = millis();
       }
       break;
+    }
 
     case STAGE_RUN: {
       if (!eth_connected) {
-        Serial.println("[ETH] link lost in RUN, back to WAIT_IP");
-        pushNetStatus(-1, false);
+        logf("[ETH] link lost in RUN, back to WAIT_IP");
+        link_emit_net();
         stage = STAGE_WAIT_IP;
+        stageAtMs = millis();
         break;
       }
-      Serial.print("[ETH] Assigned IP: ");
-      Serial.println(ETH.localIP());
+      if (millis() - stageAtMs < kIntervalMs) break;
+      stageAtMs = millis();
 
-      Serial.print("[PING] Pinging 1.1.1.1 ... ");
+      logf("[ETH] Assigned IP: %s", ETH.localIP().toString().c_str());
+
       bool ok = Ping.ping(kPingTarget, kPingCount);
-      int pingMs = -1;
       if (ok) {
-        pingMs = (int)Ping.averageTime();
-        Serial.print("OK, avg time = ");
-        Serial.print(pingMs);
-        Serial.println(" ms");
+        lastPingMs = (int)Ping.averageTime();
+        logf("[PING] 1.1.1.1 OK, avg time = %d ms", lastPingMs);
       } else {
-        Serial.println("FAIL (no reply)");
+        lastPingMs = -1;
+        logf("[PING] 1.1.1.1 FAIL (no reply)");
       }
-      // Push the fresh verdict every cycle so /info stays live.
-      pushNetStatus(pingMs, true);
-      pollExpState();
+      // Declare the fresh verdict every cycle so /info stays live.
+      link_emit_net();
       syncDbLatest(false);
 
       // The data fetch is the portal verdict: WALLED means the session
       // expired, so pause the loop and re-auth via the display.
       if (!fetchData()) {
-        Serial.println("[LOGIN] session walled mid-run, re-polling display");
-        lastCredPollMs = 0;
+        logf("[LOGIN] session walled mid-run, re-polling display");
         stage = STAGE_NEED_CREDS;
+        stageAtMs = 0;
         break;
       }
-      Serial.printf("[RUN] exp=%d duration=%dh running=%d dbLatest=%d bottles=%d ntp=%d queued=%u drops=%u (quick-polled)\n",
-                    expNum, durationH, expRunning ? 1 : 0, dbLatest, dbBottleCount,
-                    ntpSynced ? 1 : 0, (unsigned)s_pushCount, (unsigned)s_pushDrops);
-      delay(kIntervalMs);
+      logf("[RUN] exp=%d duration=%dh running=%d dbLatest=%d bottles=%d ntp=%d "
+           "queued=%u drops=%u",
+           expNum, durationH, expRunning ? 1 : 0, dbLatest, dbBottleCount,
+           ntpSynced ? 1 : 0, (unsigned)s_pushCount, (unsigned)s_pushDrops);
       break;
     }
   }

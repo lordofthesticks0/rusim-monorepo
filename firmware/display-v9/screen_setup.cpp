@@ -1,7 +1,7 @@
 #include "screen_setup.h"
 
 #include "fake_data.h"
-#include "link_modbus.h"
+#include "link_serial.h"
 #include "provision_ap.h"
 #include "ui_config.h"
 #include "ui_shell.h"
@@ -225,7 +225,7 @@ void screen_setup_show(lv_obj_t *parent) {
   lv_obj_add_event_cb(bypassBtn, on_debug_bypass, LV_EVENT_CLICKED, nullptr);
 #endif
 
-  s_status = ui_mk_label(parent, "Credentials go to the WT32 over Modbus.",
+  s_status = ui_mk_label(parent, "Credentials go to the WT32 over the serial link.",
                          24, 380, 740, UI_COL_WARN, &lv_font_montserrat_14);
 
   join_details_refresh();
@@ -238,7 +238,7 @@ static void setup_close_success() {
   g.experimentRunning = false;
   g.experimentStartMs = 0;
   Serial.println("[SETUP] WT32 auth OK, logged in; start the run from /control");
-  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
   // Never leave the credential form reachable once the run has started.
   provision_ap_end();
 
@@ -269,11 +269,11 @@ static void on_debug_bypass(lv_event_t *e) {
 #endif
 }
 
-// Poll the Modbus flags each loop. The master write of LOGIN_REQ routes to
-// /setup. RESULT drives the home route or a retry.
+// Poll the link flags each loop. LOGINREQ routes to /setup. RESULT drives the
+// home route or a retry.
 void screen_setup_poll() {
-  if (link_modbus_take_login_request()) {
-    Serial.println("[SETUP] WT32 LOGIN_REQ poll -> showing setup");
+  if (link_serial_take_login_request()) {
+    Serial.println("[SETUP] WT32 LOGINREQ -> showing setup");
     if (!ui_is_setup()) {
       ui_show_setup();
     } else {
@@ -281,7 +281,7 @@ void screen_setup_poll() {
     }
   }
   int res = LINK_RESULT_NONE;
-  if (link_modbus_take_result(res)) {
+  if (link_serial_take_result(res)) {
     if (res == LINK_RESULT_SUCCESS) {
       setup_close_success();
     } else if (res == LINK_RESULT_FAIL) {

@@ -1,15 +1,15 @@
 # network-master (`firmware/network-master`) — production WT32 firmware
 
 Scope: the WT32-ETH01 firmware that ships. It brings up wired Ethernet,
-takes the captive portal username/password from the display over Modbus RTU,
-logs in to the portal, then holds the connection up with ping plus an HTTPS
-data fetch. Re-authentication reuses the same display path; there is no
-serial-console credential entry.
+takes the captive portal username/password from the display over the
+`rusim-line` serial link, logs in to the portal, then holds the connection up
+with ping plus an HTTPS data fetch. Re-authentication reuses the same display
+path; there is no serial-console credential entry.
 
-`display-docs.md` §10 documents the display side of the same link
-(Modbus slave, combined login gate). `wt32-eth01-ping-test.md` documents the
-prototype this env was copied from. `captive-portal-workaround.md` documents
-the portal relay plan.
+`link-serial-protocol.md` is the wire specification. `display-docs.md` §10
+documents the display end of the same link. `wt32-eth01-ping-test.md`
+documents the prototype this env was copied from.
+`captive-portal-workaround.md` documents the portal relay plan.
 
 ## 1. Environment
 
@@ -34,47 +34,64 @@ pio device monitor -e network-master
 
 | WT32 pin | Display pin | Direction |
 |---|---|---|
-| AT-header TXD (IO17), Serial1 TX | IO18 (RX) | WT32 -> display |
-| AT-header RXD (IO5), Serial1 RX | IO17 (TX) | display -> WT32 |
+| Debug-header TXD (IO1), UART0 TX | IO18 (RX) | WT32 -> display |
+| Debug-header RXD (IO3), UART0 RX | IO17 (TX) | display -> WT32 |
 | GND | GND | common, wired directly |
-| IO14 | IO11 | display -> WT32, out of band (poll request; `display-wt32-link.md` §4.3) |
 
-Settings: 9600 8N1, Modbus RTU slave ID 1. `Serial` (TX0/RX0 debug header)
-is USB debug only and never carries Modbus frames.
+Settings: 115200 8N1. `Serial` is both the link and the log sink. The WT32
+prints every diagnostic as a `LOG <text>` line and the display forwards it to
+its own USB console; nothing else may write raw text to `Serial`.
 
-If no frames arrive, swap the two data wires first, then check the direct
-GND wire. Do not rely on shared USB ground. IO5 is a boot-strapping pin:
-the board must boot with RX idle high; a display that drives TX low during
-WT32 reset can block boot, so power the WT32 first when testing.
+`Serial1` is not opened in this phase. The old AT-header pair (`IO5`/`IO17`)
+is free and reserved for the RS485 sensor bus (`link-serial-protocol.md` §8).
+`IO2` remains an optional bench LED (external LED + 1k to GND) that blinks on
+any line received from the display. The `IO11 -> IO14` poll-request wire and
+its ISR are gone.
 
-## 3. Register map
+If no lines arrive, swap the two data wires first, then check the direct GND.
+Do not rely on shared USB ground. `IO1`/`IO3` carry no boot strapping, so
+power-up order does not matter; a UART transmitter idles HIGH.
 
-Must match `firmware/display-v9/link_modbus.h`.
+## 3. Line protocol
 
-| Address | Name | Access | Meaning |
-|---|---|---|---|
-| `0x0000` | LOGIN_REQ | master WR | `1` = show the login gate |
-| `0x0001` | CREDS_READY | slave sets, master writes `0` to ack | `1` = staged creds ready to read |
-| `0x0002` | RESULT | master WR | `0` none, `1` success, `2` fail |
-| `0x0003` | EXP_RUNNING | slave RD (poll) | `1` = experiment under way |
-| `0x0004` | EXP_NUM | slave RD (poll) | current experiment number |
-| `0x0010-0x002F` | USERNAME | master RD (32 regs) | 64 bytes ASCII, big-endian, NUL-padded |
-| `0x0030-0x004F` | PASSWORD | master RD (32 regs) | same encoding as username |
-| `0x0060` | DURATION_H | master RD (1 reg, quick poll) | 1-99, clamped |
-| `0x0070-0x0077` | IP_ADDR | master WR (8 regs) | 16 bytes ASCII NUL-padded, pushed every cycle for /info |
-| `0x0078` | PING_MS | master WR | avg ping to 1.1.1.1 in ms, `0xFFFF` = no data / failed |
-| `0x0079` | NET_UP | master WR | `1` = holds DHCP IP, `0` = link down |
-| `0x0005` | DB_LATEST | master WR | latest experiment_id in DB, `0xFFFF` = unknown |
-| `0x0006` | TIME_OK | master WR | `1` = NTP synced, `0` = no valid time yet |
-| `0x0007` | DB_BOTTLES | master WR | bottle_count from `authenticate()`, `0xFFFF` = unknown |
-| `0x0008` | PUSH_DROPS | master WR | buffered push rows dropped on queue overflow, saturated at `0xFFFF` |
+Must match `firmware/display-v9/link_serial.h`. One ASCII line per message,
+`\n` terminated, 1024 bytes maximum, 50 ms partial-line discard, no CRC and no
+acks. Full rules: `link-serial-protocol.md` §2.
 
-Full wire spec (framing, flows, timing, how to extend the map):
-`display-wt32-link.md`.
+### 3.1 Received from the display
 
-Only FC `0x03` (read holding) and FC `0x06` (write single) are used by the
-master. Each string register holds two ASCII bytes, high byte first. The CRC
-is standard Modbus CRC16 (`01 03 00 00 00 01` -> `84 0A` low byte first).
+| Word | Payload | Meaning |
+|---|---|---|
+| `HELLO` | - | display booted; reply with the full snapshot |
+| `EXPERIMENT` | `run=<0\|1> num=<n> dur=<1-99>` | experiment truth; log on change |
+| `CREDS` | `user=<pct> pass=<pct>` | staged portal pair; decode, trim, log in |
+| `DUMP` | - | emit a `LOG [DUMP] ...` state snapshot (read-only, ungated) |
+
+### 3.2 Sent to the display
+
+| Word | Payload | Cadence |
+|---|---|---|
+| `HELLO` | - | once at WT32 boot |
+| `LOGINREQ` | - | every heartbeat while credentials are needed |
+| `RESULT` | `OK` / `FAIL` | after every login attempt, plus the HELLO snapshot in RUN |
+| `NET` | `ip=<str> up=<0\|1> [ping=<n\|->]` | every heartbeat and ETH event |
+| `DB` | `latest=<n\|-> time=<0\|1> bottles=<n\|-> drops=<n>` | every heartbeat and after each DB pass |
+| `LOG` | `<text>` | every diagnostic line |
+
+`DB latest=0` means "no experiments yet" (the display maps it to -1), `-`
+means unknown. `drops=` is always a number; `0` is meaningful.
+
+### 3.3 Credential state
+
+Fixed 64-byte buffers, no Arduino `String`. A new pair is decoded from
+percent-encoding, trimmed, and copied to the working buffers and to the
+last-attempted pair. An identical pair answers with the stored verdict instead
+of logging in again. The working pair is overwritten with `x` then zeroed
+after each attempt; the last-attempted pair stays in RAM for the repeat rule.
+Nothing is written to NVS or flash.
+
+The display keeps its own copy for the session, so a WT32 reboot (`HELLO`)
+makes the display re-push the same pair without retyping.
 
 ## 4. State machine
 
@@ -85,42 +102,36 @@ WAIT_IP -> NEED_CREDS -> LOGIN -> RUN
    link lost    login fail / walled mid-run
 ```
 
-- `WAIT_IP`: waits for `ARDUINO_EVENT_ETH_GOT_IP`. Prints
-  `[ETH] Waiting for IP address (DHCP)...` every 2 s.
-- `NEED_CREDS`: the network loop pauses. Every 5 s it writes
-  `LOGIN_REQ=1`, reads `CREDS_READY`, and when `1` reads USERNAME (32),
-  PASSWORD (32). An all-empty pair is ignored; the display only raises
-  `CREDS_READY` after the phone form or `CREDS` has staged one. A captured
-  pair moves to LOGIN.
-  Each poll also quick-reads DURATION/EXP_NUM/EXP_RUNNING. A RISING pulse on
-  IO14 means the display has just staged a pair, so the remaining wait is
-  skipped and the poll happens on the next loop pass. That is what makes a
-  corrected password take effect immediately instead of up to 5 s later; the
-  ISR latches the flag, so a pulse during a login is not lost.
-- `LOGIN`: runs `doLogin()` (§5) with the RAM-only credentials, writes
-  RESULT (`1`/`2`), writes `CREDS_READY=0`, and on success also
-  `LOGIN_REQ=0`. Credentials are overwritten and released before leaving.
-  Success moves to RUN; failure returns to NEED_CREDS, where the next poll is
-  5 s away unless the display pulses the poll-request line first. The display
-  shows the same failure on its panel and on the phone's form page.
-- `RUN`: prints the IP, pings `1.1.1.1` 3x, fetches the data URL, and
-  quick-reads DURATION/EXP_NUM/EXP_RUNNING (logged on change). The fetch
-  verdict decides: genuine content stays in RUN, a WALLED body (portal
-  interception page) returns to NEED_CREDS for re-auth. A ping failure alone
-  does not trigger re-auth.
+- `WAIT_IP`: heartbeat `NET up=0`. Logs `[ETH] Waiting for IP address (DHCP)...`
+  every 2 s. `ETH_GOT_IP` moves to `NEED_CREDS`.
+- `NEED_CREDS`: every 5 s emits `NET up=1`, `DB` and `LOGINREQ`, and runs the
+  30 s already-authenticated probe (portal trigger + data fetch). A `CREDS`
+  line moves to `LOGIN` immediately. The display re-pushes its pair on every
+  heartbeat until a verdict arrives.
+- `LOGIN`: `doLogin()` (§5) with the RAM-only pair, then `RESULT OK`/`FAIL`.
+  The working pair is wiped. Success moves to `RUN`; failure returns to
+  `NEED_CREDS`, where a corrected pair from the display is acted on at once.
+- `RUN`: every 5 s prints the IP, pings `1.1.1.1` 3x, fetches the data URL,
+  runs the DB/push pass, and emits `NET` + `DB`. A WALLED fetch returns to
+  `NEED_CREDS` for re-auth. A ping failure alone does not trigger re-auth.
 
-There is no `DONE` halt state: every failure path re-polls the display.
+`loop()` is non-blocking between stage ticks: it pulls and dispatches link
+lines before anything else, then checks `millis()` gates. `doLogin()` and the
+HTTPS calls still block for their duration; the UART FIFO absorbs one
+heartbeat and the next pass drains it.
+
+There is no `DONE` halt state: every failure path returns to the display.
 Reset is never required to retry.
 
 ## 5. Portal login (`doLogin()`)
 
 Ported unchanged from `wt32-eth01_ping-test` except that username/password
-arrive from Modbus instead of the serial console:
+arrive over the line link instead of the serial console:
 
-1. Trigger: GET `http://example.com/` with redirects disabled, parse
-   `window.location="..."`. Empty means no interception; a genuine data
-   fetch then means already authenticated.
-2. Login page: HTTPS GET of the `fgtauth` URL with `setInsecure()`,
+1. Trigger: GET `http://connectivitycheck.gstatic.com/generate_204` with
+   redirects disabled, parse `window.location="..."`. Empty means no
+   interception; a genuine data fetch then means already authenticated.
+2. Login page: HTTPS GET of the portal URL with `setInsecure()`,
    rolling-window scan for form `action`, `4Tredir`, `magic`.
    Abort when the form or token is missing.
 3. Submit: POST form-urlencoded
@@ -143,6 +154,8 @@ through a 320-byte rolling window because the WT32-ETH01 has no PSRAM.
   optimizer because nothing enqueues yet; when the sensor pass adds a
   caller it materializes and RAM rises to ~112 KB (34%), still inside the
   100-150 KB ceiling.
+- The line link adds two fixed 1 KB log buffers, one 1 KB RX buffer, and
+  ~130 B of state. No heap allocation is added.
 - DHCP only, no static-IP fallback.
 - `setInsecure()` skips TLS verification on the captive-portal path only
   (interception sits above TLS termination, so it cannot be verified).
@@ -150,49 +163,57 @@ through a 320-byte rolling window because the WT32-ETH01 has no PSRAM.
   pin the CA bundle via `setCACert()` instead: chain + hostname checking
   on, no insecure fallback. See `esp-db-sync.md` §5.
 - Sample push queue: fixed 1200-row ring (~50 rounds), oldest-drop with a
-  saturating drop counter (`PUSH_DROPS`), sample-time stamps, clock-gated
-  on NTP, flushed 2 rounds per 30 s cycle to `push_readings()`. Dormant
-  until the sensor chain lands. See `esp-db-sync.md` §7-8.
-- DHCP only, no static-IP fallback.
-- `setInsecure()` skips TLS verification (same tradeoff as the ping test).
-- Credential lifetime: RAM only between capture and `clearCreds()`. Overwrite
-  with `x` before release. Never written to flash or NVS.
+  saturating drop counter, sample-time stamps, clock-gated on NTP, flushed
+  2 rounds per 30 s cycle to `push_readings()`. Dormant until the sensor
+  chain lands. See `esp-db-sync.md` §7-8.
+- Credential lifetime: RAM only. The working pair is overwritten with `x`
+  before release. The last-attempted pair is kept for the same-pair rule.
+  Never written to flash or NVS.
 - This firmware does not know where the credentials came from. The display's
-  SoftAP form and its USB `CREDS` command both stage them into the same
-  registers (§3) via `link_modbus_set_credentials()`, which also pulses the
-  poll-request line, and this side only ever sees a staged pair.
-- Link timeouts: 1 s per Modbus transaction, 8 ms inter-frame silence at
-  9600 baud. A failed transaction waits for the next 5 s poll.
+  SoftAP form and its USB `CREDS` command both land in
+  `link_serial_set_credentials()`, which sends `CREDS` immediately, and this
+  side only ever sees a staged pair.
+- Link limits: 1024-byte lines, 50 ms gap discard. A lost or corrupted line is
+  replaced by the next heartbeat within 5 s.
 
 ## 7. Expected output
 
+Lines prefixed `LOG ` reach the display, which prints them as `[W32] ...` on
+its USB console. A bare adapter on the WT32 Debug header shows the prefix.
+
 ```
-network-master (production WT32 portal + Modbus master)
-[MB] master on Serial1 RX=5 TX=17 9600 8N1 slave=1
-[ETH] Waiting for link + DHCP...
-[ETH] Started
-[ETH] Link up
-[ETH] Got IP
-[MB] link up, polling display for credentials
-[MB] display has no staged credentials yet
-[INT] display staged new credentials; polling now
-[MB] captured creds user='...'
-[LOGIN] Verifying with a real data fetch...
-[LOGIN] SUCCESS: port is authenticated.
-[PING] Pinging 1.1.1.1 ... OK, avg time = 15.55 ms
+LOG network-master (production WT32 portal + rusim-line peer)
+LOG Ping target: 1.1.1.1
+LOG Data URL: https://unison.boidu.dev/lyrics?v=dQw4w9WgXcQ
+LOG Credentials come from the display over UART0, never stored.
+HELLO
+LOG [LINK] rusim-line v1 on UART0 IO1/IO3 115200 8N1
+LOG [ETH] Waiting for link + DHCP...
+LOG [ETH] Started
+LOG [ETH] Link up
+LOG [ETH] Got IP 192.168.1.10 gw ... mask ... mac ...
+LOG [LINK] link up, waiting for credentials from the display
+LOG [LINK] captured creds user='...' (password in RAM only)
+LOG [LOGIN] Verifying with a real data fetch...
+LOG [LOGIN] SUCCESS: port is authenticated.
+LOG [PING] 1.1.1.1 OK, avg time = 15 ms
+LOG [RUN] exp=1 duration=24h running=1 dbLatest=3 bottles=24 ntp=1 queued=0 drops=0
 ```
 
 On a rejected pair:
 
 ```
-[LOGIN] FAILED: still walled (wrong credentials or portal changed).
-[LOGIN] will re-poll display in 5 s (or at once on a poll request)
+LOG [LOGIN] FAILED: still walled (wrong credentials or portal changed).
+LOG [LOGIN] will wait for a corrected pair from the display
 ```
+
+The display shows the same verdict on `/setup` and on the phone's form page.
 
 ## 8. Related documents
 
-- `display-docs.md` §10, §12 — display slave, login gate, and the SoftAP
-  credential form.
+- `link-serial-protocol.md` — the wire spec, log forwarding, `PASSTH`, RS485
+  follow-on.
+- `display-docs.md` §10, §12 — display end, login gate, SoftAP form.
 - `display-provisioning-ap.md` — the phone login path on the display.
 - `wt32-eth01-ping-test.md` — prototype this env was copied from.
 - `wt32-eth01-captive-recon.md` — portal recon sketch.
@@ -201,4 +222,4 @@ On a rejected pair:
 - `../hardware.md` — board pinouts (read-only reference).
 
 ---
-Content generated by `opencode/muse-spark-1.3-contributor-free` in `opencode`.
+Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.

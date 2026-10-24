@@ -3,7 +3,7 @@
 // Fake in-memory model of what the WT32 will push over UART every 5 minutes.
 // Single cycle only, no history (PSRAM is spent on frame buffers).
 // Every value here is settable at runtime over the USB serial line protocol
-// (see serial_cmd.h). There is no real Modbus/UART/WiFi traffic in this pass.
+// (see serial_cmd.h). There is no real UART/WiFi traffic in this pass.
 
 #include <Arduino.h>
 

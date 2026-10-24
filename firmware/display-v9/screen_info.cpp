@@ -1,7 +1,7 @@
 #include "screen_info.h"
 
 #include "fake_data.h"
-#include "link_modbus.h"
+#include "link_serial.h"
 #include "ui_config.h"
 #include "ui_shell.h"
 
@@ -91,7 +91,7 @@ static void gauge_set(lv_obj_t *arc, lv_obj_t *centre, int pct, const char *cent
 static void info_render() {
   // IP tile
   char ip[LINK_IP_MAX + 1];
-  link_modbus_get_ip(ip, sizeof(ip));
+  link_serial_get_ip(ip, sizeof(ip));
   if (s_valIp != nullptr) {
     lv_label_set_text(s_valIp, ip[0] != '\0' ? ip : "--");
   }
@@ -116,13 +116,13 @@ static void info_render() {
   }
 
   // DB tile: latest experiment id plus the bottle_count from authenticate()
-  // ("12 (24bt)"). "--" while never synced (0xFFFF on the wire).
+  // ("12 (24bt)"). "--" while never synced ("latest=-" on the wire).
   if (s_valDb != nullptr) {
-    int db = link_modbus_get_db_latest();
+    int db = link_serial_get_db_latest();
     if (db == -2) {
       lv_label_set_text(s_valDb, "--");
     } else {
-      int bottles = link_modbus_get_db_bottles();
+      int bottles = link_serial_get_db_bottles();
       char t[32];
       if (bottles < 0) snprintf(t, sizeof(t), "%d", db);
       else snprintf(t, sizeof(t), "%d (%dbt)", db, bottles);

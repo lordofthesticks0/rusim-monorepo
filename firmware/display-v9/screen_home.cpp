@@ -1,7 +1,7 @@
 #include "screen_home.h"
 
 #include "fake_data.h"
-#include "link_modbus.h"
+#include "link_serial.h"
 #include "ui_config.h"
 #include "ui_hold_button.h"
 #include "ui_shell.h"
@@ -146,7 +146,7 @@ static void on_duration_down(lv_event_t *e) {
   g.durationH--;
   if (g.durationH < UI_DURATION_MIN_H) g.durationH = UI_DURATION_MIN_H;
   Serial.printf("[HOME] duration %dh\n", g.durationH);
-  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
   ui_update_bell();
   home_render_run();
 }
@@ -156,7 +156,7 @@ static void on_duration_up(lv_event_t *e) {
   g.durationH++;
   if (g.durationH > UI_DURATION_MAX_H) g.durationH = UI_DURATION_MAX_H;
   Serial.printf("[HOME] duration %dh\n", g.durationH);
-  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
   ui_update_bell();
   home_render_run();
 }

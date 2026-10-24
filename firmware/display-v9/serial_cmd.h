@@ -6,7 +6,7 @@
 //            STATUS | LINK | HELP
 //
 // NOTE: this line protocol is display-local debug on USB Serial only.
-// The WT32 link is Modbus RTU slave ID 1 on Serial1 (IO18 RX / IO17 TX,
-// 9600 8N1); see link_modbus.h for the register map. USB debug output
-// never goes out Serial1, so monitor logs cannot corrupt Modbus frames.
+// The WT32 link is rusim-line v1 on Serial1 (IO18 RX / IO17 TX, 115200 8N1);
+// see link_serial.h and docs/llm-generated/link-serial-protocol.md. USB debug
+// output never goes out Serial1, so monitor logs cannot corrupt link lines.
 void serial_cmd_poll();
