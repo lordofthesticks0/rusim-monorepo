@@ -67,25 +67,41 @@ function LoginScreen({
 }) {
   const [token, setToken] = useState("");
 
-  return <main className="shell">
-    <header className="topbar"><div className="brand"><span className="brand-mark">R</span><span>RuSim <small>/ telemetry</small></span></div></header>
-    <section className="intro"><div><p className="eyebrow">Device access</p><h1>Sign in</h1><p className="subtitle">Enter your device token to view telemetry.</p></div></section>
-    <form className="panel login-panel" onSubmit={(event) => { event.preventDefault(); void onSignIn(token); }}>
-      <label className="login-field">Device token
-        <input
-          type="password"
-          value={token}
-          onChange={(event) => setToken(event.target.value)}
-          placeholder="Enter your device token"
-          autoComplete="current-password"
-          autoFocus
-          required
-        />
-      </label>
-      {error && <div className="notice login-error">{error}</div>}
-      <button className="refresh" type="submit" disabled={signingIn || token === ""}>{signingIn ? "Checking token..." : "Sign in"}</button>
-      <p className="login-hint">Your device token is exchanged for a 12-hour session scoped to its own device. The device token itself is never stored; only the session token is kept until you sign out or it expires.</p>
-    </form>
+  return <main className="login-shell">
+    <header className="login-header">
+      <div className="login-brand">
+        <span className="login-brand-mark" aria-hidden="true">R</span>
+        <span>RuSim <small>/ telemetry</small></span>
+      </div>
+    </header>
+
+    <div className="login-main">
+      <section className="login-card" aria-labelledby="login-title">
+        <div className="login-heading">
+          <p className="eyebrow">Device access</p>
+          <h1 className="login-title" id="login-title">Sign in</h1>
+          <p className="login-subtitle">Enter your device token to view telemetry.</p>
+        </div>
+
+        <form className="login-form" onSubmit={(event) => { event.preventDefault(); void onSignIn(token); }}>
+          <label className="login-field">Device token
+            <input
+              type="password"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              placeholder="Enter your device token"
+              autoComplete="current-password"
+              autoFocus
+              required
+            />
+          </label>
+          {error && <div className="login-error" role="alert">{error}</div>}
+          <button className="login-submit" type="submit" disabled={signingIn || token === ""}>{signingIn ? "Checking token..." : "Sign in"}</button>
+        </form>
+
+        <p className="login-hint">Your device token is exchanged for a 12-hour session scoped to its own device. The device token itself is never stored; only the session token is kept until you sign out or it expires.</p>
+      </section>
+    </div>
   </main>;
 }
 
@@ -171,12 +187,23 @@ function Dashboard({
       : readings.length > 0
         ? "Data loaded"
         : "No readings";
+  const pulseTone = loading ? "pending" : error ? "error" : readings.length > 0 ? "ok" : "idle";
+  const bottleState = selectedBottleIsDisconnected
+    ? "Disconnected"
+    : latestReading
+      ? (isConcluded(latestReading.timestamp) ? "Concluded" : "Live")
+      : "No data";
+  const bottleStateTone: "live" | "warning" | "neutral" = selectedBottleIsDisconnected
+    ? "warning"
+    : latestReading && !isConcluded(latestReading.timestamp)
+      ? "live"
+      : "neutral";
 
   return <main className="shell">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">R</span><span>RuSim <small>/ telemetry</small></span></div>
       <div className="status">
-        <span className="pulse" />
+        <span className={`pulse${view === "monitoring" ? ` ${pulseTone}` : ""}`} />
         {view === "monitoring" ? connectionStatus : "Experiment history"}
         <span className="divider" />
         {view === "monitoring"
@@ -201,52 +228,52 @@ function Dashboard({
       <button className={`nav-tab${view === "history" ? " active" : ""}`} onClick={() => setView("history")} aria-pressed={view === "history"}>Experiment History</button>
     </section>
 
-    {view === "monitoring" ? <>
-      {error && <div className="notice">Unable to refresh readings; showing the last loaded data. <span>{error}</span></div>}
-      {loading && <div className="notice">Loading readings...</div>}
+    {view === "monitoring" ? <div className="monitoring-view">
+      {error && <div className="notice notice-error">Unable to refresh readings; showing the last loaded data. <span>{error}</span></div>}
+      {loading && <div className="notice notice-info">Loading readings...</div>}
       {!loading && !liveExperiment ? <section className="panel monitoring-empty-state">
         <p className="eyebrow">Monitoring</p>
         <h2>Tidak ada eksperimen aktif</h2>
         <p className="subtitle">Historical readings remain available in Experiment History.</p>
       </section> : <>
 
-      <section className="controls">
+      <section className="controls monitoring-controls">
         <div className="control-copy"><span className="label">Showing</span><strong>Chamber {selectedBottle}</strong><span className="count">{bottleCount} chambers</span></div>
         <label>Chamber
           <select value={selectedBottle} onChange={(event) => setSelectedBottle(Number(event.target.value))}>
             {Array.from({ length: bottleCount }, (_, bottleId) => <option key={bottleId} value={bottleId}>Chamber {bottleId}</option>)}
           </select>
         </label>
+        <div className="monitoring-device">
+          <span className="device-id">Device {deviceId}</span>
+          <span className="device-owner">{ownerName ?? "Unnamed owner"}{ownerEmail ? ` (${ownerEmail})` : ""}</span>
+        </div>
       </section>
 
-      <div className="notice">Device {deviceId} <span>| {ownerName ?? "Unnamed owner"}{ownerEmail ? ` (${ownerEmail})` : ""}</span></div>
-
-      <section className="metrics">
+      <section className="status-summary" aria-label="Chamber status">
         <StatusCard label="Chamber" value={`Chamber ${selectedBottle}`} />
         <StatusCard label="Samples" value={String(bottleReadings.length)} />
         <StatusCard label="Latest sample" value={latestReadingAt} />
-        <StatusCard
-          label="Connection"
-          value={selectedBottleIsDisconnected ? "Disconnected" : latestReading ? (isConcluded(latestReading.timestamp) ? "Concluded" : "Live") : "No data"}
-        />
+        <StatusCard label="Connection" value={bottleState} tone={bottleStateTone} />
       </section>
 
-      {presence.latestSample && presence.disconnected.length > 0 && <div className="notice">
-        Disconnected at {formatDate(presence.latestSample)}: chambers {presence.disconnected.map((bottleId) => `Chamber ${bottleId}`).join(", ")} sent no data.
+      {presence.latestSample && presence.disconnected.length > 0 && <div className="notice connection-warning">
+        <span className="notice-label">Missing chamber data</span>
+        <p>Disconnected at {formatDate(presence.latestSample)}: chambers {presence.disconnected.map((bottleId) => `Chamber ${bottleId}`).join(", ")} sent no data.</p>
       </div>}
 
-      <section className="metrics">
-        {PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={latestReading ? getParameterValue(latestReading, name) : null} index={index} />)}
+      <section className="readings-grid" aria-label="Latest parameter readings">
+        {PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={latestReading ? getParameterValue(latestReading, name) : null} index={index} compact />)}
       </section>
 
-      {!loading && !error && monitoringReadings.length === 0 && <div className="notice">
+      {!loading && !error && monitoringReadings.length === 0 && <div className="notice notice-info">
         No readings are available for this chamber{presence.latestSample ? "; it did not report at the latest sample" : ""}.
       </div>}
 
-      <section className="panel">
+      <section className="panel monitoring-chart">
         <div className="panel-heading">
           <div><p className="eyebrow">Across experiments</p><h2>{parameterLabel(chartParameter)} readings</h2></div>
-          <div>
+          <div className="chart-controls">
             <select aria-label="Chart parameter" value={chartParameter} onChange={(event) => { if (isChartParameter(event.target.value)) setChartParameter(event.target.value); }}>
               {PARAMETER_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
@@ -255,14 +282,14 @@ function Dashboard({
         </div>
         <div className="chart">
           {bottleReadings.length < 2
-            ? <div className="notice">Not enough data for chart.</div>
+            ? <div className="chart-empty">Not enough data for chart.</div>
             : <Chart rows={bottleReadings} parameter={chartParameter} />}
         </div>
       </section>
 
       <footer><span>Data source: Supabase</span><span>-</span><span>Current experiment chamber readings</span></footer>
       </>}
-    </> : <ExperimentHistoryView experiments={experiments} loading={loading} error={error} sessionToken={sessionToken} />}
+    </div> : <ExperimentHistoryView experiments={experiments} loading={loading} error={error} sessionToken={sessionToken} />}
   </main>;
 }
 
@@ -446,7 +473,16 @@ function ExperimentResultsView({
           <div className="result-metrics">
             {PARAMETER_NAMES.map((name) => {
               const parameterStats = stats[name];
-              return <div className="result-metric" key={name}><strong>{parameterLabel(name)}</strong><span>{parameterStats ? <>Min {formatValue(parameterStats.min, name)} | Avg {formatValue(parameterStats.average, name)} | Max {formatValue(parameterStats.max, name)}</> : "No readings"}</span></div>;
+              return <div className="result-metric" key={name}>
+                <strong>{parameterLabel(name)}</strong>
+                {parameterStats
+                  ? <div className="result-stat-values">
+                    <div><span>Min</span><strong>{formatValue(parameterStats.min, name)}</strong></div>
+                    <div><span>Mean</span><strong>{formatValue(parameterStats.average, name)}</strong></div>
+                    <div><span>Max</span><strong>{formatValue(parameterStats.max, name)}</strong></div>
+                  </div>
+                  : <span className="result-empty">No readings</span>}
+              </div>;
             })}
           </div>
         </article>)}
@@ -525,7 +561,13 @@ function Chart({ rows, parameter, bottleId, interactive = false }: { rows: Readi
         />;
       })}
     </svg>
-    <div className="axis">{labels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}</div>
+    <div className="axis" aria-label="Sample time">
+      {labels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}
+    </div>
+    <div className="chart-context">
+      <span className="chart-axis-label">Sample time</span>
+      <span className="chart-legend"><i aria-hidden="true" />{parameterLabel(parameter)}</span>
+    </div>
     {interactive && activeDetails && <div className="chart-tooltip" role="status">
       <span>Timestamp: {formatDateTime(activeDetails.timestamp)}</span>
       <span>Chamber: {bottleId === null ? "Unavailable" : `Chamber ${bottleId}`}</span>
@@ -627,17 +669,27 @@ function createTimeLabels(rows: Reading[]): string[] {
   });
 }
 
-function MetricCard({ name, value, index }: { name: ParameterName; value: number | null; index: number }) {
+function MetricCard({ name, value, index, compact = false }: { name: ParameterName; value: number | null; index: number; compact?: boolean }) {
   const colors = ["blue", "orange", "green", "purple", "pink"];
+  if (compact) {
+    return <article className="metric metric-compact">
+      <p>{name}</p>
+      <strong>{value === null ? "-" : formatValue(value, name)}</strong>
+      <span className="unit">{value === null ? "No reading" : PARAMETER_UNITS[name] || "Unitless"}</span>
+    </article>;
+  }
   return <article className="metric">
     <div className={`metric-icon ${colors[index]}`}><span /></div>
-    <div><p>{name}</p><strong>{value === null ? "-" : formatValue(value, name)}</strong><span className="unit">{value === null ? "" : PARAMETER_UNITS[name]}</span></div>
+    <div><p>{name}</p><strong>{value === null ? "-" : formatValue(value, name)}</strong><span className="unit">{value === null ? "No reading" : PARAMETER_UNITS[name] || "Unitless"}</span></div>
     <span className="trend">{value === null ? "-" : "Latest"}</span>
   </article>;
 }
 
-function StatusCard({ label, value }: { label: string; value: string }) {
-  return <article className="metric"><p>{label}</p><strong>{value}</strong></article>;
+function StatusCard({ label, value, tone }: { label: string; value: string; tone?: "live" | "warning" | "neutral" }) {
+  return <article className="metric status-card">
+    <p>{label}</p>
+    <strong>{tone ? <span className={`status-dot ${tone}`} aria-hidden="true" /> : null}{value}</strong>
+  </article>;
 }
 
 export default App;
