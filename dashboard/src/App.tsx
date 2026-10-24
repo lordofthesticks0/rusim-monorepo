@@ -219,7 +219,7 @@ function Dashboard({
         </label>
       </section>
 
-      <div className="notice">Device {deviceId} <span>| {ownerName ?? "Unnamed owner"}{ownerEmail ? ` (${ownerEmail})` : ""}</span></div>
+      <div className="notice device-summary"><span className="device-id">Device {deviceId}</span><span className="device-owner">{ownerName ?? "Unnamed owner"}{ownerEmail ? ` (${ownerEmail})` : ""}</span></div>
 
       <section className="metrics">
         <StatusCard label="Chamber" value={`Chamber ${selectedBottle}`} />
@@ -446,7 +446,16 @@ function ExperimentResultsView({
           <div className="result-metrics">
             {PARAMETER_NAMES.map((name) => {
               const parameterStats = stats[name];
-              return <div className="result-metric" key={name}><strong>{parameterLabel(name)}</strong><span>{parameterStats ? <>Min {formatValue(parameterStats.min, name)} | Avg {formatValue(parameterStats.average, name)} | Max {formatValue(parameterStats.max, name)}</> : "No readings"}</span></div>;
+              return <div className="result-metric" key={name}>
+                <strong>{parameterLabel(name)}</strong>
+                {parameterStats
+                  ? <div className="result-stat-values">
+                    <div><span>Min</span><strong>{formatValue(parameterStats.min, name)}</strong></div>
+                    <div><span>Mean</span><strong>{formatValue(parameterStats.average, name)}</strong></div>
+                    <div><span>Max</span><strong>{formatValue(parameterStats.max, name)}</strong></div>
+                  </div>
+                  : <span className="result-empty">No readings</span>}
+              </div>;
             })}
           </div>
         </article>)}
@@ -525,7 +534,13 @@ function Chart({ rows, parameter, bottleId, interactive = false }: { rows: Readi
         />;
       })}
     </svg>
-    <div className="axis">{labels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}</div>
+    <div className="axis" aria-label="Sample time">
+      {labels.map((label, index) => <span key={`${label}-${index}`}>{label}</span>)}
+    </div>
+    <div className="chart-context">
+      <span className="chart-axis-label">Sample time</span>
+      <span className="chart-legend"><i aria-hidden="true" />{parameterLabel(parameter)}</span>
+    </div>
     {interactive && activeDetails && <div className="chart-tooltip" role="status">
       <span>Timestamp: {formatDateTime(activeDetails.timestamp)}</span>
       <span>Chamber: {bottleId === null ? "Unavailable" : `Chamber ${bottleId}`}</span>
@@ -631,7 +646,7 @@ function MetricCard({ name, value, index }: { name: ParameterName; value: number
   const colors = ["blue", "orange", "green", "purple", "pink"];
   return <article className="metric">
     <div className={`metric-icon ${colors[index]}`}><span /></div>
-    <div><p>{name}</p><strong>{value === null ? "-" : formatValue(value, name)}</strong><span className="unit">{value === null ? "" : PARAMETER_UNITS[name]}</span></div>
+    <div><p>{name}</p><strong>{value === null ? "-" : formatValue(value, name)}</strong><span className="unit">{value === null ? "No reading" : PARAMETER_UNITS[name] || "Unitless"}</span></div>
     <span className="trend">{value === null ? "-" : "Latest"}</span>
   </article>;
 }

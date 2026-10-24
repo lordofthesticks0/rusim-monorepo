@@ -51,4 +51,23 @@
 .telemetry-chart-panel { min-width: 0; }
 .telemetry-chart-panel h2 { font-size: 18px; }
 .chart-tooltip { position: absolute; z-index: 2; top: 9px; right: 0; display: grid; gap: 3px; max-width: min(280px, 80%); padding: 8px 10px; border: 1px solid #dce2e8; border-radius: 5px; background: rgba(255, 255, 255, .96); color: #384453; box-shadow: 0 5px 16px rgba(32, 41, 54, .1); font-size: 11px; line-height: 1.35; }
+.metric strong { font-variant-numeric: tabular-nums; }
+.metric .unit { display: block; margin-top: 4px; color: #687586; font-size: 10px; }
+.device-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; background: #f8fafc; border-color: #e2e6eb; color: #687586; }
+.device-summary span { opacity: 1; }
+.device-id { color: #384453; font: 500 11px 'DM Mono', monospace; }
+.device-owner { font-size: 12px; }
+.chart .axis { position: absolute; left: 0; right: 0; bottom: 22px; padding-top: 0; font-variant-numeric: tabular-nums; }
+.axis span { white-space: nowrap; }
+.chart-context { position: absolute; right: 0; bottom: 0; left: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 17px; color: #778392; font-size: 10px; }
+.chart-axis-label { color: #87919e; }
+.chart-legend { display: inline-flex; align-items: center; gap: 6px; font: 10px 'DM Mono', monospace; }
+.chart-legend i { width: 14px; border-top: 2px solid #2462ee; }
+.result-metric { align-content: start; min-width: 0; }
+.result-metric > strong { color: #384453; font-size: 11px; }
+.result-stat-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+.result-stat-values > div { display: grid; gap: 3px; min-width: 0; }
+.result-stat-values span { color: #778392; font: 10px 'DM Sans', sans-serif; }
+.result-stat-values strong { color: #202936; font: 500 11px 'DM Mono', monospace; font-variant-numeric: tabular-nums; }
+.result-empty { color: #778392; font: 10px 'DM Sans', sans-serif; }
 @media (max-width: 760px) { .section-navigation { flex-direction: row; align-items: stretch; overflow-x: auto; }.nav-tab { flex: 1 0 auto; }.history-chart-grid { gap: 12px; }.telemetry-chart-panel { padding: 18px 15px 12px; }.telemetry-chart-panel .chart { height: 235px; } }
