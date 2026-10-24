@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "./auth";
 import { csvFileName, downloadCsv, toCsv } from "./csv";
+import { displayChamberNumber, internalChamberIds, FIRST_INTERNAL_CHAMBER_ID } from "./chambers";
 import {
   fetchReadings,
   fetchExperimentReadings,
@@ -118,7 +119,7 @@ function Dashboard({
   const [readings, setReadings] = useState<Reading[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [selectedBottle, setSelectedBottle] = useState(0);
+  const [selectedBottle, setSelectedBottle] = useState(FIRST_INTERNAL_CHAMBER_ID);
   const [chartParameter, setChartParameter] = useState<ParameterName>("CH4");
   // A failed fetch is treated as the end of the live feed, so polling stops
   // until the operator refreshes by hand.
@@ -238,10 +239,10 @@ function Dashboard({
       </section> : <>
 
       <section className="controls monitoring-controls">
-        <div className="control-copy"><span className="label">Showing</span><strong>Chamber {selectedBottle}</strong><span className="count">{bottleCount} chambers</span></div>
+        <div className="control-copy"><span className="label">Showing</span><strong>Chamber {displayChamberNumber(selectedBottle)}</strong><span className="count">{bottleCount} chambers</span></div>
         <label>Chamber
           <select value={selectedBottle} onChange={(event) => setSelectedBottle(Number(event.target.value))}>
-            {Array.from({ length: bottleCount }, (_, bottleId) => <option key={bottleId} value={bottleId}>Chamber {bottleId}</option>)}
+            {internalChamberIds(bottleCount).map((internalId) => <option key={internalId} value={internalId}>Chamber {displayChamberNumber(internalId)}</option>)}
           </select>
         </label>
         <div className="monitoring-device">
@@ -251,7 +252,7 @@ function Dashboard({
       </section>
 
       <section className="status-summary" aria-label="Chamber status">
-        <StatusCard label="Chamber" value={`Chamber ${selectedBottle}`} />
+        <StatusCard label="Chamber" value={`Chamber ${displayChamberNumber(selectedBottle)}`} />
         <StatusCard label="Samples" value={String(bottleReadings.length)} />
         <StatusCard label="Latest sample" value={latestReadingAt} />
         <StatusCard label="Connection" value={bottleState} tone={bottleStateTone} />
@@ -259,15 +260,15 @@ function Dashboard({
 
       {presence.latestSample && presence.disconnected.length > 0 && <div className="notice connection-warning">
         <span className="notice-label">Missing chamber data</span>
-        <p>Disconnected at {formatDate(presence.latestSample)}: chambers {presence.disconnected.map((bottleId) => `Chamber ${bottleId}`).join(", ")} sent no data.</p>
+        <p>Disconnected at {formatDate(presence.latestSample)}: chambers {presence.disconnected.map((internalId) => `Chamber ${displayChamberNumber(internalId)}`).join(", ")} sent no data.</p>
       </div>}
 
       <section className="readings-grid" aria-label="Latest parameter readings">
         {PARAMETER_NAMES.map((name, index) => <MetricCard key={name} name={name} value={latestReading ? getParameterValue(latestReading, name) : null} index={index} compact />)}
       </section>
 
-      {!loading && !error && monitoringReadings.length === 0 && <div className="notice notice-info">
-        No readings are available for this chamber{presence.latestSample ? "; it did not report at the latest sample" : ""}.
+      {!loading && !error && bottleReadings.length === 0 && <div className="notice notice-info">
+        No readings are available for Chamber {displayChamberNumber(selectedBottle)}{presence.latestSample ? "; it did not report at the latest sample" : ""}.
       </div>}
 
       <section className="panel monitoring-chart">
@@ -431,7 +432,7 @@ function ExperimentHistoryView({
             value={selectedChamberId ?? ""}
             onChange={(event) => setSelectedChamberId(Number(event.target.value))}
           >
-            {availableChambers.map((bottleId) => <option value={bottleId} key={bottleId}>Chamber {bottleId}</option>)}
+            {availableChambers.map((internalId) => <option value={internalId} key={internalId}>Chamber {displayChamberNumber(internalId)}</option>)}
           </select>
         </section>
         <section className="metrics">
@@ -467,7 +468,7 @@ function ExperimentResultsView({
       <div className="result-list">
         {chamberSummaries.map(({ bottle_id, readings, lastReading, stats }) => <article className="result-card" key={bottle_id}>
           <div className="result-heading">
-            <div><strong>Chamber {bottle_id}</strong><span>Latest sample: {formatDate(lastReading.timestamp)}</span></div>
+            <div><strong>Chamber {displayChamberNumber(bottle_id)}</strong><span>Latest sample: {formatDate(lastReading.timestamp)}</span></div>
             <span className="tag">{readings.length} readings</span>
           </div>
           <div className="result-metrics">
@@ -570,7 +571,7 @@ function Chart({ rows, parameter, bottleId, interactive = false }: { rows: Readi
     </div>
     {interactive && activeDetails && <div className="chart-tooltip" role="status">
       <span>Timestamp: {formatDateTime(activeDetails.timestamp)}</span>
-      <span>Chamber: {bottleId === null ? "Unavailable" : `Chamber ${bottleId}`}</span>
+      <span>Chamber: {bottleId == null ? "Unavailable" : `Chamber ${displayChamberNumber(bottleId)}`}</span>
       <span>Experiment: {formatExperimentId(activeReading!.experiment_id)}</span>
       <span>Parameter: {parameterLabel(activeDetails.parameter)}</span>
       <span>Value: {formatTooltipValue(activeDetails.value, activeDetails.parameter)}</span>
@@ -580,7 +581,7 @@ function Chart({ rows, parameter, bottleId, interactive = false }: { rows: Readi
 
 function BottleChart({ readings, parameter, bottleId }: { readings: Reading[]; parameter: ParameterName; bottleId: number | null }) {
   return <section className="panel telemetry-chart-panel">
-    <div className="panel-heading"><div><p className="eyebrow">{bottleId === null ? "Selected chamber" : `Chamber ${bottleId}`}</p><h2>{parameterLabel(parameter)}</h2></div><span className="tag">{readings.length} readings</span></div>
+    <div className="panel-heading"><div><p className="eyebrow">{bottleId === null ? "Selected chamber" : `Chamber ${displayChamberNumber(bottleId)}`}</p><h2>{parameterLabel(parameter)}</h2></div><span className="tag">{readings.length} readings</span></div>
     <div className="chart"><Chart rows={readings} parameter={parameter} bottleId={bottleId} interactive /></div>
   </section>;
 }

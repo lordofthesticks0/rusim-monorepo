@@ -13,6 +13,10 @@ export const PARAMETER_UNITS = {
   Pressure: "kPa",
 } as const satisfies Record<ParameterName, string>;
 
+// Chamber numbering lives in its own module so pure helpers stay importable
+// without constructing the Supabase client.
+export { displayChamberNumber, internalChamberIds, FIRST_INTERNAL_CHAMBER_ID, splitBottlesByPresence } from "./chambers";
+
 type ReadingRow = {
   device_id: number;
   bottle_id: number;
@@ -177,11 +181,11 @@ export async function fetchReadings(sessionToken: string): Promise<Reading[]> {
 }
 
 /**
- * Reads every bottle's reading for one experiment.
+ * Reads every chamber's readings for one experiment.
  *
  * RLS already restricts this to the session's own device, so no device filter
- * is applied here. Ordering by bottle then time keeps a multi-page read
- * contiguous, so `computeBottleStats` sees each bottle's samples together.
+ * is applied here. Ordering by chamber then time keeps a multi-page read
+ * contiguous, so `groupReadingsByChamber` sees each chamber's samples together.
  */
 export async function fetchExperimentReadings(sessionToken: string, experimentId: number): Promise<Reading[]> {
   const rows: ReadingRow[] = [];
@@ -251,40 +255,6 @@ export function getParameterValue(reading: Reading, parameter: ParameterName): n
     case "CH4": return reading.ch4;
     case "Pressure": return reading.pressure;
   }
-}
-
-/**
- * Determines which bottles reported at a given sample time.
- *
- * A bottle that is configured on the device but has no row at the latest sample
- * is treated as disconnected: it sent nothing at all for that timestamp. This is
- * distinct from a row that exists with null measurements, which means the bottle
- * reported but that one sensor failed.
- *
- * Returns the connected and disconnected bottle ids for the most recent sample.
- */
-export function splitBottlesByPresence(
-  readings: Reading[],
-  bottleCount: number,
-): { latestSample: string | null; connected: number[]; disconnected: number[] } {
-  const all = Array.from({ length: bottleCount }, (_, bottleId) => bottleId);
-  if (readings.length === 0) {
-    return { latestSample: null, connected: [], disconnected: all };
-  }
-
-  const latestSample = readings.reduce(
-    (latest, reading) => (reading.timestamp > latest ? reading.timestamp : latest),
-    readings[0]!.timestamp,
-  );
-  const reporting = new Set(
-    readings.filter((reading) => reading.timestamp === latestSample).map((reading) => reading.bottle_id),
-  );
-
-  return {
-    latestSample,
-    connected: all.filter((bottleId) => reporting.has(bottleId)),
-    disconnected: all.filter((bottleId) => !reporting.has(bottleId)),
-  };
 }
 
 /**

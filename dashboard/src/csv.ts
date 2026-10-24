@@ -1,4 +1,5 @@
 import { getParameterValue, PARAMETER_NAMES, PARAMETER_UNITS, type ParameterName } from "./data";
+import { displayChamberNumber } from "./chambers";
 import type { Reading } from "./types/domain";
 
 /**
@@ -8,6 +9,9 @@ import type { Reading } from "./types/domain";
  * the dashboard. Parameter names and units come from data.ts rather than being
  * repeated here, and getParameterValue does the field lookup, so a sensor cannot
  * end up exported under the wrong name or column.
+ *
+ * The exported bottle id is mapped once to the user-facing chamber number;
+ * readings and their stored ids remain unchanged in memory and in Supabase.
  */
 const COLUMNS: ReadonlyArray<string | ParameterName> = [
   "bottle_id",
@@ -37,7 +41,7 @@ export function toCsv(readings: Reading[]): string {
   );
 
   const lines = rows.map((reading) => [
-    reading.bottle_id,
+    displayChamberNumber(reading.bottle_id),
     reading.timestamp,
     ...PARAMETER_NAMES.map((parameter) => getParameterValue(reading, parameter)),
   ].map(formatCell).join(","));

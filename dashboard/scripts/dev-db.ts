@@ -25,6 +25,7 @@
  * This script connects directly so it stays re-runnable on demand.
  */
 import { SQL } from "bun";
+import { displayChamberNumber } from "../src/chambers";
 import { createInterface } from "node:readline/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -80,16 +81,16 @@ const FIELDS: FieldRule[] = [
   { key: "sampleGapMinutes", label: "Minutes between samples", hint: "spacing of the time series", min: 1, max: 1440, integer: true },
   {
     key: "bottleCount",
-    label: "Bottles reporting",
-    hint: "bottles 0 to N-1 report; the rest are treated as disconnected",
+    label: "Chambers reporting",
+    hint: "chambers 1 to N report; the rest are treated as disconnected",
     min: 0,
     max: 10_000,
     integer: true,
   },
   {
     key: "bottleTotal",
-    label: "Total bottles on device",
-    hint: "bottle_count stored on the device; the dashboard offers this many",
+    label: "Total chambers on device",
+    hint: "bottle_count stored on the device; the dashboard offers this many, numbered 1 to N",
     min: 0,
     max: 10_000,
     integer: true,
@@ -233,11 +234,12 @@ async function promptForKnobs(): Promise<Knobs> {
 
 function summarise(knobs: Knobs): string {
   const window = (knobs.sampleCount - 1) * knobs.sampleGapMinutes;
+  const reporting = knobs.bottleCount > 0 ? `1-${knobs.bottleCount}` : "none";
   return [
     `  device          ${knobs.deviceId}`,
     `  experiment      ${knobs.experimentId}${knobs.experimentId === 0 ? " (testing)" : ""}`,
     `  samples         ${knobs.sampleCount} every ${knobs.sampleGapMinutes} min (~${window} min span)`,
-    `  bottles         0-${knobs.bottleCount - 1} report, ${knobs.bottleTotal} configured`,
+    `  chambers        ${reporting} report, ${knobs.bottleTotal} configured`,
     `  null rate       ${knobs.nullRate}`,
     `  rows to insert  ${knobs.sampleCount * Math.max(knobs.bottleCount, 0)}`,
   ].join("\n");
@@ -400,7 +402,7 @@ where device_id = $1
 `.trim();
 
 /**
- * Bottles the device claims to have but which never reported. The dashboard
+ * Chambers the device claims to have but which never reported. The dashboard
  * reads this absence as "disconnected", which is a different condition from a
  * row whose measurement is null.
  */
@@ -420,8 +422,9 @@ order by missing.bottle_id;
 
 /**
  * Makes sure the target device exists, so the readings have a parent row. Its
- * bottle_count becomes the number of bottles the dashboard offers, of which only
- * the first bottle_count actually report. The token hash is left alone: it is
+ * bottle_count becomes the number of chambers the dashboard offers, of which
+ * only the first bottle_count (chambers 1 to N) actually report. The token hash
+ * is left alone: it is
  * owned by setDevToken and must survive a reseed.
  */
 const UPSERT_DEVICE = `
@@ -470,12 +473,12 @@ async function seedReadings(db: SQL, knobs: Knobs): Promise<void> {
       value instanceof Date ? value.toISOString().replace("T", " ").slice(0, 16) : String(value);
 
     console.log(`\n  rows written     ${summary?.total_rows ?? 0}`);
-    console.log(`  bottles          ${summary?.bottles_reporting ?? 0} reporting`);
+    console.log(`  chambers         ${summary?.bottles_reporting ?? 0} reporting`);
     console.log(`  first sample     ${format(summary!.first_sample)} UTC`);
     console.log(`  last sample      ${format(summary!.last_sample)} UTC`);
     console.log(`  null ph / ch4    ${summary?.null_ph ?? 0} / ${summary?.null_ch4 ?? 0}`);
     if (missing.length > 0) {
-      console.log(`  disconnected     ${missing.map((row) => row.bottle_id).join(", ")}`);
+      console.log(`  disconnected     ${missing.map((row) => displayChamberNumber(row.bottle_id)).map((chamber) => `Chamber ${chamber}`).join(", ")}`);
     }
   });
 }

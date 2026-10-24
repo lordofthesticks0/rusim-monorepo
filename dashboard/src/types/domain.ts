@@ -8,6 +8,7 @@ export type Metadata = Record<string, unknown>;
  */
 export interface Device {
   device_id: number;
+  /** Number of chambers the device exposes; internal bottle ids are 0..bottle_count-1. */
   bottle_count: number;
   owner_name: string | null;
   owner_email: string | null;
@@ -31,6 +32,9 @@ export interface DeviceSession {
  * timestamp but that individual sensor produced no value, which is different
  * from the bottle being absent from the sample entirely (offline). `temp` is the
  * schema's column name for temperature.
+ *
+ * `bottle_id` is the stored/ESP32 internal id (`0..bottle_count-1`). The UI
+ * displays it as a chamber number by adding one at the display boundary.
  */
 export interface Reading {
   device_id: number;

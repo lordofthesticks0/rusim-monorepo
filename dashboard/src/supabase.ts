@@ -3,20 +3,25 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./types/database";
 
-const envUrl = import.meta.env.VITE_SUPABASE_URL;
-const envPublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+/**
+ * Reads the two build-time values on first use rather than at module load.
+ *
+ * The guard still fails loudly when the app actually builds a client, but it no
+ * longer prevents pure helpers from being imported by tests that do not talk to
+ * Supabase.
+ */
+function readConfig(): { url: string; publishableKey: string } {
+  const envUrl = import.meta.env.VITE_SUPABASE_URL;
+  const envPublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-if (!envUrl || !envPublishableKey) {
-  throw new Error(
-    "Missing Supabase configuration: VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are required.",
-  );
+  if (!envUrl || !envPublishableKey) {
+    throw new Error(
+      "Missing Supabase configuration: VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are required.",
+    );
+  }
+
+  return { url: envUrl, publishableKey: envPublishableKey };
 }
-
-// Bound to plain strings after the guard above. Vite types env reads as
-// `string | undefined`, and letting that leak into createClient suppresses its
-// generic inference, which degrades every query to an unresolved conditional.
-const url: string = envUrl;
-const publishableKey: string = envPublishableKey;
 
 /**
  * Custom header carrying the session token issued by `device_data.authenticate`.
@@ -34,6 +39,9 @@ export const SESSION_HEADER = "x-device-session";
 export type DeviceDataClient = SupabaseClient<Database, "device_data", "device_data", Database["device_data"]>;
 
 function buildClient(sessionToken: string | null): DeviceDataClient {
+  // readConfig returns plain strings, so the values passed to createClient do
+  // not carry `string | undefined` and the generic inference stays concrete.
+  const { url, publishableKey } = readConfig();
   return createClient<Database, "device_data">(url, publishableKey, {
     // Default every query to the device_data namespace; the old public schema
     // is still present in the database but is no longer used by this app.

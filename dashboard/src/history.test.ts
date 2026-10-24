@@ -24,6 +24,14 @@ function reading(overrides: Partial<Reading> = {}): Reading {
 }
 
 describe("historical chamber data", () => {
+  test("selects and groups internal bottle id 0 without shifting the stored id", () => {
+    const row = reading({ bottle_id: 0 });
+
+    expect(getExperimentChambers([row], 1)).toEqual([0]);
+    expect(selectChamberReadings([row], 1, 0)).toEqual([row]);
+    expect(groupReadingsByChamber([row], 1)[0]?.bottle_id).toBe(0);
+  });
+
   test("starts without a selection and toggles selection on repeated clicks", () => {
     expect(toggleExperimentSelection(null, 1)).toBe(1);
     expect(toggleExperimentSelection(1, 1)).toBeNull();
