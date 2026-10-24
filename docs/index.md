@@ -67,7 +67,7 @@ document is the source of truth for anything measured on real hardware.
 | [captive-portal-workaround.md](llm-generated/captive-portal-workaround.md) | Plan for headless captive portal authentication on the WT32-ETH01 |
 | [captive-portal-login-script.md](llm-generated/captive-portal-login-script.md) | `scripts-hardware/captive-portal-login.sh`: the firmware login sequence as a one-shot bash script |
 | [legacy-slave.md](llm-generated/legacy-slave.md) | `legacy/slave/new-slave.cpp`: 4-bottle sensor slave, JSON protocol, USB stream, HX711 init trap, known gaps |
-| [migration-plan.md](llm-generated/migration-plan.md) | Plan: ESP pulls telemetry from the legacy Mega slave over UART1, log-only first step, pH conversion deferred to the slave |
+| [migration-plan.md](llm-generated/migration-plan.md) | ESP pulls telemetry from the legacy Mega slave over UART1 (implemented, log-only); pH converted in the slave; enqueue deferred |
 | [legacy-master.md](llm-generated/legacy-master.md) | `legacy/master/master.cpp`: water-bath master firmware, MOSFET PWM pump and stirrer ramping, hysteresis, Pi USB serial commands |
 
 ## 3. Dashboard

@@ -4,7 +4,7 @@
  * per-bottle table.
  *
  * The slave emits one line per sample on USB serial at 9600 baud:
- *   {"bottles":[{"id":1,"ph":2.51,"methane":812.4,"temp":38.5,"co2":1204,"press":1013.2}, ...]}
+ *   {"bottles":[{"id":1,"ph":6.84,"methane":812.4,"temp":38.5,"co2":1204,"press":1013.2}, ...]}
  *
  * Opening the serial port usually resets the Mega, so the first messages are
  * full of the firmware's invalid markers (-1 / -999) while the cache fills.
@@ -46,7 +46,7 @@ const DEFAULT_SETTLE_SECONDS = 5;
 // arrives in chunks; this lets the monitor finish delivering a frame.
 const FRAME_QUIET_MS = 100;
 
-const HEADERS = ["time", "bottle", "pH (V)", "CH4 (ppm)", "temp (°C)", "CO2 (ppm)", "press (Pa)"];
+const HEADERS = ["time", "bottle", "pH", "CH4 (ppm)", "temp (°C)", "CO2 (ppm)", "press (Pa)"];
 const WIDTHS = [8, 6, 7, 9, 9, 9, 10];
 const ALIGN: Array<"left" | "right"> = ["left", "right", "right", "right", "right", "right", "right"];
 

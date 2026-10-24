@@ -32,6 +32,8 @@ pio device monitor -e network-master
 
 ## 2. Wiring
 
+### 2.1 Display link (UART0)
+
 | WT32 pin | Display pin | Direction |
 |---|---|---|
 | Debug-header TXD (IO1), UART0 TX | IO18 (RX) | WT32 -> display |
@@ -42,8 +44,6 @@ Settings: 115200 8N1. `Serial` is both the link and the log sink. The WT32
 prints every diagnostic as a `LOG <text>` line and the display forwards it to
 its own USB console; nothing else may write raw text to `Serial`.
 
-`Serial1` is not opened in this phase. The old AT-header pair (`IO5`/`IO17`)
-is free and reserved for the RS485 sensor bus (`link-serial-protocol.md` §8).
 `IO2` remains an optional bench LED (external LED + 1k to GND) that blinks on
 any line received from the display. The `IO11 -> IO14` poll-request wire and
 its ISR are gone.
@@ -51,6 +51,55 @@ its ISR are gone.
 If no lines arrive, swap the two data wires first, then check the direct GND.
 Do not rely on shared USB ground. `IO1`/`IO3` carry no boot strapping, so
 power-up order does not matter; a UART transmitter idles HIGH.
+
+### 2.2 Mega slave link (UART1)
+
+Direct TTL, no MAX485: the legacy Mega answers on its own `Serial1`, and the
+link needs no direction control.
+
+| Signal | WT32 pin | Mega pin | Direction |
+|---|---|---|---|
+| Data | IO5 (UART1 RX) | D18 (TX1) | Mega -> WT32 |
+| Data | IO17 (UART1 TX) | D19 (RX1) | WT32 -> Mega |
+| Ground | GND | GND | common |
+
+Settings: 9600 8N1, matching `Serial1.begin(9600)` in
+`legacy/slave/new-slave.cpp`. `Serial1.begin(9600, SERIAL_8N1, 5, 17)` remaps
+the pins, because the ESP32 UART1 defaults (`IO9`/`IO10`) are flash pins on
+this module. `IO14` stays spare.
+
+Electrical warning: the Mega drives D18 at 5 V and the WT32 pins are 3.3 V
+only, so D18 -> IO5 needs a divider (2k2/3k3) or a level shifter. IO17 -> D19
+at 3.3 V sits close to the ATmega's worst-case `VIH` (about 3.0 V at a 5 V
+supply); it works in practice but is not guaranteed. The common ground is
+mandatory; two USB grounds are not a substitute.
+
+### 2.3 Mega slave poll behaviour
+
+- `sens_poll()` is called from `loop()` before the stage switch, so it runs in
+every state, including while the portal gate is open. One round per 30 s
+(`kSensPollMs`).
+- Each round drains stale RX bytes, writes `#1:PING*` (8 bytes), and reads
+until `\n`, a full buffer, or 1500 ms (`kSensReplyMs`: 50 ms capture window
+plus about 310 ms of line time for a ~500-byte reply). A frame that does not
+begin with `{` is rejected before parsing.
+- The frame is one fixed `char sensRx[513]`. No `String`, no JSON library: the
+shape is fixed and flash is tight. The parser locates `"id":`, then `"ph":`,
+`"methane":`, `"temp":`, `"co2":` and `"press":` with `strstr` + `strtof`,
+bounded to one bottle object and to the buffer's NUL. Ids outside 1-4 are
+ignored.
+- The slave's invalid markers become `nullMask` bits instead of numbers:
+`ph`/`methane`/`co2`/`press` `-1` and `temp` `-999`, mapped to bits 0/4/3/1/2
+the same way `PushRow` does. `ph` is pH units: the slave applies its per-bottle
+3-point calibration, so no table exists in this firmware.
+- One `LOG [SENS]` line per round, for example
+`LOG [SENS] 4 bottles ok=20 fail=0 b1 ph=2.51 ch4=812.4 t=38.5 co2=1204 p=1013 ...`.
+`ok=` counts accepted values, `fail=` counts bottle slots with no object in
+the frame. Failed rounds (timeout, overlong frame, non-JSON) are logged on the
+first failure and then every 20th, so a disconnected Mega cannot flood the
+display's log.
+- Nothing is enqueued. The push queue above stays dormant until the deferred
+step in `migration-plan.md` §6.
 
 ## 3. Line protocol
 
@@ -65,7 +114,7 @@ acks. Full rules: `link-serial-protocol.md` §2.
 | `HELLO` | - | display booted; reply with the full snapshot |
 | `EXPERIMENT` | `run=<0\|1> num=<n> dur=<1-99>` | experiment truth; log on change |
 | `CREDS` | `user=<pct> pass=<pct>` | staged portal pair; decode, trim, log in |
-| `DUMP` | - | emit a `LOG [DUMP] ...` state snapshot (read-only, ungated) |
+| `DUMP` | - | emit a `LOG [DUMP] ...` state snapshot, including the sensor counters `sensOk`, `sensFail` and `sensAge` (read-only, ungated) |
 
 ### 3.2 Sent to the display
 
@@ -118,7 +167,9 @@ WAIT_IP -> NEED_CREDS -> LOGIN -> RUN
 `loop()` is non-blocking between stage ticks: it pulls and dispatches link
 lines before anything else, then checks `millis()` gates. `doLogin()` and the
 HTTPS calls still block for their duration; the UART FIFO absorbs one
-heartbeat and the next pass drains it.
+heartbeat and the next pass drains it. The sensor poll blocks for at most
+1.5 s once per 30 s, and it pulls the display link from inside that wait so a
+`CREDS` line arriving during a reply is not left in the FIFO.
 
 There is no `DONE` halt state: every failure path returns to the display.
 Reset is never required to retry.
@@ -145,15 +196,17 @@ through a 320-byte rolling window because the WT32-ETH01 has no PSRAM.
 
 ## 6. Memory and limits
 
-- Flash used: ~985 KB of 1280 KB (75%). RAM used: ~58 KB of 320 KB (18%).
-  The tight flash is why the SoftAP credential form lives on the display
-  rather than here: a web server does not fit in the remaining ~300 KB. See
-  `display-provisioning-ap.md`. The Supabase CA bundle (`supabase_ca.h`,
-  3 roots, ~4 KB flash) is included in those figures. The dormant push
-  queue + JSON body (~54 KB `.bss`) is currently folded away by the
-  optimizer because nothing enqueues yet; when the sensor pass adds a
-  caller it materializes and RAM rises to ~112 KB (34%), still inside the
-  100-150 KB ceiling.
+- Flash used: 990,117 B of 1,310,720 B (75.5%). RAM used: 62,312 B of
+  327,680 B (19.0%). The tight flash is why the SoftAP credential form lives
+  on the display rather than here: a web server does not fit in the
+  remaining ~300 KB. See `display-provisioning-ap.md`. The Supabase CA bundle
+  (`supabase_ca.h`, 3 roots, ~4 KB flash) is included in those figures.
+  The sensor poll adds one fixed 513-byte RX frame and ~20 B of counters.
+- Push queue: the 1200-row ring (~48 KB `.bss`) is still folded away because
+  nothing enqueues yet, but the 6,144-byte JSON body is present in the image
+  (`nm` shows `s_pushBody` at 0x1800 bytes, `s_pushQueue` absent). When the
+  sensor step adds a caller the ring materializes and RAM rises by roughly
+  48 KB, still inside the 100-150 KB ceiling.
 - The line link adds two fixed 1 KB log buffers, one 1 KB RX buffer, and
   ~130 B of state. No heap allocation is added.
 - DHCP only, no static-IP fallback.
@@ -164,8 +217,9 @@ through a 320-byte rolling window because the WT32-ETH01 has no PSRAM.
   on, no insecure fallback. See `esp-db-sync.md` §5.
 - Sample push queue: fixed 1200-row ring (~50 rounds), oldest-drop with a
   saturating drop counter, sample-time stamps, clock-gated on NTP, flushed
-  2 rounds per 30 s cycle to `push_readings()`. Dormant until the sensor
-  chain lands. See `esp-db-sync.md` §7-8.
+  2 rounds per 30 s cycle to `push_readings()`. Still dormant: the sensor
+  poll logs but does not enqueue (`migration-plan.md` §6). See
+  `esp-db-sync.md` §7-8.
 - Credential lifetime: RAM only. The working pair is overwritten with `x`
   before release. The last-attempted pair is kept for the same-pair rule.
   Never written to flash or NVS.
@@ -188,6 +242,7 @@ LOG Data URL: https://unison.boidu.dev/lyrics?v=dQw4w9WgXcQ
 LOG Credentials come from the display over UART0, never stored.
 HELLO
 LOG [LINK] rusim-line v1 on UART0 IO1/IO3 115200 8N1
+LOG [SENS] UART1 on IO5 RX / IO17 TX, 9600 8N1
 LOG [ETH] Waiting for link + DHCP...
 LOG [ETH] Started
 LOG [ETH] Link up
@@ -197,7 +252,21 @@ LOG [LINK] captured creds user='...' (password in RAM only)
 LOG [LOGIN] Verifying with a real data fetch...
 LOG [LOGIN] SUCCESS: port is authenticated.
 LOG [PING] 1.1.1.1 OK, avg time = 15 ms
+LOG [SENS] 4 bottles ok=20 fail=0 b1 ph=2.51 ch4=812.4 t=38.5 co2=1204 p=1013 b2 ph=2.49 ch4=790.1 t=38.2 co2=1198 p=1013 b3 ph=2.53 ch4=824.9 t=38.7 co2=1210 p=1014 b4 ph=2.47 ch4=801.3 t=38.4 co2=1202 p=1013
 LOG [RUN] exp=1 duration=24h running=1 dbLatest=3 bottles=24 ntp=1 queued=0 drops=0
+```
+
+With the Mega absent or its TX wire open, a failure line is logged on the
+first failure and then every 20th:
+
+```
+LOG [SENS] poll failed: reply timeout (fail=1)
+```
+
+A field the slave reported invalid prints as `null`:
+
+```
+LOG [SENS] 2 bottles ok=5 fail=2 b1 ph=null ch4=null t=null co2=null p=null b2 ph=2.5 ch4=700 t=37 co2=1000 p=1000 ...
 ```
 
 On a rejected pair:
@@ -211,15 +280,18 @@ The display shows the same verdict on `/setup` and on the phone's form page.
 
 ## 8. Related documents
 
-- `link-serial-protocol.md` — the wire spec, log forwarding, `PASSTH`, RS485
-  follow-on.
+- `link-serial-protocol.md` — the wire spec, log forwarding, `PASSTH`, and
+  the Mega link that replaced the RS485 pin reservation.
 - `display-docs.md` §10, §12 — display end, login gate, SoftAP form.
 - `display-provisioning-ap.md` — the phone login path on the display.
 - `wt32-eth01-ping-test.md` — prototype this env was copied from.
 - `wt32-eth01-captive-recon.md` — portal recon sketch.
 - `captive-portal-workaround.md` — portal relay plan.
+- `migration-plan.md` — the sensor pull this implements, plus the deferred
+  enqueue and in-slave pH conversion.
+- `legacy-slave.md` — the Mega program and its JSON reply.
 - `platformio-environments.md` — build environments.
 - `../hardware.md` — board pinouts (read-only reference).
 
 ---
-Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.
+Content generated by `codebuff/deepseek-v4.1-flash` in `freebuff`.

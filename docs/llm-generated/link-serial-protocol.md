@@ -85,7 +85,7 @@ likewise. Loopback benching (RX shorted to TX) therefore produces no loops.
 - Polling entirely: both ends declare truth on a cadence; there is no
   request/response anywhere on the link.
 - CRC16. The display module no longer carries it; the WT32 keeps an unused
-  helper for the future RS485 Modbus bus (§8).
+  helper (§8). The Mega slave link has no checksum either.
 
 ## 4. State and flows
 
@@ -250,23 +250,29 @@ Known edge: flash payload bytes containing the exact `PASSTH OFF` line at a
 line boundary would close the tunnel. Accepted as negligible; a failed flash
 just needs `PASSTH ON` again.
 
-## 8. Follow-on: RS485 bus
+## 8. Follow-on: Mega slave link (`IO5`/`IO17`)
 
-Moving the link to the Debug header frees the WT32 `IO5`/`IO17` pair (and
-`IO14`). The planned Mega Mini sensor bus is a MAX485 Modbus RTU bus with the
-WT32 as master:
+Moving the display link to the Debug header freed the WT32 `IO5`/`IO17` pair.
+It now carries the legacy Mega slave directly, over TTL, not through a MAX485
+bus: the slave never drives `DE`/`RE`, and a cross-connected RX/TX pair needs
+no direction control.
 
-| Signal | WT32 pin | Note |
-|---|---|---|
-| `RO` | `IO5` | `Serial1` RX |
-| `DI` | `IO17` | `Serial1` TX |
-| `DE`+`RE` tied | `IO33` | silkscreened `485_EN`, non-strapping; fallback `IO14` |
+| Signal | WT32 pin | Mega pin | Direction |
+|---|---|---|---|
+| Data | `IO5` (`Serial1` RX) | D18 (TX1) | Mega -> WT32 |
+| Data | `IO17` (`Serial1` TX) | D19 (RX1) | WT32 -> Mega |
+| Ground | `GND` | `GND` | common |
 
-Constraints copied from `esp-db-sync.md` §3: 9600 8N1, manual single-pin
-direction control only (the modules tie `DE`/`RE`, so `CSE_ArduinoRS485` must
-never be used), 120 ohm termination at both bus ends, common ground. The
-CRC16/frame-silence helpers stay available for that bus; the line link shares
-no state with it.
+9600 8N1, matching the slave's `Serial1.begin(9600)`. The WT32 pins are
+remapped in `Serial1.begin(9600, SERIAL_8N1, 5, 17)` because its UART1
+defaults (`IO9`/`IO10`) are flash pins. Request `#1:PING*`, reply one JSON
+line; no checksum, no acks, no retry.
+
+The Mega drives 5 V, so D18 -> `IO5` needs a divider or a level shifter. The
+full wiring, electrical warning and parse rules are in `network-master.md`
+§2.2-2.3; the plan is `migration-plan.md`. `IO14` stays spare, and the
+`CRC16` helper stays in the firmware unused. The line link shares no state
+with this port.
 
 ## 9. Failure modes
 
@@ -279,6 +285,7 @@ no state with it.
 | Flash over the tunnel fails | WT32 not in download mode (`IO0` jumpered, then power-cycled), or its wires are not on display `IO17`/`IO18` |
 | Tunnel disappears while a monitor is open | any ordinary open of the display's CH340 port resets the board; close the monitor before uploading |
 | Upload starts then stalls | adapter baud left at the 460800 board default; the tunnel cannot change rate |
+| No `[SENS]` lines | Mega unpowered, its TX wire open, or no common ground; the ESP logs `[SENS] poll failed: reply timeout` on the first failure and then every 20th |
 
 ## 10. Bench checks
 
@@ -295,7 +302,12 @@ no state with it.
 5. **Reboot mixes:** WT32 reboot mid-run is released by the snapshot
    `RESULT OK`; display reboot mid-run re-raises `/setup` and replies to
    `HELLO` with experiment state.
-6. Three build targets must pass before claiming done: `display-v9`,
+6. **Mega slave:** Mega powered from the same ground, WT32 running. Expect
+   one `[SENS]` line per 30 s with values that match the JSON the Mega prints
+   on its own USB at the same time. Pull the Mega's TX wire: the ESP logs a
+   timeout, the display link stays up, and readings resume when the wire
+   returns.
+7. Three build targets must pass before claiming done: `display-v9`,
    `display-sim`, `network-master`.
 
 ---

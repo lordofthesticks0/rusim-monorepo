@@ -19,7 +19,10 @@
 //   Debug-header RXD (IO3) <- display IO17 (TX), 115200 8N1, common GND.
 //   Serial is therefore both the link and the log sink: every log line is
 //   emitted as "LOG <text>" and the display re-prints it on its own USB.
-//   Serial1 (IO5/IO17) is not opened; that pair is reserved for RS485.
+// - Polls the legacy Mega slave on Serial1 (IO5 RX / IO17 TX, 9600 8N1) once
+//   per 30 s with "#1:PING*" and logs the four-bottle JSON reply as one
+//   "LOG [SENS]" line. Log only: the reply is not enqueued yet, so the push
+//   queue below stays dormant. See docs/llm-generated/migration-plan.md.
 // - Gets the captive portal username/password from the display instead of
 //   the serial console. Both ends declare their state every 5 s and push
 //   changes immediately; there is no master and no polling.
@@ -146,8 +149,38 @@ static uint32_t ledOffMs = 0;
 static size_t s_pushCount = 0;    // rows held
 static uint32_t s_pushDrops = 0;  // saturating overflow counter
 
-// CRC16-Modbus, unused on the line link by design. Kept for the phase-2
-// Modbus RTU master on the freed IO5/IO17 pair (MAX485, 9600 8N1).
+// Sensor poll state (migration-plan.md). One fixed RX frame: no Arduino
+// String and no JSON library, because the reply shape is fixed and flash is
+// at ~75 %. IO5/IO17 are the freed display-link pair; the ESP32 UART1
+// defaults (IO9/IO10) are flash pins on this module, so pins are explicit.
+static const int kSensRxPin = 5;
+static const int kSensTxPin = 17;
+static const uint32_t kSensBaud = 9600;
+static const uint32_t kSensPollMs = 30000;  // one round per 30 s
+static const uint32_t kSensReplyMs = 1500;  // 50 ms capture + ~310 ms line time
+static const size_t kSensFrameCap = 513;    // 512-byte frame + NUL
+static const size_t kSensBottles = 4;
+
+// nullMask bits, matching PushRow below.
+static const uint8_t kSensNullAll = 0x1F;
+static const uint8_t kSensNullPh = 0x01;
+static const uint8_t kSensNullPressure = 0x02;
+static const uint8_t kSensNullTemp = 0x04;
+static const uint8_t kSensNullCo2 = 0x08;
+static const uint8_t kSensNullCh4 = 0x10;
+
+static char sensRx[kSensFrameCap];
+static size_t sensRxLen = 0;
+static bool sensRxOverflow = false;
+static uint32_t lastSensPollMs = 0;
+static uint32_t sensRoundsOk = 0;    // rounds with a parseable frame
+static uint32_t sensRoundsFail = 0;  // timeouts, overlong or non-JSON frames
+static uint32_t sensLastReplyMs = 0;
+static bool sensReplySeen = false;
+
+// CRC16-Modbus, unused on the line link and unused by the Mega TTL poll
+// (that protocol has no checksum). Kept for a future Modbus RTU master; the
+// freed IO5/IO17 pair now carries the Mega link, so it would need other pins.
 static uint16_t __attribute__((unused)) linkCrc16(const uint8_t* data, size_t len) {
   uint16_t crc = 0xFFFF;
   for (size_t i = 0; i < len; i++) {
@@ -411,10 +444,12 @@ static void link_log_dump() {
   char ip[24];
   snprintf(ip, sizeof(ip), "%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
   logf("[DUMP] stage=%d eth=%d ip=%s exp=%d run=%d dur=%d dbLatest=%d ntp=%d "
-       "bottles=%d queued=%u drops=%u verdict=%d",
+       "bottles=%d queued=%u drops=%u verdict=%d sensOk=%u sensFail=%u sensAge=%d",
        (int)stage, eth_connected ? 1 : 0, ip, expNum, expRunning ? 1 : 0, durationH,
        dbLatest, ntpSynced ? 1 : 0, dbBottleCount, (unsigned)s_pushCount,
-       (unsigned)s_pushDrops, haveVerdict ? (lastVerdict ? 1 : 2) : 0);
+       (unsigned)s_pushDrops, haveVerdict ? (lastVerdict ? 1 : 2) : 0,
+       (unsigned)sensRoundsOk, (unsigned)sensRoundsFail,
+       sensReplySeen ? (int)(millis() - sensLastReplyMs) : -1);
 }
 
 static void handle_line(char* line) {
@@ -1013,6 +1048,193 @@ static bool pushEnqueueRound(time_t sampleUnix, int experimentId,
   return true;
 }
 
+// --- Legacy Mega slave poll (migration-plan.md) ----------------------------
+//
+// Direct TTL on Serial1: Mega D18 TX -> IO5 RX, Mega D19 RX <- IO17 TX,
+// 9600 8N1, common GND. Request "#1:PING*" (8 bytes, no checksum); the slave
+// answers on the port the request arrived on with one JSON line of four
+// bottle objects. Logging only: nothing is enqueued, so the push queue above
+// stays dormant until the deferred step in migration-plan.md §6.
+
+static const uint8_t kSensRequest[] = {'#', '1', ':', 'P', 'I', 'N', 'G', '*'};
+
+// Formats one field for the log line: "null" when the nullMask bit is set.
+static void sens_format_value(char* out, size_t cap, float v, bool isNull) {
+  if (isNull) {
+    snprintf(out, cap, "null");
+  } else {
+    snprintf(out, cap, "%.4g", (double)v);
+  }
+}
+
+// Parses "key":<number> inside [begin, end). The frame is NUL-terminated, so
+// strtof can run off the end of the region but never the buffer; stop is
+// checked against end so one bottle cannot borrow the next bottle's value.
+static bool sens_float_field(const char* begin, const char* end, const char* key,
+                             float& out) {
+  if (begin == nullptr || end == nullptr || key == nullptr || begin >= end) return false;
+  char needle[16];
+  int n = snprintf(needle, sizeof(needle), "\"%s\":", key);
+  if (n <= 0 || (size_t)n >= sizeof(needle)) return false;
+  const char* at = strstr(begin, needle);
+  if (at == nullptr || at >= end) return false;
+  at += (size_t)n;
+  while (at < end && (*at == ' ' || *at == '\t')) at++;
+  if (at >= end) return false;
+  char* stop = nullptr;
+  float v = strtof(at, &stop);
+  if (stop == at || stop > end) return false;
+  out = v;
+  return true;
+}
+
+// Stores one field unless it is absent or carries the slave's invalid marker,
+// in which case the nullMask bit stays set. `valid` counts accepted values.
+static void sens_take(BottleReading& r, const char* begin, const char* end,
+                      const char* key, uint8_t nullBit, float invalid, float& slot,
+                      unsigned& valid) {
+  float v = 0;
+  if (!sens_float_field(begin, end, key, v)) return;
+  if (v == invalid) return;
+  slot = v;
+  r.nullMask = (uint8_t)(r.nullMask & ~nullBit);
+  valid++;
+}
+
+// Counts a failed round. Only the first and then every 20th are logged, so a
+// disconnected Mega cannot flood the display's log.
+static void sens_log_failure(const char* why) {
+  sensRoundsFail++;
+  if (sensRoundsFail == 1 || (sensRoundsFail % 20) == 0) {
+    logf("[SENS] poll failed: %s (fail=%u)", why, (unsigned)sensRoundsFail);
+  }
+}
+
+// Turns one received frame into the single [SENS] log line. Ids outside 1-4
+// are ignored. A frame that holds no bottle object is a failed round.
+static void sens_report_round() {
+  BottleReading readings[kSensBottles];
+  bool seen[kSensBottles] = {false, false, false, false};
+  for (size_t i = 0; i < kSensBottles; i++) {
+    readings[i] = BottleReading();
+    readings[i].nullMask = kSensNullAll;
+  }
+
+  unsigned valid = 0;
+  const char* p = sensRx;
+  while (true) {
+    const char* idKey = strstr(p, "\"id\":");
+    if (idKey == nullptr) break;
+    const char* value = idKey + 5;  // strlen("\"id\":")
+    char* stop = nullptr;
+    long id = strtol(value, &stop, 10);
+    if (stop == value) {
+      p = value;  // not a number; keep scanning past this key
+      continue;
+    }
+    const char* next = strstr(stop, "\"id\":");
+    const char* end = (next != nullptr) ? next : (sensRx + sensRxLen);
+    if (id >= 1 && id <= (long)kSensBottles) {
+      size_t idx = (size_t)(id - 1);
+      BottleReading& r = readings[idx];
+      seen[idx] = true;
+      sens_take(r, stop, end, "ph", kSensNullPh, -1.0f, r.ph, valid);
+      sens_take(r, stop, end, "methane", kSensNullCh4, -1.0f, r.ch4, valid);
+      sens_take(r, stop, end, "temp", kSensNullTemp, -999.0f, r.tempC, valid);
+      sens_take(r, stop, end, "co2", kSensNullCo2, -1.0f, r.co2, valid);
+      sens_take(r, stop, end, "press", kSensNullPressure, -1.0f, r.pressure, valid);
+    }
+    p = end;
+  }
+
+  unsigned present = 0;
+  for (size_t i = 0; i < kSensBottles; i++) {
+    if (seen[i]) present++;
+  }
+  if (present == 0) {
+    sens_log_failure("reply has no bottle objects");
+    return;
+  }
+
+  // Worst case is ~73 characters per bottle at %.4g, so 384 holds four
+  // bottles plus the prefix. snprintf truncates rather than overrunning.
+  char line[384];
+  int used = snprintf(line, sizeof(line), "%u bottles ok=%u fail=%u", present, valid,
+                      (unsigned)(kSensBottles - present));
+  if (used < 0) return;
+  size_t pos = (size_t)used < sizeof(line) ? (size_t)used : sizeof(line) - 1;
+  for (size_t i = 0; i < kSensBottles; i++) {
+    char phB[16], chB[16], teB[16], coB[16], prB[16];
+    const BottleReading& r = readings[i];
+    sens_format_value(phB, sizeof(phB), r.ph, (r.nullMask & kSensNullPh) != 0);
+    sens_format_value(chB, sizeof(chB), r.ch4, (r.nullMask & kSensNullCh4) != 0);
+    sens_format_value(teB, sizeof(teB), r.tempC, (r.nullMask & kSensNullTemp) != 0);
+    sens_format_value(coB, sizeof(coB), r.co2, (r.nullMask & kSensNullCo2) != 0);
+    sens_format_value(prB, sizeof(prB), r.pressure, (r.nullMask & kSensNullPressure) != 0);
+    int w = snprintf(line + pos, sizeof(line) - pos, " b%u ph=%s ch4=%s t=%s co2=%s p=%s",
+                     (unsigned)(i + 1), phB, chB, teB, coB, prB);
+    if (w <= 0) break;
+    if ((size_t)w >= sizeof(line) - pos) {
+      pos = sizeof(line) - 1;
+      break;
+    }
+    pos += (size_t)w;
+  }
+  sensRoundsOk++;
+  logf("[SENS] %s", line);
+}
+
+// One request/reply round, gated to one every 30 s. The wait is blocking for
+// at most 1.5 s, so the display link is pulled from inside it: a CREDS line
+// arriving during the reply would otherwise sit in the FIFO.
+static void sens_poll() {
+  if (millis() - lastSensPollMs < kSensPollMs) return;
+  lastSensPollMs = millis();
+
+  // Anything already in the FIFO is stale (a partial reply or Mega boot
+  // noise), so drop it before asking.
+  while (Serial1.available() > 0) (void)Serial1.read();
+  sensRxLen = 0;
+  sensRxOverflow = false;
+
+  Serial1.write(kSensRequest, sizeof(kSensRequest));
+  Serial1.flush();
+
+  bool complete = false;
+  uint32_t start = millis();
+  while (millis() - start < kSensReplyMs) {
+    int c = Serial1.read();
+    if (c < 0) {
+      link_line_pull();  // keep the display link alive during the wait
+      delay(1);
+      continue;
+    }
+    if (c == '\n') {
+      complete = true;
+      break;
+    }
+    if (c == '\r') continue;
+    if (sensRxLen + 1 >= sizeof(sensRx)) {
+      sensRxOverflow = true;
+      break;
+    }
+    sensRx[sensRxLen++] = (char)c;
+  }
+  sensRx[sensRxLen] = '\0';
+
+  if (!complete) {
+    sens_log_failure(sensRxOverflow ? "reply over 512 bytes" : "reply timeout");
+    return;
+  }
+  if (sensRxLen == 0 || sensRx[0] != '{') {
+    sens_log_failure("reply is not a JSON object");
+    return;
+  }
+  sensLastReplyMs = millis();
+  sensReplySeen = true;
+  sens_report_round();
+}
+
 // --- Supabase real-data fetch (backlog #1) via device token (devices.token_hash) ---
 static bool sbAuthenticate() {
   if (String(SUPABASE_URL).length() == 0 || String(SUPABASE_ANON_KEY).length() == 0 ||
@@ -1306,6 +1528,14 @@ void setup() {
   link_emit_hello();
   logf("[LINK] rusim-line v1 on UART0 IO1/IO3 115200 8N1");
 
+  // UART1 is the legacy Mega slave link: Mega D18 TX -> IO5 RX, Mega D19 RX
+  // <- IO17 TX. Pins are remapped because the ESP32 UART1 defaults (IO9/IO10)
+  // are flash pins on this module.
+  Serial1.begin(kSensBaud, SERIAL_8N1, kSensRxPin, kSensTxPin);
+  logf("[SENS] UART1 on IO%d RX / IO%d TX, %u 8N1", kSensRxPin, kSensTxPin,
+       (unsigned)kSensBaud);
+  lastSensPollMs = millis();
+
   WiFi.onEvent(onEthEvent);
 
   // Explicit WT32-ETH01 RMII pins (same as variant defaults in pins_arduino.h):
@@ -1328,6 +1558,9 @@ void loop() {
   }
   if (ethEventCode != 0) log_eth_event();
   link_heartbeat_tick();
+  // Sensor rounds run in every stage, including while the portal gate is
+  // open; the poll has its own 30 s gate and does not depend on the network.
+  sens_poll();
 
   if (ledOffMs != 0 && (int32_t)(millis() - ledOffMs) >= 0) {
     digitalWrite(TEST_LED_PIN, LOW);
