@@ -62,4 +62,4 @@ The following files and directories are **OFF LIMITS**. Do **NOT** read or edit 
 - `reusable-prompts/`. The user will instruct you to read a certain one if necessary, and generally the harness will attach the file for you anyways.
 - Any `.env` file. `.env.example` is allowed.
 
-When using Git, remember to NEVER commit anything, unless the user explicitly says so. You can ask, but never commit on your own behalf, not until the user explicitly says you to commit.
+When using Git, remember to NEVER commit anything, unless the user explicitly says so. You can ask, but never commit on your own behalf, not until the user explicitly says you to commit. When doing so, do NOT add attributions to the commit message.
