@@ -8,7 +8,7 @@
 #include <memory>
 #include <string.h>
 
-#include "link_modbus.h"
+#include "link_serial.h"
 #include "ui_config.h"
 
 // --- tunables -------------------------------------------------------------
@@ -174,13 +174,13 @@ static void send_form() {
   page.reserve(2048);
   page += kPageHead;
   page += "<h1>Portal login</h1>";
-  page += "<p class=sub>Sent to the WT32 over Modbus, then to the campus "
-          "portal. Held in memory only.</p>";
+  page += "<p class=sub>Sent to the WT32 over the serial link, then to the "
+          "campus portal. Held in memory only.</p>";
   // The wrong-password verdict is visible on the page the user returns to, not
-  // only on the panel: RESULT=2 stays set in the slave until the next pair is
-  // staged, and creds_ready covers a retry that is already in flight, so the
-  // banner cannot sit over a fresh attempt.
-  if (link_modbus_result() == LINK_RESULT_FAIL && !link_modbus_creds_ready()) {
+  // only on the panel: RESULT FAIL stays set until the next pair is staged,
+  // and creds_ready covers a retry that is already in flight, so the banner
+  // cannot sit over a fresh attempt.
+  if (link_serial_result() == LINK_RESULT_FAIL && !link_serial_creds_ready()) {
     page += "<p class=err>Wrong username or password. The WT32 rejected the "
             "last attempt. Try again below.</p>";
   }
@@ -212,7 +212,7 @@ static void send_result_page() {
   // /status leads with a state token (see handle_status). The page stops or
   // retries on the token, so re-wording a message cannot change the behaviour.
   // A reject gets the error treatment and a link back to the form; the retry
-  // it starts pulses the poll-request line, so the WT32 reads the new pair at
+  // it starts sends CREDS immediately, so the WT32 reads the new pair at
   // once rather than on its next 5 s cycle.
   page += "<script>"
           "const o=document.getElementById('out'),"
@@ -254,9 +254,9 @@ static void send_error_page(const char *what) {
 // --- handlers -------------------------------------------------------------
 
 static void handle_status() {
-  // Non-destructive peek. screen_setup_poll() owns link_modbus_take_result(),
+  // Non-destructive peek. screen_setup_poll() owns link_serial_take_result(),
   // so this must not consume the verdict.
-  int res = link_modbus_result();
+  int res = link_serial_result();
 
   String out;
   // First token is machine-readable: "waiting" | "success" | "fail". The rest
@@ -268,7 +268,7 @@ static void handle_status() {
   } else if (res == LINK_RESULT_FAIL) {
     out = "fail: Wrong username or password. The WT32 rejected the last "
           "attempt.";
-  } else if (link_modbus_creds_ready()) {
+  } else if (link_serial_creds_ready()) {
     out = "waiting: Credentials received by the display. The WT32 is logging "
           "in now...";
   } else {
@@ -307,13 +307,13 @@ static void handle_creds() {
     return;
   }
 
-  // The password is never logged. link_modbus_set_credentials() holds the
+  // The password is never logged. link_serial_set_credentials() holds the
   // strings in display RAM until the WT32 reads them; the WT32 overwrites its
   // own copy after login. Nothing reaches flash. Duration and experiment
   // settings live on /control, not in the login form.
   Serial.printf("[AP] staged user='%s' over the air\n", user.c_str());
 
-  link_modbus_set_credentials(user.c_str(), pass.c_str());
+  link_serial_set_credentials(user.c_str(), pass.c_str());
 
   // The plaintext String buffers hold the password in heap. Drop them now.
   pass = String();
@@ -423,6 +423,6 @@ int provision_ap_client_count() {
 }
 
 bool provision_ap_awaiting_verdict() {
-  return s_active && link_modbus_creds_ready() &&
-         link_modbus_result() == LINK_RESULT_NONE;
+  return s_active && link_serial_creds_ready() &&
+         link_serial_result() == LINK_RESULT_NONE;
 }

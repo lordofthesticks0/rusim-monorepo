@@ -12,7 +12,7 @@
 #include <memory>
 
 #include "fake_data.h"
-#include "link_modbus.h"
+#include "link_serial.h"
 #include "provision_ap.h"
 #include "screen_control.h"
 #include "screen_home.h"
@@ -109,7 +109,7 @@ static void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data) {
 void setup() {
   Serial.begin(115200);
   Serial.println("Display UI v9 (fake-data pass). Send HELP for serial cmds.");
-  link_modbus_init();
+  link_serial_init();
 
 #if defined(DISPLAY_DEV_KIT)
   gfx = std::unique_ptr<Arduino_GFX>(create_default_Arduino_GFX());
@@ -189,7 +189,7 @@ void setup() {
     lv_indev_set_read_cb(indev, my_touchpad_read);
 
     fake_init();
-    link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+    link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
     ui_init();
 
     Serial.println("Setup done");
@@ -198,14 +198,37 @@ void setup() {
 
 void loop() {
   serial_cmd_poll(); /* human-typeable fake-data protocol; see serial_cmd.h */
-  link_modbus_poll(); /* WT32 Modbus slave on Serial1; raises setup */
-  screen_setup_poll(); /* LOGIN_REQ -> setup route, RESULT -> home/retry */
-  screen_home_poll();
-  screen_control_poll(); /* late DB sync -> /control warn label */
-  screen_info_poll(); /* info tiles refresh */
-  ui_update_clock();
+  link_serial_poll(); /* rusim-line peer on Serial1; raises setup */
+
+  // Keep the USB <-> WT32 tunnel responsive by suspending all LVGL work and
+  // screen-model updates while raw flash bytes are moving. The panel backlight
+  // is independent of the RGB scanout, so turn it off explicitly as well.
+  static bool uiPausedForPassthrough = false;
+  const bool passthrough = link_serial_passthrough_active();
+  if (passthrough && !uiPausedForPassthrough) {
+    digitalWrite(UI_BL_PIN, LOW);
+    uiPausedForPassthrough = true;
+  } else if (!passthrough && uiPausedForPassthrough) {
+    digitalWrite(UI_BL_PIN, HIGH);
+    sleep_note_input();
+    if (display != nullptr) {
+      lv_obj_t *activeScreen = lv_screen_active();
+      if (activeScreen != nullptr) lv_obj_invalidate(activeScreen);
+    }
+    uiPausedForPassthrough = false;
+  }
+
+  if (!passthrough) {
+    screen_setup_poll(); /* LOGINREQ -> setup route, RESULT -> home/retry */
+    screen_home_poll();
+    screen_control_poll(); /* late DB sync -> /control warn label */
+    screen_info_poll(); /* info tiles refresh */
+    ui_update_clock();
+  }
   provision_ap_poll(); /* SoftAP credential form, while it is running */
-  sleep_tick();      /* 60 s idle -> backlight off */
-  lv_timer_handler(); /* let the GUI do its work */
+  if (!passthrough) {
+    sleep_tick();       /* 60 s idle -> backlight off */
+    lv_timer_handler(); /* let the GUI do its work */
+  }
   delay(5);
 }

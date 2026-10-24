@@ -6,7 +6,7 @@
 #include "screen_home.h"
 #include "screen_info.h"
 #include "screen_setup.h"
-#include "link_modbus.h"
+#include "link_serial.h"
 #include "ui_config.h"
 
 // Layout: status bar 800x44 on top, content 800x436 below.
@@ -462,7 +462,7 @@ void ui_experiment_toggle() {
     g.experimentStartMs = millis();
     g.expNum++;
   }
-  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
   Serial.printf("[FAKE->WT32] RUN %s\n", g.experimentRunning ? "ON" : "OFF");
   ui_update_bell();
 }

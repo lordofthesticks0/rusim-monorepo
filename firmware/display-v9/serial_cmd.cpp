@@ -3,7 +3,7 @@
 #include <ctype.h>
 
 #include "fake_data.h"
-#include "link_modbus.h"
+#include "link_serial.h"
 #include "provision_ap.h"
 #include "ui_config.h"
 #include "ui_shell.h"
@@ -15,6 +15,60 @@
 static char s_line[200];
 static size_t s_len = 0;
 
+// --- passthrough exit matching --------------------------------------------
+// While the tunnel is open, bytes go straight to Serial1 except for an exact
+// "PASSTH OFF" at the start of a line. The matching prefix is held back (at
+// most 10 bytes) so the exit word is not sent to the WT32; a mismatch flushes
+// it unchanged. See link_serial.cpp for the reverse direction.
+static const char kPtExit[] = "PASSTH OFF";
+static size_t s_ptMatch = 0;
+static bool s_ptLineStart = true;
+static bool s_ptArmed = false;
+
+static void pt_reset() {
+  s_ptMatch = 0;
+  s_ptLineStart = true;
+  s_ptArmed = false;
+}
+
+static void pt_byte(char ch) {
+  if (s_ptArmed) {
+    if (ch == '\r') return;
+    if (ch == '\n') {
+      s_ptArmed = false;
+      link_serial_passthrough_set(false);
+      pt_reset();
+      return;
+    }
+    // Not the exit line after all: release what was held, then this byte.
+    link_serial_passthrough_write(reinterpret_cast<const uint8_t *>(kPtExit), s_ptMatch);
+    s_ptMatch = 0;
+    s_ptArmed = false;
+    uint8_t b = static_cast<uint8_t>(ch);
+    link_serial_passthrough_write(&b, 1);
+    s_ptLineStart = false;
+    return;
+  }
+  if (!s_ptLineStart) {
+    uint8_t b = static_cast<uint8_t>(ch);
+    link_serial_passthrough_write(&b, 1);
+    if (ch == '\n') s_ptLineStart = true;
+    return;
+  }
+  if (s_ptMatch < sizeof(kPtExit) - 1 && ch == kPtExit[s_ptMatch]) {
+    s_ptMatch++;
+    if (s_ptMatch == sizeof(kPtExit) - 1) s_ptArmed = true;
+    return;
+  }
+  if (s_ptMatch > 0) {
+    link_serial_passthrough_write(reinterpret_cast<const uint8_t *>(kPtExit), s_ptMatch);
+    s_ptMatch = 0;
+  }
+  uint8_t b = static_cast<uint8_t>(ch);
+  link_serial_passthrough_write(&b, 1);
+  s_ptLineStart = (ch == '\n');
+}
+
 static void print_help() {
   Serial.println("CMDS: TEMP <f> | SETPOINT <f> | DURATION <1-99> | STIRRER ON|OFF |");
   Serial.println("      POST ON|OFF | RUN ON|OFF | EXP <n> | NODE <0-5> ON|OFF |");
@@ -23,6 +77,10 @@ static void print_help() {
   Serial.println("CREDS <user> <pass>   stage portal credentials for the WT32");
   Serial.println("AP                    toggle the cloaked SoftAP credential form");
   Serial.println("MEM                   heap/PSRAM counters (O(1); never walks the heap)");
+  Serial.println("PASSTH ON|OFF         raw USB <-> IO17/IO18 tunnel (WT32 flash/log)");
+#if IS_DEBUG
+  Serial.println("W32CMD <line>         send one arbitrary line to the WT32 (debug)");
+#endif
 }
 
 static void print_mem() {
@@ -47,7 +105,7 @@ static void print_status() {
 }
 
 // Credentials sourced from the phone form on /setup, and staged onto the
-// Modbus link exactly as the on-screen Confirm does. Username only: the
+// serial link exactly as the on-screen Confirm does. Username only: the
 // password would land in the terminal scrollback and in any captured log,
 // which is what the non-echoing serial prompt in the WT32 ping-test exists
 // to avoid. Use the SoftAP or the touchscreen for the password itself.
@@ -62,8 +120,8 @@ static void handle_creds(char *args) {
   if (dur < UI_DURATION_MIN_H) dur = UI_DURATION_MIN_H;
   if (dur > UI_DURATION_MAX_H) dur = UI_DURATION_MAX_H;
   g.durationH = dur;
-  link_modbus_set_credentials(user, pass);
-  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  link_serial_set_credentials(user, pass);
+  link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
   Serial.printf("[SETUP] creds staged from serial user='%s'\n", user);
 }
 
@@ -125,7 +183,44 @@ static void handle_line(char *line) {
   } else if (strcmp(cmd, "STATUS") == 0) {
     print_status();
   } else if (strcmp(cmd, "LINK") == 0) {
-    link_modbus_debug_print();
+    link_serial_debug_print();
+  } else if (strcmp(cmd, "PASSTH") == 0) {
+    char *a = strtok(nullptr, " \t");
+    if (a != nullptr && strcasecmp(a, "ON") == 0) {
+      if (link_serial_passthrough_active()) {
+        Serial.println("[LINK] passthrough already on");
+      } else {
+        pt_reset();
+        s_len = 0;  // drop any half-typed command before the tunnel opens
+        link_serial_passthrough_set(true);
+      }
+    } else if (a != nullptr && strcasecmp(a, "OFF") == 0) {
+      if (!link_serial_passthrough_active()) {
+        Serial.println("[LINK] passthrough already off");
+      } else {
+        // Only reachable through the exit-line match in pt_byte().
+        link_serial_passthrough_set(false);
+        pt_reset();
+      }
+    } else {
+      Serial.println("usage: PASSTH ON|OFF");
+    }
+  } else if (strcmp(cmd, "W32CMD") == 0) {
+#if IS_DEBUG
+    size_t cmdLen = strlen(cmd);
+    if (cmd + cmdLen >= line + lineLen) {
+      Serial.println("usage: W32CMD <line>");
+      return;
+    }
+    const char *payload = cmd + cmdLen + 1;
+    if (link_serial_send_raw(payload)) {
+      Serial.printf("[LINK] W32CMD sent (%u bytes)\n", (unsigned)strlen(payload));
+    } else {
+      Serial.println("[LINK] W32CMD not sent (too long or passthrough)");
+    }
+#else
+    Serial.println("W32CMD: debug builds only (build with -DIS_DEBUG=1)");
+#endif
   } else if (strcmp(cmd, "MEM") == 0) {
     print_mem();
   } else if (strcmp(cmd, "PUSH") == 0) {
@@ -159,7 +254,7 @@ static void handle_line(char *line) {
       int v = atoi(a);
       if (v >= UI_DURATION_MIN_H && v <= UI_DURATION_MAX_H) {
         g.durationH = v;
-        link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+        link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
         mutated = true;
       } else {
         Serial.println("range 1-99");
@@ -173,7 +268,7 @@ static void handle_line(char *line) {
       int v = atoi(a);
       if (v >= UI_EXP_NUM_MIN && v <= UI_EXP_NUM_MAX) {
         g.expNum = v;
-        link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+        link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
         mutated = true;
       } else {
         Serial.printf("range %d-%d\n", UI_EXP_NUM_MIN, UI_EXP_NUM_MAX);
@@ -188,7 +283,7 @@ static void handle_line(char *line) {
       // Each transition from stopped to running is a new experiment number.
       if (v && !g.experimentRunning) g.expNum++;
       g.experimentRunning = v;
-      link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+      link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
       Serial.printf("[FAKE->WT32] RUN %s exp=%d\n", v ? "ON" : "OFF", g.expNum);
       mutated = true;
     } else {
@@ -262,7 +357,15 @@ static void handle_line(char *line) {
 
 void serial_cmd_poll() {
   while (Serial.available() > 0) {
-    char ch = (char)Serial.read();
+    int ci = Serial.read();
+    if (ci < 0) break;
+    char ch = (char)ci;
+    // While the tunnel is open, every USB byte is forwarded raw to the link
+    // except an exact exit line at a line boundary.
+    if (link_serial_passthrough_active()) {
+      pt_byte(ch);
+      continue;
+    }
     if (ch == '\r') continue;
     if (ch == '\n') {
       s_line[s_len] = '\0';

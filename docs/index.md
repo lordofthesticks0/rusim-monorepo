@@ -13,7 +13,7 @@ document is the source of truth for anything measured on real hardware.
 |---|---|
 | [`firmware/`](../firmware/) | One directory per PlatformIO program. All microcontroller code. |
 | [`dashboard/`](../dashboard/) | React + TypeScript + Vite dashboard, its Supabase project, and the dev database script. |
-| [`scripts-hardware/`](../scripts-hardware/) | Bun scripts that talk to physical boards. |
+| [`scripts-hardware/`](../scripts-hardware/) | Bun hardware tools and the PlatformIO WT32 passthrough upload hook. |
 | [`platformio.ini`](../platformio.ini) | Every firmware build environment. |
 | [`docs/`](../docs/) | Human documentation. |
 | [`docs/llm-generated/`](../docs/llm-generated/) | Agent-written documentation. |
@@ -26,10 +26,10 @@ document is the source of truth for anything measured on real hardware.
 
 | Directory | Board | Document |
 |---|---|---|
-| [`firmware/display-v9/`](../firmware/display-v9/) | ESP32-S3 DevKitC-1 | [display-docs.md](llm-generated/display-docs.md), [migration-notes.md](llm-generated/migration-notes.md), [display-wt32-link.md](llm-generated/display-wt32-link.md), [display-provisioning-ap.md](llm-generated/display-provisioning-ap.md), [display-sim.md](llm-generated/display-sim.md), [display-debug-flag.md](llm-generated/display-debug-flag.md), [lvgl-redesign.md](llm-generated/lvgl-redesign.md), [display-info-reboot.md](llm-generated/display-info-reboot.md) |
+| [`firmware/display-v9/`](../firmware/display-v9/) | ESP32-S3 DevKitC-1 | [display-docs.md](llm-generated/display-docs.md), [migration-notes.md](llm-generated/migration-notes.md), [link-serial-protocol.md](llm-generated/link-serial-protocol.md), [display-provisioning-ap.md](llm-generated/display-provisioning-ap.md), [display-sim.md](llm-generated/display-sim.md), [display-debug-flag.md](llm-generated/display-debug-flag.md), [lvgl-redesign.md](llm-generated/lvgl-redesign.md), [display-info-reboot.md](llm-generated/display-info-reboot.md) |
 | [`firmware/wt32-eth01_ping-test/`](../firmware/wt32-eth01_ping-test/) | WT32-ETH01 | [wt32-eth01-ping-test.md](llm-generated/wt32-eth01-ping-test.md), [wt32-eth01.md](llm-generated/wt32-eth01.md) |
 | [`firmware/wt32-eth01_captive-recon/`](../firmware/wt32-eth01_captive-recon/) | WT32-ETH01 | [wt32-eth01-captive-recon.md](llm-generated/wt32-eth01-captive-recon.md) |
-| [`firmware/network-master/`](../firmware/network-master/) | WT32-ETH01 | [network-master.md](llm-generated/network-master.md) (production), [display-wt32-link.md](llm-generated/display-wt32-link.md) |
+| [`firmware/network-master/`](../firmware/network-master/) | WT32-ETH01 | [network-master.md](llm-generated/network-master.md) (production), [link-serial-protocol.md](llm-generated/link-serial-protocol.md) |
 | [`firmware/methane-calibrate/`](../firmware/methane-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §6 |
 | [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §5 |
 | [`firmware/temp-probe/`](../firmware/temp-probe/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §7 |
@@ -51,8 +51,10 @@ document is the source of truth for anything measured on real hardware.
 | [rs485-loopback-test.md](llm-generated/rs485-loopback-test.md) | The dual-MAX485 loopback test and its direction control |
 | [wt32-eth01-ping-test.md](llm-generated/wt32-eth01-ping-test.md) | The Ethernet and ping demo |
 | [wt32-eth01-captive-recon.md](llm-generated/wt32-eth01-captive-recon.md) | Captive portal recon firmware |
-| [network-master.md](llm-generated/network-master.md) | Production WT32 firmware: portal login via display Modbus |
-| [display-wt32-link.md](llm-generated/display-wt32-link.md) | The single Modbus RTU line: wiring, framing, register map, flows |
+| [network-master.md](llm-generated/network-master.md) | Production WT32 firmware: portal login via display `rusim-line` link |
+| [link-serial-protocol.md](llm-generated/link-serial-protocol.md) | `rusim-line` v1 wire spec: wiring, line rules, command set, log forwarding, `PASSTH`, RS485 follow-on |
+| [display-wt32-link.md](llm-generated/display-wt32-link.md) | Retired: replaced by `link-serial-protocol.md` |
+| [comms-rework-plan.md](llm-generated/comms-rework-plan.md) | Implemented plan that produced `rusim-line` v1 (blueprint; the wire spec is `link-serial-protocol.md`) |
 | [db-sync-experiment-ntp.md](llm-generated/db-sync-experiment-ntp.md) | Supabase latest-experiment sync, mismatch warn, NTP (backlog #1/#9/#12) |
 | [esp-db-sync.md](llm-generated/esp-db-sync.md) | ESP to database round trip: the missing push path, write grants, sensor chain, token exposure |
 | [display-provisioning-ap.md](llm-generated/display-provisioning-ap.md) | SoftAP credential form on the display: phone login instead of on-screen typing |
@@ -65,6 +67,7 @@ document is the source of truth for anything measured on real hardware.
 | [captive-portal-workaround.md](llm-generated/captive-portal-workaround.md) | Plan for headless captive portal authentication on the WT32-ETH01 |
 | [captive-portal-login-script.md](llm-generated/captive-portal-login-script.md) | `scripts-hardware/captive-portal-login.sh`: the firmware login sequence as a one-shot bash script |
 | [legacy-slave.md](llm-generated/legacy-slave.md) | `legacy/slave/new-slave.cpp`: 4-bottle sensor slave, JSON protocol, USB stream, HX711 init trap, known gaps |
+| [migration-plan.md](llm-generated/migration-plan.md) | ESP pulls telemetry from the legacy Mega slave over UART1 (implemented, log-only); pH converted in the slave; enqueue deferred |
 | [legacy-master.md](llm-generated/legacy-master.md) | `legacy/master/master.cpp`: water-bath master firmware, MOSFET PWM pump and stirrer ramping, hysteresis, Pi USB serial commands |
 
 ## 3. Dashboard

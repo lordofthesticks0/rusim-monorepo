@@ -67,7 +67,17 @@ const float CALIBRATION_FACTORS[NUM_BOTTLES] = {
 };
 
 // ==========================================
-// 5. SENSOR OBJECTS & CACHED TELEMETRY
+// 5. PH (PH-402C / PH-4502C) 3-POINT CALIBRATION
+// ==========================================
+// Per-bottle voltages measured at pH 4.01 / 6.86 / 9.18. Ported from the Pi's
+// PH_CALIBRATION table so the conversion happens next to the ADC read; the
+// serialised "ph" field is therefore pH units, not volts.
+const float PH_V_401[NUM_BOTTLES] = {4.120f, 4.160f, 4.160f, 4.160f};
+const float PH_V_686[NUM_BOTTLES] = {3.833f, 3.833f, 3.833f, 3.833f};
+const float PH_V_918[NUM_BOTTLES] = {3.620f, 3.630f, 3.630f, 3.630f};
+
+// ==========================================
+// 6. SENSOR OBJECTS & CACHED TELEMETRY
 // ==========================================
 OneWire oneWire1(PIN_TEMP[0]); DallasTemperature temp1(&oneWire1);
 OneWire oneWire2(PIN_TEMP[1]); DallasTemperature temp2(&oneWire2);
@@ -249,10 +259,31 @@ void updatePressure(int idx) {
 // ==========================================
 // TEMPERATURE & PH FUNCTIONS
 // ==========================================
+// Piecewise linear pH conversion, mirroring the Pi's old convert_ph_voltage():
+// acidic segment (4.01..6.86) above v_686, alkaline segment (6.86..9.18) at or
+// below it. 0 V and the 5 V rail are invalid, matching the Pi's guard, and a
+// NaN input fails the same test. Result is clamped to 0..14 and rounded to two
+// decimals, which is the value the Pi used to compute and the CSV records.
+float convertPhVoltage(float v, int idx) {
+  if (!(v > 0.0f) || v >= 5.0f) return -1.0f;
+  float ph;
+  if (v > PH_V_686[idx]) {
+    const float slope = (6.86f - 4.01f) / (PH_V_686[idx] - PH_V_401[idx]);
+    ph = 4.01f + slope * (v - PH_V_401[idx]);
+  } else {
+    const float slope = (9.18f - 6.86f) / (PH_V_918[idx] - PH_V_686[idx]);
+    ph = 6.86f + slope * (v - PH_V_686[idx]);
+  }
+  if (ph < 0.0f) ph = 0.0f;
+  if (ph > 14.0f) ph = 14.0f;
+  return roundf(ph * 100.0f) / 100.0f;
+}
+
 void updatePhAndTemp() {
   for (int i = 0; i < NUM_BOTTLES; i++) {
     int phRaw = analogRead(PIN_PH[i]);
-    cachedPh[i] = (phRaw == 0) ? -1.0f : phRaw * (5.0f / 1023.0f);
+    // Raw 0 is 0 V, which convertPhVoltage() rejects along with the 5 V rail.
+    cachedPh[i] = convertPhVoltage(phRaw * (5.0f / 1023.0f), i);
   }
 
   unsigned long now = millis();

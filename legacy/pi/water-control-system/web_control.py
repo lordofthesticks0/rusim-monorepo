@@ -91,48 +91,9 @@ current_data = {
     'bottles': []
 }
 
-# --- PH SENSOR CALIBRATION (PH-4502C / PH-402C) ---
-# 3-point piecewise linear calibration per chamber/bottle (pH 4.01, 6.86, 9.18).
-# Sourced from chamber calibration files (kode-kalibrasi-ph1..4.cpp).
-PH_CALIBRATION = {
-    1: {"v_401": 4.120, "v_686": 3.833, "v_918": 3.620},
-    2: {"v_401": 4.160, "v_686": 3.833, "v_918": 3.630},
-    3: {"v_401": 4.160, "v_686": 3.833, "v_918": 3.630},
-    4: {"v_401": 4.160, "v_686": 3.833, "v_918": 3.630},
-}
-
-def convert_ph_voltage(raw_v, bottle_id=1):
-    """
-    Converts raw analog voltage from PH-4502C sensor to actual pH value
-    using 3-point piecewise linear interpolation:
-      - Acidic range (pH 4.01 to 6.86) when v > v_686
-      - Alkaline range (pH 6.86 to 9.18) when v <= v_686
-    Returns -1.0 if raw voltage is invalid or sentinel (-1).
-    """
-    if raw_v is None:
-        return -1.0
-    try:
-        v = float(raw_v)
-    except (ValueError, TypeError):
-        return -1.0
-    if v <= 0.0 or v >= 5.0 or v == -1.0:
-        return -1.0
-
-    cal = PH_CALIBRATION.get(int(bottle_id), PH_CALIBRATION[1])
-    v_401 = cal["v_401"]
-    v_686 = cal["v_686"]
-    v_918 = cal["v_918"]
-
-    if v > v_686:
-        # Acidic range (pH 4.01 to 6.86)
-        slope = (6.86 - 4.01) / (v_686 - v_401)
-        ph = 4.01 + slope * (v - v_401)
-    else:
-        # Alkaline range (pH 6.86 to 9.18)
-        slope = (9.18 - 6.86) / (v_918 - v_686)
-        ph = 6.86 + slope * (v - v_686)
-
-    return round(max(0.0, min(14.0, ph)), 2)
+# pH arrives from the Mega slave in pH units: the slave now applies its own
+# per-bottle 3-point calibration (PH_V_401/686/918 in legacy/slave/new-slave.cpp)
+# and sends -1 for an invalid reading. Do not convert it here again.
 
 cached_sys_stats = {
     "cpu_percent": 0.0,
@@ -422,24 +383,14 @@ def serial_worker():
                         existing_map = {b['id']: b for b in current_data['bottles'] if isinstance(b, dict) and 'id' in b}
                         for nb in new_bottles:
                             if isinstance(nb, dict) and 'id' in nb:
-                                b_id = nb['id']
-                                if 'ph' in nb:
-                                    raw_ph = nb['ph']
-                                    nb['ph_raw_v'] = raw_ph
-                                    nb['ph'] = convert_ph_voltage(raw_ph, b_id)
-                                existing_map[b_id] = nb
+                                existing_map[nb['id']] = nb
                         current_data['bottles'] = list(existing_map.values())
 
                     elif 'id' in payload and 'temp' in payload:
                         packet_stats['rx_slave'] += 1
                         last_slave_rx_time = now_ts
                         existing_map = {b['id']: b for b in current_data['bottles'] if isinstance(b, dict) and 'id' in b}
-                        b_id = payload['id']
-                        if 'ph' in payload:
-                            raw_ph = payload['ph']
-                            payload['ph_raw_v'] = raw_ph
-                            payload['ph'] = convert_ph_voltage(raw_ph, b_id)
-                        existing_map[b_id] = payload
+                        existing_map[payload['id']] = payload
                         current_data['bottles'] = list(existing_map.values())
 
                     elif payload.get('type') == 'master_status':

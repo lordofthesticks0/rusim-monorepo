@@ -1,6 +1,6 @@
 #pragma once
 // /setup: first-class route for portal login + start-experiment. Shown first
-// on boot and whenever the WT32 polls LOGIN_REQ over Modbus.
+// on boot and whenever the WT32 sends LOGINREQ over the serial link.
 //
 // There is no on-screen keyboard. The user taps "Start phone login", which
 // raises an open SoftAP, then scans the QR code on this screen with a phone:

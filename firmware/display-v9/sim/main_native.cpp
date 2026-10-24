@@ -7,7 +7,7 @@
 #include <lvgl.h>
 
 #include "fake_data.h"
-#include "link_modbus.h"
+#include "link_serial.h"
 #include "serial_cmd.h"
 #include "screen_control.h"
 #include "screen_home.h"
@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
 
-  link_modbus_init();
+  link_serial_init();
   setvbuf(stdout, nullptr, _IONBF, 0);
 
   if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -37,14 +37,14 @@ int main(int argc, char **argv) {
   lv_sdl_keyboard_create();
 
   fake_init();
-  link_modbus_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
   ui_init();
 
   printf("display-v9 sim. Type serial commands here (PUSH, TEMP 42, STATUS, ...; HELP for list).\n");
 
   for (;;) {
     serial_cmd_poll();
-    link_modbus_poll();
+    link_serial_poll();
     screen_setup_poll();
     screen_home_poll();
     screen_control_poll();

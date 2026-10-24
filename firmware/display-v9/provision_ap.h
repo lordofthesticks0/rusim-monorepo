@@ -4,9 +4,9 @@
 //
 // Why this exists: typing a username and password on the touchscreen is a
 // poor experience. This module raises a short-lived access point, serves a
-// small web form, and stages whatever arrives into the same Modbus credential
-// registers. `network-master` is unaware of this path and needs no change: both
-// callers converge on link_modbus_set_credentials().
+// small web form, and stages whatever arrives into the same serial-link
+// credential pair. `network-master` is unaware of this path and needs no
+// change: both callers converge on link_serial_set_credentials().
 //
 // The network is WPA2 and, by default, cloaked: the SSID is not broadcast and
 // the access point does not appear in a network list. The join QR carries
@@ -22,9 +22,9 @@
 //   -D PROVISION_AP_PASSWORD="secret"  8-63 chars, replaces the MAC-derived one
 //   -D PROVISION_AP_HIDDEN=0            broadcast the SSID instead of cloaking it
 //
-// Credential lifetime is unchanged: the strings live in display RAM until the
-// WT32 reads them and acks, and the WT32 overwrites its own copy after login.
-// Nothing here writes to NVS or flash.
+// Credential lifetime is unchanged: the strings live in display RAM for the
+// session (kept so a rebooted WT32 can be re-sent the pair), and the WT32
+// overwrites its own copy after login. Nothing here writes to NVS or flash.
 //
 // The AP is deliberately NOT started automatically. It stays down until the
 // user asks for it on /setup or over USB serial, and it is torn down as soon
@@ -37,9 +37,9 @@
 //   GET  /status  plain-text state for the result page to poll; leads with a
 //                 "waiting" | "success" | "fail" token, then the message
 //
-// A staged pair also pulses the poll-request line (link_modbus, Display IO11 ->
-// WT32 IO14) so the master reads it immediately. A rejected pair leaves RESULT
-// at fail, which is what puts the wrong-password banner on the form.
+// A staged pair sends CREDS immediately (Display IO17 -> WT32 IO3), so the
+// master reads it without waiting for its heartbeat. A rejected pair leaves
+// RESULT at fail, which is what puts the wrong-password banner on the form.
 
 #include <Arduino.h>
 

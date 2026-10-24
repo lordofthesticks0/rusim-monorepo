@@ -3,12 +3,13 @@
 ## 1. Overview
 
 `firmware/display-v9/` is the Display MCU firmware: Sunton 800×480 ST7262
-(RGB565) + GT911 touch, ESP32-S3, LVGL v9.3.0, Arduino_GFX flush path.
+(RGB565) + GT911 touch, ESP32-S3, LVGL v9.6.0, Arduino_GFX flush path.
 
 This pass implements the screen tree from the Display UI scribble notes
-**with fake data only**: nothing is connected. The WT32 (Modbus master, 5-min
-push) does not exist yet, so a local `AppState` pretends to be "the latest
-cycle" and a USB-serial line protocol lets a human mutate it. All open
+**with fake sensor data**: no sensor chain is attached. The WT32 is real for
+login, network status, DB state and experiment state over the serial link
+(`link-serial-protocol.md`); a local `AppState` still supplies the bottle
+readings, and a USB-serial line protocol lets a human mutate it. All open
 questions from the notes are parked; each stub carries a `TODO(WT32|HW)`.
 
 Locked decisions honoured: no staleness UI, no PIN on Control,
@@ -25,26 +26,26 @@ hold-to-confirm 500 ms on binary toggles, no local log storage, 41 °C warn /
 | Touch | GT911, SDA 19 / SCL 20 (`touch.h`), read via `my_touchpad_read()` |
 | Backlight | `TFT_BL = 2`. Notes say GPIO45, but **GPIO45 is R0 of the RGB bus** — do not move without EE sign-off (`ui_config.h`, `screen_sleep.cpp`) |
 | Draw buffer | 800·480/4·2 ≈ 187.5 KB `MALLOC_CAP_INTERNAL`, `RENDER_MODE_PARTIAL`, RGB565 |
-| Env | `display-v9` in `platformio.ini`: esp32-s3-devkitc-1, qio_opi, 16 MB flash, opi PSRAM, lvgl 9.3.0 |
+| Env | `display-v9` in `platformio.ini`: esp32-s3-devkitc-1, qio_opi, 16 MB flash, opi PSRAM, lvgl 9.6.0 |
 
 ## 3. File map
 
 | File | Role |
 |---|---|
-| `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_modbus_init()` + `ui_init()`; `loop()` = USB serial poll → Modbus slave poll → boot-gate poll → sleep tick → `lv_timer_handler()` |
+| `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_serial_init()` + `ui_init()`; `loop()` = USB serial poll → link poll → boot-gate poll → sleep tick → `lv_timer_handler()` |
 | `lv_conf.h` | Enables vs stock: `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART, BUTTONMATRIX, QRCODE (+CANVAS, required by qrcode)` = 1; fonts +12/+20/+28. `KEYBOARD` is now 0 (credential entry moved to QR, §12). **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
-| `link_modbus.h/.cpp` | Modbus RTU slave ID 1 on `Serial1` (RX 18 / TX 17, 9600 8N1). FC 0x03/0x06/0x10 + CRC16. Register map in §10. `Serial` stays USB debug only. Also owns the poll-request output (IO11 -> WT32 IO14): `link_modbus_set_credentials()` pulses it so the master re-reads a new pair at once |
-| `screen_setup.h/.cpp` | `/setup` first-class route: 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + Start/Stop button. Shown first on boot and on WT32 `LOGIN_REQ`; routes home only on `RESULT=success`. No keyboard (§12); duration/exp number/run live on `/control`. It owns the SoftAP except while `/info` is up (§13). `RESULT=fail` puts the wrong-password text on the panel, and the phone sees the same verdict (§12) |
+| `link_serial.h/.cpp` | `rusim-line` v1 peer on `Serial1` (RX 18 / TX 17, 115200 8N1). Line parser, 5 s heartbeats, all inbound/outbound words, log forwarding, `PASSTH` tunnel. `Serial` stays USB debug only. Full wire spec in §10 and `link-serial-protocol.md` |
+| `screen_setup.h/.cpp` | `/setup` first-class route: 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + Start/Stop button. Shown first on boot and on WT32 `LOGINREQ`; leaves the gate on `RESULT OK`. No keyboard (§12); duration/exp number/run live on `/control`. It owns the SoftAP except while `/info` is up (§13). `RESULT FAIL` puts the wrong-password text on the panel, and the phone sees the same verdict (§12) |
 | `touch.h` | Unchanged GT911 glue |
 | `ui_config.h` | Counts (6 clusters × 4 bottles, 2 online), ranges, 500 ms / 30 s / 5 min timings, thresholds, pins, light palette (§13), `FW_VERSION`, `IS_DEBUG` debug gate (§14) |
 | `fake_data.h/.cpp` | `AppState g`: experiment, setpoint, stirrer, POST, chamber temp, 6×4 bottles × 5 sensors + NULL flags + temp trend ring; `fake_init()` seeds 2 online / 4 offline; `fake_wt32_push()` jitters online values every 5 min (lv_timer) |
 | `serial_cmd.h/.cpp` | Human-typeable debug protocol over USB serial (see §5). Display-local only. Also `CREDS` and `AP` (§12) |
-| `provision_ap.h/.cpp` | SoftAP + web credential form on the display, staging into the same Modbus registers as the `CREDS` serial command (§12). `/status` leads with a `waiting`/`success`/`fail` token and a reject gets the error page with a retry link |
+| `provision_ap.h/.cpp` | SoftAP + web credential form on the display, staging into the same link pair as the `CREDS` serial command (§12). `/status` leads with a `waiting`/`success`/`fail` token and a reject gets the error page with a retry link |
 | `ui_shell.h/.cpp` | Status bar, content router, single blocking-modal primitive, bell logic, overheat eval, `ui_mk_*` styled helpers (no LVGL theme is enabled, so all styling is explicit) |
 | `screen_boot.h/.cpp` | `/boot` blocking gate: spinbox 1–99 h ±1 h + confirm; must confirm every boot |
 | `screen_home.h/.cpp` | `/home`: DATA / CONTROL / INFO nav + run summary + serial hint |
 | `screen_data.h/.cpp` | `/data` picker (6 clusters, offline greyed), `/data/X` 2×2 bottle grid ("node offline" inline), `/data/X/bottle_Y` 5 sensor rows + `lv_chart` temp trend (values ×10, range 300–450) |
-| `screen_control.h/.cpp` | `/control`: setpoint −/+ 0.1 °C (35.0–40.0, logs `[FAKE->WT32]`), stirrer + POST switches with hold-to-confirm progress bars, plus a `PULSE INT` button that calls `link_notify_pulse()` so the poll-request line can be exercised by hand |
+| `screen_control.h/.cpp` | `/control`: setpoint −/+ 0.1 °C (35.0–40.0, logs `[FAKE->WT32]`), stirrer + POST switches with hold-to-confirm progress bars, plus a `PUSH EXP` button that sends one immediate `EXPERIMENT` line for bench testing |
 | `screen_info.h/.cpp` | `/info`: rebuilt on every open; fake storage/IP/HTTP/FW rows + real heap/PSRAM rows + fetch timestamp + a 180 px network QR with its own Start/Stop (§13). `screen_info_poll()` keeps the QR in step each loop |
 | `screen_sleep.h/.cpp` | Idle timer on last-touch millis; backlight off after 30 s, on at next touch tick |
 
@@ -88,10 +89,14 @@ UNNULL <c> <b> <s>   clear one field NULL
 
 There are deliberately **no on-screen debug buttons/modals for faking** —
 all injection goes through this port. `STATUS` prints run state + node list.
-`LINK` prints the Modbus slave state (`req/ready/result/user/dur`).
+`LINK` prints the link state (`req/pair/result/user/exp`, `ip/ping/up/age`,
+`db`, passthrough). `PASSTH ON|OFF` opens the raw USB <-> IO17/IO18 tunnel
+used to flash or watch the WT32 (§10). `W32CMD <line>` forwards one arbitrary
+line and exists only in `IS_DEBUG=1` builds.
 
-> Display→WT32 login transport is now real Modbus RTU (see §10); the
-> remaining fake part is the sensor-data push, still via `fake_wt32_push()`.
+> Display→WT32 login, network status, DB state and experiment state are real
+> over the serial link (see §10); the remaining fake part is the sensor-data
+> push, still via `fake_wt32_push()`.
 
 ## 6. Bell / NULL semantics (fake)
 
@@ -121,58 +126,73 @@ Home → Data → Cluster 0 → Bottle → back; open Cluster 4 (offline); tap b
 
 ## 9. Known gaps / next pass
 
-- Real WT32 sensor-data push over the Modbus link (today only login
-  transport is real; `fake_wt32_push()` still jitters local values).
-- Real `→WT32` command transport (today: `Serial.printf("[FAKE->WT32] …")`).
+- Real WT32 sensor-data push over the serial link (login, network, DB and
+  experiment state are already real; `fake_wt32_push()` still jitters local
+  values).
+- Real `→WT32` transport for setpoint, stirrer and POST (experiment state is
+  real; the rest still only prints `[FAKE->WT32] …`).
 - Backlight GPIO45 conflict resolution with EE.
 - `LV_MEM_SIZE` is still 64 KB — bump if chart/table-heavy screens OOM.
 - Duration sub-hour steps, wake-confirm UX, breaker power-domain scope: parked
   open questions, unchanged.
 
-## 10. WT32 login link (Modbus RTU slave, production)
+## 10. WT32 link (`rusim-line` v1, production)
 
-The display is the Modbus slave; the WT32 `network-master` env is the master.
-The full wire spec — wiring, framing, register map, transaction patterns —
-lives in `display-wt32-link.md`; this section is the display-end summary.
-USB `Serial` is debug only (see §5 plus the `LINK` command). The link is
-`Serial1`: RX IO18, TX IO17, 9600 8N1, common GND. `link_modbus_init()`
-drains boot noise; `link_modbus_poll()` runs every `loop()` before
-`screen_setup_poll()`.
+The display and the WT32 are peers on a raw line protocol. The full wire spec
+lives in `link-serial-protocol.md`; this section is the display-end summary.
+USB `Serial` is debug only (§5 plus the `LINK` command). The link is
+`Serial1`: RX IO18, TX IO17, 115200 8N1, common GND. `link_serial_init()`
+drains boot noise and sends `HELLO`; `link_serial_poll()` runs every `loop()`
+before `screen_setup_poll()`.
 
-Supported functions: `0x03` read holding, `0x06` write single, `0x10` write
-multiple. Anything else returns exception `0x01`; unknown addresses return
-`0x02`. Fixed-length requests parse eagerly at 8 bytes; variable-length ones
-parse after 8 ms of line silence. CRC is standard Modbus CRC16.
+One ASCII line per message, `\n` terminated, 1024 bytes maximum. A partial
+line is dropped after 50 ms of silence. Unknown words and display-direction
+words arriving on RX are ignored silently, so power-on noise and a loopback
+copy produce no action. There is no CRC and no ack: both ends repeat their
+full truth every 5 s (`LINK_BEAT_MS`), and changes push immediately.
 
-| Address | Name | Write owner | Meaning |
-|---|---|---|---|
-| `0x0000` | LOGIN_REQ | master | `1` = show the login gate |
-| `0x0001` | CREDS_READY | slave sets, master clears | `1` = staged creds ready |
-| `0x0002` | RESULT | master | `0` none, `1` success, `2` fail |
-| `0x0003` | EXP_RUNNING | read-only | `1` = experiment under way |
-| `0x0004` | EXP_NUM | read-only | current experiment number |
-| `0x0010-0x002F` | USERNAME | read-only | 64 B ASCII, big-endian, NUL-padded |
-| `0x0030-0x004F` | PASSWORD | read-only | same encoding as username |
-| `0x0060` | DURATION_H | read-only | 1-99, quick-polled by the master |
-| `0x0070-0x0077` | IP_ADDR | master | 16 B ASCII, shown live in /info |
-| `0x0078` | PING_MS | master | ms to 1.1.1.1, `0xFFFF` = none, shown live in /info |
-| `0x0079` | NET_UP | master | `1` = WT32 holds IP |
+Received from the WT32:
 
-`LOGIN_REQ=1` from the master routes to `/setup`. Staging a pair (phone form
-or `CREDS`) sets `CREDS_READY=1`, shows "waiting for WT32", and pulses the
-poll-request line on IO11 so the master reads it on its next loop pass instead
-of up to 5 s later. `RESULT=1` routes home but does NOT start the run;
-`RESULT=2` stays in setup with "wrong username or password" on the status line,
-while the phone's own page shows the same verdict and a retry link (§12). The
-master writes `CREDS_READY=0` after each read; `LOGIN_REQ=0` only on success.
-The run starts from `/control` (hold-to-confirm), which flips `EXP_RUNNING` and
-increments `EXP_NUM`.
+| Word | Meaning |
+|---|---|
+| `HELLO` | WT32 booted; clear verdict bookkeeping so the staged pair is re-pushed |
+| `LOGINREQ` | route to `/setup` (idempotent); heartbeat while creds are needed |
+| `RESULT OK` / `RESULT FAIL` | login verdict: route home / stay on setup with retry text |
+| `NET ip= up= [ping=]` | `/info` IP, link and latency store |
+| `DB latest= time= bottles= drops=` | `/info` DB store; `-` = unknown, `latest=0` = no rows |
+| `LOG <text>` | print `[W32] <text>` on the display USB console, verbatim |
 
-The poll-request line is one wire, Display IO11 -> WT32 IO14, idle LOW, and it
-carries no data: a 20 ms HIGH pulse means "poll now". The WT32 picks it up in an
-interrupt and consumes it in its credential stage. A pulse that arrives while
-the master is logging in is latched, so the retry after a failure is polled
-twice as fast as the 5 s cycle allows. Full spec: `display-wt32-link.md` §4.3.
+Sent to the WT32:
+
+| Word | Meaning |
+|---|---|
+| `HELLO` | display booted; the WT32 replies with its full snapshot |
+| `EXPERIMENT run= num= dur=` | on every change and every heartbeat |
+| `CREDS user= pass=` | percent-encoded pair, sent on staging and every heartbeat until a verdict |
+| `DUMP` | debug-build bench command via `W32CMD`, never automatic |
+
+Staging a pair (phone form or USB `CREDS`) calls
+`link_serial_set_credentials()`, which sends `CREDS` immediately and repeats it
+on each heartbeat until `RESULT` arrives. `LOGINREQ` routes to `/setup`;
+`RESULT OK` routes home but does NOT start the run; `RESULT FAIL` keeps
+`/setup` up with "wrong username or password" on the panel and on the phone
+page (§12). The run starts from `/control` (hold-to-confirm), which flips
+`run=1` and increments `num`.
+
+Every outbound command is echoed locally as one `[LINK>] <word> [args]` line.
+`CREDS` echoes the word only, never the payload. A WT32 `HELLO` clears the
+local verdict and re-pushes the kept pair, so the rebooted master can log in
+without retyping. A display `HELLO` makes the WT32 re-send `NET`/`DB` and
+`RESULT OK` if it is running.
+
+`PASSTH ON` suspends both parsers and turns the display into a raw USB <->
+IO17/IO18 tunnel: use it to watch unprefixed WT32 ROM output or to flash the
+WT32 through the display's USB, using the same `IO0` jumper and power-cycle
+drill as a bare 4-wire adapter. `PASSTH OFF` at the start of a line closes it;
+after binary traffic send a newline first. Runtime only. The USB port is a
+CH340 bridge whose auto-reset circuit reboots the display on any ordinary
+serial open, so an open monitor ends the tunnel and the flash tool must not
+open the port itself (`link-serial-protocol.md` §7).
 
 ## 11. Setup route
 
@@ -181,13 +201,14 @@ skips route 6, so the 5-minute fake push never disturbs it.
 
 The route was originally a two-textarea form with an `lv_keyboard`. That is
 gone; §12 describes what replaced it. What survives: the route is raised by
-`LOGIN_REQ` and lowered to `/home` on `RESULT=success`. The duration
+`LOGINREQ` and lowered to `/home` on `RESULT OK`. The duration
 spinbox moved to `/control`, so experiment duration and number can be
 changed after login without re-authing.
 
 Verify: `pio run -e display-v9`; on device send `LINK` over USB serial to
-print `req/ready/result/user/dur`. Short RX to TX on the display alone to
-loop back Modbus frames during development.
+print the link state. Short display IO18 to IO17 with the WT32 absent to
+loop back lines: each emitted command must still produce no parse reply, which
+proves the direction check is in place.
 
 ## 12. Credential entry by QR (`provision_ap`)
 
@@ -289,3 +310,10 @@ with a `DEBUG:` prefix, and never enable it in a production flash.
 
 ---
 Content generated by `opencode/muse-spark-1.3-contributor-free` in `opencode`.
+
+Update by `opencode/glm-5.3-flash-free` in `opencode`: LVGL version references corrected
+v9.3.0 -> v9.6.0, matching `platformio.ini` (`lvgl/lvgl@9.6.0`) and the 9.6 port.
+
+Update by `opencode/deepseek-v4.1-flash-free` in `opencode`: Modbus RTU slave section replaced by the `rusim-line` v1 peer (`link-serial-protocol.md`); file map, serial commands (`LINK`, `PASSTH`, `W32CMD`) and known gaps updated.
+
+Update by `codebuff/deepseek-v4.1-flash` in `freebuff`: §10 `PASSTH` note added on the CH340 auto-reset when the port is opened and on the line-start requirement for the exit word.
