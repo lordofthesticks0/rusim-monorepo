@@ -19,17 +19,19 @@ There is no UI framework, no state library, and no chart library. The chart is h
 | File | Lines | Responsibility |
 |---|---|---|
 | `index.tsx` | 5 | Mounts `<App/>` into `#root`, imports the stylesheet |
-| `src/App.tsx` | 537 | Everything visible: login screen, both views, all components, all chart math |
-| `src/data.ts` | 305 | Every Supabase read, the auth RPCs, and all pure domain logic |
+| `src/App.tsx` | 697 | Everything visible: login screen, both views, all components, all chart math |
+| `src/data.ts` | 275 | Every Supabase read, the auth RPCs, and the non-numbering domain logic |
+| `src/chambers.ts` | 54 | Maps stored 0-based bottle ids to displayed chamber numbers and splits current presence |
 | `src/auth.ts` | 110 | Session lifecycle: localStorage persistence, expiry timer, retry backoff |
-| `src/supabase.ts` | 62 | Client construction, schema pinning, session header injection |
-| `src/csv.ts` | 90 | RFC 4180 CSV serialisation and download |
+| `src/supabase.ts` | 72 | Client construction, schema pinning, session header injection |
+| `src/csv.ts` | 94 | RFC 4180 CSV serialisation and download |
 | `src/styles.css` | 53 | All styling, one declaration block per line |
 | `scripts/dev-db.ts` | 694 | Dev-only database seeding and token provisioning |
-| `supabase/migrations/*.sql` | 16 files | Schema, authentication, lockdown |
+| `supabase/migrations/*.sql` | 17 files | Schema, authentication, lockdown |
 | `netlify.toml` | 23 | Build config and security headers |
-| `src/types/domain.ts` | 56 | Hand-written domain types and experiment-id helpers |
+| `src/types/domain.ts` | 60 | Hand-written domain types and experiment-id helpers |
 | `src/types/database.ts` | 840 | Supabase-generated schema types for `device_data` and legacy `public` |
+| `src/*.test.ts` | 318 | `bun test` suites for history grouping, monitoring isolation, chamber numbering, and CSV output |
 
 ### 1.2 What it is not
 
@@ -63,7 +65,7 @@ bun run dev-db       # prepare the development database
 
 `netlify.toml` states the rule plainly: only the two `VITE_*` variables may be set on the deployed site. `DATABASE_URL` is direct Postgres write access, and `DEV_0_TOKEN_HASH` is a credential.
 
-`src/supabase.ts` **throws at module load** if either `VITE_*` variable is missing. This is a hard crash of the whole bundle, not a rendered error state.
+`src/supabase.ts` reads the two `VITE_*` variables on first use, then throws if either is missing. A missing variable is still a hard failure of the app, not a rendered error state, but importing a pure module for a test no longer constructs the client or requires the variables.
 
 ### 2.2 The static host
 
@@ -82,7 +84,7 @@ A second, much richer schema, `public`, exists from an earlier design and is ret
 | Column | Type | Rules and meaning |
 |---|---|---|
 | `device_id` | `integer` | Primary key, `CHECK (device_id >= 0)`. Factory assigned. `0` is the development device; production numbering starts at `1`. |
-| `bottle_count` | `integer` | Required, no range check. How many bottles the UI offers in its selector. Dev device: 24. |
+| `bottle_count` | `integer` | Required, no range check. How many chambers the UI offers in its selector. Chamber ids run `1` through this value. Dev device: 24. |
 | `owner_name` | `text` | Nullable. Rendered in the UI. |
 | `owner_email` | `text` | Nullable. Rendered in the UI. |
 | `token_hash` | `text` | Nullable, `UNIQUE`, constrained to `NULL` or exactly 128 lowercase hex characters. |
@@ -96,18 +98,20 @@ Device 0 is provisioned by migration `20260930162100` with `bottle_count = 24`, 
 | Column | Type | Rules and meaning |
 |---|---|---|
 | `device_id` | `integer` | FK → `devices.device_id` |
-| `bottle_id` | `integer` | Required, no range check. Convention is `0`–`23` for 24 bottles. |
+| `bottle_id` | `integer` | Required internal id, retained as stored by Supabase and ESP32 (`0..bottle_count-1`). The dashboard displays `bottle_id + 1` as the chamber number. |
 | `experiment_id` | `integer` | Required, `CHECK (>= 0)`. `0` is the testing experiment. **Not in the primary key.** |
 | `timestamp` | `timestamptz` | Required, timezone-aware. **In the primary key.** |
 | `ph`, `pressure`, `temp`, `co2`, `ch4` | `real` | Nullable four-byte floats. |
 
 **Primary key: `(device_id, bottle_id, timestamp)`.**
 
-This is the single most consequential schema decision, changed by `20260930170000_make_readings_a_time_series.sql`. The previous key was `(device_id, bottle_id, experiment_id)`, which permitted exactly one row per bottle per experiment and made repeated sampling within an experiment impossible. Dropping `experiment_id` from the key turns the table into a genuine time series.
+This is the single most consequential schema decision, changed by `20260930170000_make_readings_a_time_series.sql`. The previous key was `(device_id, bottle_id, experiment_id)`, which permitted exactly one row per chamber per experiment and made repeated sampling within an experiment impossible. Dropping `experiment_id` from the key turns the table into a genuine time series.
 
 `experiment_id` itself is unchanged: still `NOT NULL`, still a grouping column, still reserving `0` for the testing experiment. Only its role in the key was removed.
 
-A direct consequence, stated in the migration: **one bottle cannot hold the same timestamp in two experiments.** A conflicting insert fails loudly on the primary key rather than overwriting. The rationale is that a device cannot genuinely report two experiments for one bottle at the same instant.
+A direct consequence, stated in the migration: **one chamber cannot hold the same timestamp in two experiments.** A conflicting insert fails loudly on the primary key rather than overwriting. The rationale is that a device cannot genuinely report two experiments for one chamber at the same instant.
+
+Stored `bottle_id` values remain unchanged. The dashboard adds one only when presenting an id to the user; data queries, Supabase values, and ESP32 payloads keep their existing internal ids.
 
 All five measurement columns became nullable in the same migration. The stated intent: *"a row is now present-but-empty rather than absent when a reading fails."*
 
@@ -130,8 +134,8 @@ Two different failure modes exist, and every function in the codebase keeps them
 
 | State | Database meaning | UI surface |
 |---|---|---|
-| **No row** at a timestamp | The bottle sent nothing at all — it is offline | `splitBottlesByPresence` → "Disconnected" card, disconnection banner |
-| **Row present, field `NULL`** | The bottle reported, but that one sensor produced no value | `-` in the metric card, a break in the chart line, an empty CSV field |
+| **No row** at a timestamp | The chamber sent nothing at all - it is offline | `splitBottlesByPresence` → "Disconnected" card, disconnection banner |
+| **Row present, field `NULL`** | The chamber reported, but that one sensor produced no value | `-` in the metric card, a break in the chart line, an empty CSV field |
 
 Three separate places enforce this explicitly:
 
@@ -308,17 +312,17 @@ The default view, reached by the "Monitoring" nav tab.
 
 **Top bar** — connection status (`Loading` / `Unable to load` / `Data loaded` / `No readings`), the latest sample's localised timestamp, `Auto-refreshing` or `No live experiment`, and a sign-out link. The green `.pulse` dot beside the status is a static CSS colour and does not reflect state.
 
-**Bottle selector** — a `<select>` with `bottleCount` options, defaulting to `Bottle 0`. This is the only client-side drill-down control in the whole app.
+**Chamber selector** — a `<select>` with `bottleCount` options numbered `1` through `bottleCount`, defaulting to Chamber 1. Options retain internal values from `internalChamberIds(bottleCount)` and use `displayChamberNumber` for visible labels. This is the only client-side drill-down control in the whole app.
 
 **Device identity strip** — `Device {id} | {owner_name} ({owner_email})`, with "Unnamed owner" when null.
 
-**Four status cards** — Bottle, Samples (that bottle's row count), Latest sample, and Connection. Connection resolves in priority order: `Disconnected` if the bottle is absent from the newest sample, else `Concluded` if the newest sample is older than 10 minutes, else `Live`, else `No data`.
+**Four status cards** — Chamber, Samples (that chamber's row count), Latest sample, and Connection. Connection resolves in priority order: `Disconnected` if the chamber is absent from the newest sample, else `Concluded` if the newest sample is older than 10 minutes, else `Live`, else `No data`.
 
-**Disconnection banner** — rendered only when a latest sample exists *and* at least one configured bottle is missing from it. With the default dev configuration (24 configured, 8 reporting) this reads: "Disconnected at …: bottles Bottle 8, Bottle 9, … Bottle 23 sent no data."
+**Disconnection banner** — rendered only when a latest sample exists *and* at least one configured chamber is missing from it. With the default dev configuration (24 configured, chambers 1–8 reporting) this reads: "Disconnected at …: chambers Chamber 9, Chamber 10, … Chamber 24 sent no data."
 
-**Five metric cards** — pH, Temp, CO2, CH4, Pressure, read from the selected bottle's newest sample. Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as `-` with no unit and no "Latest" tag.
+**Five metric cards** — pH, Temp, CO2, CH4, Pressure, read from the selected chamber's newest sample. Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as `-` with no unit and no "Latest" tag.
 
-**One chart** — with a parameter picker defaulting to CH4, plotting the selected bottle's **entire** history across all experiments, which is why the panel heading reads "Across experiments". Fewer than two rows renders "Not enough data for chart."
+**One chart** — with a parameter picker defaulting to CH4, plotting the selected chamber's **entire** history across all experiments, which is why the panel heading reads "Across experiments". Fewer than two rows renders "Not enough data for chart."
 
 ### 5.6 Live vs concluded is inferred, never stored
 
@@ -347,11 +351,11 @@ Selection defaults to the newest: `selectedExperimentId ?? experiments[0]?.exper
 
 **Stage 2 — the detail.** A `useEffect` keyed on `activeExperimentId` fires `fetchExperimentReadings`, which pages identically but adds `.eq("experiment_id", id)` and orders by `bottle_id` ascending then `timestamp` ascending. A `cancelled` closure flag prevents state updates from a superseded request or an unmounted component.
 
-That ordering is load-bearing, and the comment says so: it keeps a multi-page read contiguous, so each bottle's samples stay together.
+That ordering is load-bearing, and the comment says so: it keeps a multi-page read contiguous, so each chamber's samples stay together.
 
-**"Bottle Readings" sub-panel** — five metric cards and five per-parameter charts in a grid.
+**"Chamber Readings" sub-panel** — a chamber selector, five metric cards read from the selected chamber's newest sample (`selectedChamberReadings.at(-1)`), and five per-parameter charts in a grid.
 
-**"Results" sub-panel** — three sections: a four-card overview (Experiment, Status, Bottles, Readings), a per-parameter Min/Avg/Max panel across bottles, and a per-bottle card list.
+**"Results" sub-panel** — three sections: a four-card overview (Experiment, Status, Chambers, Readings), one Min/Avg/Max block per parameter inside each chamber card, and one card per chamber produced by `groupReadingsByChamber`.
 
 **CSV download** — see §8.
 
@@ -444,7 +448,7 @@ return { min: Math.min(...reported),
 
 Nulls are excluded rather than treated as zero, and it returns `null` — rendered as "No readings" — when nothing reported at all.
 
-`computeBottleStats` is intended to align charts and tables by bottle, but as implemented it does not reduce; see §12.1.
+`groupReadingsByChamber` groups one experiment's rows by `bottle_id`, sorts each chamber's readings by time, and computes per-chamber statistics. The Results view therefore has one entry per chamber, not one per row.
 
 ---
 
@@ -453,6 +457,8 @@ Nulls are excluded rather than treated as zero, and it returns `null` — render
 `src/csv.ts` produces RFC 4180 output.
 
 **Columns:** `bottle_id, timestamp, pH, Temp (°C), CO2 (ppm), CH4 (ppm), Pressure (kPa)`.
+
+The CSV keeps the historical `bottle_id` header, but exports the user-facing chamber number (`bottle_id + 1`). The Supabase row remains unchanged.
 
 Headers and row values are both generated from `PARAMETER_NAMES` and `PARAMETER_UNITS`, with the field lookup delegated to `getParameterValue`, so a sensor cannot be exported under the wrong name or column. The comment states the intent: *"a downloaded file can be read without the dashboard."*
 
@@ -504,9 +510,9 @@ Experiment 0 ends at the current minute, so it reads as **live**. Each higher ex
 
 The comments record the bug this fixed: a naive 5-minute stride looks correct for a single sample per experiment but makes neighbours overlap almost completely — with 24 samples every 5 minutes, experiment 1's newest sample lands on experiment 0's second-newest, and the two collide on the primary key.
 
-Sensor values get a **stable per-bottle offset** (`bottle_id * 0.11` for pH, `* 0.28` for pressure, and so on) so bottles remain visually distinguishable across samples instead of being pure noise, plus a configurable `null_rate` (default 0.0005) to exercise the null-rendering paths.
+Sensor values get a **stable per-chamber offset** (`bottle_id * 0.11` for pH, `* 0.28` for pressure, and so on) so chambers remain visually distinguishable across samples instead of being pure noise, plus a configurable `null_rate` (default 0.0005) to exercise the null-rendering paths. The seed generates chamber ids `1..bottleCount` directly.
 
-The script also reports what landed: row count, bottles reporting, first and last sample in UTC, null counts for pH and methane, and a list of configured-but-never-reporting bottles — described as what "the dashboard reads as 'disconnected'".
+The script also reports what landed: row count, chambers reporting, first and last sample in UTC, null counts for pH and methane, and a list of configured-but-never-reporting chambers — described as what "the dashboard reads as 'disconnected'".
 
 ### 9.3 Why a script and not a migration
 
@@ -520,7 +526,7 @@ It runs with no flags it prompts for every setting through readline, reading via
 
 ### 9.5 Initial data
 
-Migration `20260930172000` populates experiment 0 (24 samples, 5-minute gap, 8 of 24 bottles, `null_rate` 0.0005) with the same timestamp logic inlined, so a `supabase db reset` still produces a dashboard with data in it.
+Migration `20260930172000` populates experiment 0 (24 samples, 5-minute gap, 8 of 24 chambers, `null_rate` 0.0005) using internal ids `0..7`. The dashboard displays those rows as Chambers 1 through 8; the other 16 configured chambers remain disconnected and have no fabricated readings. `bun run dev-db` continues to seed internal ids starting at 0.
 
 ---
 
@@ -577,49 +583,17 @@ This is consistent with the unchecked root README item *"Integrate to data colle
 
 ## 12. Findings
 
-### 12.1 `computeBottleStats` is misnamed and mislabelled
-
-Its doc comment reads *"Pairs each bottle with its reading, so charts and tables can align by bottle."* The implementation does not reduce:
-
-```js
-function computeBottleStats(readings) {
-  return [...readings]
-    .sort((left, right) => left.bottle_id - right.bottle_id)
-    .map((reading) => ({ bottle_id: reading.bottle_id, reading }));
-}
-```
-
-`bottleStats.length` is a **row count, not a bottle count**. `ExperimentResultsView` then renders:
-
-- the overview card as `Bottles: {bottleStats.length}`
-- the parameter summary tag as `{bottleStats.length} bottles`
-- the bottle-results tag on every `BottleChart` as `{readings.length} bottles`
-
-With the default dev configuration of 24 samples across 8 bottles, the Results tab reads **"Bottles 192"** and tags the charts **"192 bottles"** when there are 8.
-
-The "Bottle results" section likewise renders 192 cards for an 8-bottle experiment, 191 of them stale intermediate samples. Correct behaviour needs a reduction keeping the last row per `bottle_id`.
-
-### 12.2 The Results "per bottle" charts are not per bottle
-
-`BottleChart` receives all of `readings` and passes them straight to `Chart`. Because the read is ordered `bottle_id ASC, timestamp ASC`, the x-axis is a composite walk — bottle 0 across all its samples, then bottle 1 across all of its samples, and so on — with time labels drawn from five index positions in that composite order.
-
-The panel headings read "Across bottles", so the intent is per-bottle comparison, but the rendering concatenates bottles instead of comparing them.
-
-### 12.3 History metric cards show the wrong sample
-
-The "Bottle Readings" sub-panel renders its five metric cards from `readings[0]`. With `bottle_id ASC, timestamp ASC` ordering, that is the **oldest sample of bottle 0**, not a latest value. It should be the newest sample of the highest bottle, or a per-bottle latest.
-
-### 12.4 The experiment list is bounded by the monitoring fetch's row cap
+### 12.1 The experiment list is bounded by the monitoring fetch's row cap
 
 The History list is derived from the same in-memory `readings` array, which is capped at 5,000 rows ordered newest-first. On a device with more than 5,000 readings, the **oldest experiments silently vanish from the list** — including ones that would otherwise be selectable.
 
 The truncation notice only appears in the *detail* pane, so a vanished experiment is never explained. Only the Monitoring view has a per-experiment path to the full data, and it is the path that cannot reach the older rows.
 
-### 12.5 The status dot does not reflect state
+### 12.2 The status dot does not reflect state
 
 The `.pulse` element beside the connection status is a hardcoded green in `styles.css`. It is purely decorative, yet it sits immediately left of a label that *does* reflect state (`Unable to load` next to a green "live" dot).
 
-### 12.6 Dead code
+### 12.3 Dead code
 
 | Symbol | Location | Status |
 |---|---|---|
@@ -633,7 +607,7 @@ The `.pulse` element beside the connection status is a hardcoded green in `style
 
 `types/database.ts` also carries 840 lines of generated types for the entire legacy `public` schema that the app no longer reads.
 
-### 12.7 Stale comments and docs
+### 12.4 Stale comments and docs
 
 | Claim | Reality |
 |---|---|
@@ -644,7 +618,7 @@ The `.pulse` element beside the connection status is a hardcoded green in `style
 | `docs/llm-generated/database.md` — "exposes `public`, `graphql_public`, and `device_data` through the API" | `config.toml` now lists only `device_data`. |
 | `docs/llm-generated/database.md` — "The legacy `public` tables still carry their original broad read policies" | Dropped by the lockdown migration. |
 
-### 12.8 Security posture
+### 12.5 Security posture
 
 Already handled, and worth preserving:
 
@@ -664,10 +638,10 @@ Open items:
 - **No token rotation UI.** Rotation is a manual `--only token` run or direct SQL.
 - **Sessions in localStorage** are readable by any XSS. The CSP is the mitigation; there is no `HttpOnly` alternative, since the token must be readable by JS to set the custom header.
 
-### 12.9 Functional gaps
+### 12.6 Functional gaps
 
-- **No tests.** No test runner, no test files, no `test` script. The pure functions in `data.ts` and `csv.ts` are well-shaped for unit tests but untested.
-- **No per-bottle comparison in Monitoring.** The only cross-bottle view is the history charts described in §12.2.
+- **Test coverage is narrow.** `bun test` covers history grouping, monitoring isolation, chamber numbering, and CSV output. Supabase reads and React rendering remain untested.
+- **No per-chamber comparison in Monitoring.** Monitoring shows one selected chamber at a time; the History view is the only place to compare chambers.
 - **No realtime**, by design (§5.4), giving up to 5m30s of latency.
 - **No error boundary.** A render-time throw blanks the page; only data-fetch errors are caught.
 - **No loading state granularity.** One `loading` boolean covers the whole view, so the Monitoring view shows "Loading" rather than a skeleton.
@@ -724,16 +698,17 @@ Open items:
 | `20260930170000` | Makes `readings` a time series: `experiment_id` out of the primary key, sensors nullable |
 | `20260930172000` | Reseeds experiment 0 with disjoint timestamp windows |
 | `20261001000000` | Locks down `public`, drops dev policies, removes Realtime, hardens `authenticate` to 12h, adds session cleanup |
+| `20261016000000` | Adds `push_readings`, `experiments`, and `device_config` |
 
 ### 13.4 The 30-second version
 
 Paste a device token → Postgres SHA-512s it, matches the digest against a stored hash, and returns a 256-bit session token scoped to that one device, valid 12 hours. The browser stores it in localStorage and sends it as `x-device-session` on every request. RLS resolves the header back to a `device_id`, and the query returns that device's rows and nothing else.
 
-The app pulls up to 5,000 rows newest-first, derives an experiment list by grouping on `experiment_id` — there is no experiments table — infers Live versus Concluded purely from whether the newest sample is under 10 minutes old, works out which configured bottles are missing from the newest sample and calls them disconnected, then renders four status cards, five metric cards, and one hand-built SVG chart for the selected bottle. It re-polls every 5m30s only while an experiment looks live, and halts permanently on any fetch error until Refresh is pressed.
+The app pulls up to 5,000 rows newest-first, derives an experiment list by grouping on `experiment_id` — there is no experiments table — infers Live versus Concluded purely from whether the newest sample is under 10 minutes old, works out which configured chambers are missing from the newest sample and calls them disconnected, then renders four status cards, five metric cards, and one hand-built SVG chart for the selected chamber. It re-polls every 5m30s only while an experiment looks live, and halts permanently on any fetch error until Refresh is pressed.
 
-The History tab reuses the same in-memory array to list experiments, then issues a second paged read for the selected one and shows per-parameter charts, cross-bottle min/average/max, and a CSV export of exactly the rows on screen.
+The History tab reuses the same in-memory array to list experiments, then issues a second paged read for the selected one and shows per-parameter charts, cross-chamber min/average/max, and a CSV export of exactly the rows on screen.
 
-The entire design rests on one distinction it never blurs: **a missing row means a bottle went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
+The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Content generated by `stealth/space-bunny-alpha` using `opencode`.
+Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.

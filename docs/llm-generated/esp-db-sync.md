@@ -327,8 +327,10 @@ Decision: new `device_data.push_readings(jsonb)` with `SECURITY DEFINER`.
 - Forces `device_id` from `device_data.session_device_id()`. The device never sends its own id. `RUSIM_DEVICE_ID` stays log-only (`main.cpp:11`).
 - No table `INSERT` grant to `anon`. `readings` keeps `SELECT`-only grants; the RPC is the only write entry point. Rejected alternatives: column grant plus policy (payload carries `device_id`, wider `anon` surface), dedicated ingest role (second secret to manage).
 - `set search_path = pg_catalog, device_data`, `revoke all ... from public; grant execute ... to anon, authenticated`, matching `authenticate()` pattern in `20260930162000_add_device_data_token_auth.sql`.
-- Input is one JSONB array per sample round (24 objects max). Required per object: `bottle_id`, `timestamp` (sample time, timestamptz), nullable `ph`, `pressure`, `temp`, `co2`, `ch4`. Optional: `experiment_id`; when absent the function applies the device's active experiment.
-- Server-side checks: reject `timestamp` before 2025-01-01 or more than 10 minutes in the future; reject `bottle_id` outside the device's `bottle_count`; insert with `on conflict (device_id, bottle_id, timestamp) do nothing` so replays are idempotent.
+- Input is one JSONB array per sample round (24 objects max). Required per object: `bottle_id`, `timestamp` (sample time, timestamptz), nullable `ph`, `pressure`, `temp`, `co2`, `ch4`. Optional: `experiment_id`; when absent the function applies the device's active experiment. `bottle_id` is the internal 0-based ID, `0..bottle_count-1`; the push encoder sends it unchanged. The dashboard displays the value plus one.
+- Server-side checks: reject `timestamp` before 2025-01-01 or more than 10 minutes in the future; reject `bottle_id` outside `0..bottle_count-1`; insert with `on conflict (device_id, bottle_id, timestamp) do nothing` so replays are idempotent.
+
+Supabase and ESP32 retain their existing 0-based internal IDs. The dashboard adds one only for user-facing chamber labels and CSV values: internal ID 0 displays as Chamber 1, and internal ID 7 as Chamber 8. The configured capacity remains 24; chambers without readings remain disconnected or no-data, with no synthetic rows added. `pushFormatHeadRound()` sends `PushRow.bottleId` unchanged.
 
 ### 6.2 Pull scope: full `experiments` plus one config row, scoped to same `device_id`
 
@@ -380,7 +382,7 @@ chain lands; write it against the future sensor poller and leave it dormant.
 - [x] 2. Stop discarding `bottle_count`, `owner_name`, `owner_email` from `authenticate()`. Add master-written display register for `bottle_count`. Accept: `/info` shows DB value, `0xFFFF` when unknown. Built: `sbParseAuthMeta()` into `dbBottleCount`/`dbOwnerName`/`dbOwnerEmail`; `0x0007 DB_BOTTLES` on both ends; `/info` DB tile shows `latest (Nbottles)`, `--` when never synced.
 - [x] 3. Firmware clock guard: `sbPushReadings()` early-return on `!ntpSynced`, keep `TIME_OK` reporting. Accept: no row with 1970 timestamp after 10 s NTP failure. Built: guard in `sbPushReadings()` plus enqueue-time refusal (`ntpSynced` and 2025-01-01 floor); `pushDbState()` still reports `TIME_OK`.
 - [x] 7. Migrations: (a) `push_readings(jsonb)` per §6.1; (b) `experiments` + `device_config` tables per §6.2 with session-scoped `SELECT`. Accept: anon `POST /rest/v1/readings` still denied; `POST /rest/v1/rpc/push_readings` with valid `x-device-session` inserts; forged `device_id` impossible (not in payload). Built: `20261016000000_add_push_readings_and_device_tables.sql`, verified on the local DB (insert + replay-idempotent + default-experiment + all rejects + RLS scoping; `device_config` seeded from `devices`).
-- [x] 8. Batch buffer + push call: fixed ring oldest-drop, sample-time stamps, `merge-duplicates` / `on conflict do nothing`, separate body cap from portal `kMaxBody`. Accept: network drop + replay produces no duplicates; drop counter increments instead of OOM. Built: 1200-row ring (~50 rounds), `kPushBodyCap = 6144`, 2 rounds flushed per 30 s cycle, `0x0008 PUSH_DROPS` register; queue/format logic verified by host test on the real functions; dormant (no enqueuer until the sensor pass; optimizer folds the queue away, ~0 RAM cost now, ~54 KB when materialized).
+- [x] 8. Batch buffer + push call: fixed ring oldest-drop, sample-time stamps, `merge-duplicates` / `on conflict do nothing`, separate body cap from portal `kMaxBody`. Accept: network drop + replay produces no duplicates; drop counter increments instead of OOM. Built: 1200-row ring (~50 rounds), `kPushBodyCap = 6144`, 2 rounds flushed per 30 s cycle, `0x0008 PUSH_DROPS` register; queue/format logic verified by host test on the real functions; dormant (no enqueuer until the sensor pass; optimizer folds the queue away, ~0 RAM cost now, ~54 KB when materialized). The encoder writes the unchanged zero-based array index to `bottleId`.
 
 ### Deferred (2026-10-16): sensor chain
 
@@ -409,4 +411,4 @@ Push path is done when a 24-bottle round sampled on the Mega Mini appears in `de
 - `../hardware.md` — sensor wiring and MAX485 notes. Not edited.
 
 ---
-Content generated by `opencode/muse-spark-1.3-contributor-free` in `opencode`.
+Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.

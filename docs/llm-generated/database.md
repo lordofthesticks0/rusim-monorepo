@@ -24,8 +24,8 @@ This document catalogs the persistent schemas present in the live database. “S
 
 The dashboard reads only this schema. It is a separate PostgreSQL namespace because the legacy `public.devices` table has a different UUID-based structure, which allowed both structures to coexist during the transition.
 
-- `devices`: integer device registry, bottle count, owner contact details, and a hashed device token.
-- `readings`: sensor samples per device/bottle/timestamp, grouped into experiments.
+- `devices`: integer device registry, chamber count, owner contact details, and a hashed device token.
+- `readings`: sensor samples per device/chamber/timestamp, grouped into experiments.
 - `sessions`: short-lived token sessions created by a successful login, used to scope every read to one device.
 - `experiments`: per-device experiment configs (number, start, duration, sample interval, setpoints) pulled by the WT32.
 - `device_config`: one row per device for `bottle_count` and owner contact, seeded from `devices`, pulled by the WT32.
@@ -84,14 +84,14 @@ The inventory records schema structure, not a general operational health assessm
 
 ## Reference: `device_data` column detail
 
-Created by `dashboard/supabase/migrations/20260930082137_create_device_data_schema.sql`. **This schema is applied to the live project** and is now the only schema the dashboard reads. Migrations `20260930162000` through `20260930172000` added token authentication, made readings a time series, and populated development data. Migration `20261016000000` added the device write path (`push_readings`) plus the `experiments` and `device_config` pull tables.
+Created by `dashboard/supabase/migrations/20260930082137_create_device_data_schema.sql`. The base schema is documented as applied to the live project and is the only schema the dashboard reads. Migrations `20260930162000` through `20260930172000` added token authentication, made readings a time series, and populated development data. Migration `20261016000000` added the device write path (`push_readings`) plus the `experiments` and `device_config` pull tables. Chamber-number presentation is handled in the dashboard; this change does not alter the schema or stored values.
 
 ### `device_data.devices`
 
 | Column | Type | Rules / meaning |
 |---|---|---|
 | `device_id` | `integer` | Primary key; non-negative. Factory assigned. `0` is the development device; production numbering starts at `1`. |
-| `bottle_count` | `integer` | Required, with no range check. Current development device has 24. |
+| `bottle_count` | `integer` | Required, with no range check. Number of chambers the device exposes. Internal ids remain `0..bottle_count-1`; the dashboard displays them as Chamber `1..bottle_count`. The column keeps its historical name. Current development device has 24. |
 | `owner_name` | `text` | Nullable. |
 | `owner_email` | `text` | Nullable. |
 | `token_hash` | `text` | Nullable until token provisioning; unique when present and checked for 128 lowercase hexadecimal characters (SHA-512 hex digest). Store no plaintext token, and never commit a hash. |
@@ -103,14 +103,18 @@ Device `0` is provisioned by migration `20260930162100` with `bottle_count = 24`
 | Column | Type | Rules / meaning |
 |---|---|---|
 | `device_id` | `integer` | Required foreign key to `device_data.devices.device_id`. |
-| `bottle_id` | `integer` | Required; no range check, so bottle counts can grow for future devices. Current convention is IDs `0`–`23` for 24 bottles. |
+| `bottle_id` | `integer` | Required internal bottle id, currently `0..7` for the eight reporting channels on a 24-chamber device. Supabase and ESP32 values stay unchanged. The dashboard displays an id as chamber number `bottle_id + 1`; configured channels without rows remain no-data/disconnected. The column keeps its historical name. |
 | `experiment_id` | `integer` | Required, non-negative; `0` is the testing experiment and `1+` are regular experiments. There is no experiments table. **Not part of the primary key.** |
 | `timestamp` | `timestamptz` | Required, timezone-aware sample time. **Part of the primary key.** |
 | `ph`, `pressure`, `temp`, `co2`, `ch4` | `real` | Nullable four-byte floating-point sensor values. A null means the bottle reported but that sensor produced no value, which differs from the bottle being absent from the sample entirely (disconnected). |
 
-The primary key is `(device_id, bottle_id, timestamp)`, changed from `(device_id, bottle_id, experiment_id)` by migration `20260930170000` so a bottle can report repeatedly within one experiment. An index on `(experiment_id, timestamp DESC)` supports experiment time-series reads.
+The primary key is `(device_id, bottle_id, timestamp)`, changed from `(device_id, bottle_id, experiment_id)` by migration `20260930170000` so a chamber can report repeatedly within one experiment. An index on `(experiment_id, timestamp DESC)` supports experiment time-series reads.
 
-Because `experiment_id` is not in the key, one bottle cannot hold the same timestamp in two experiments. That is correct behaviour: a device cannot genuinely report two experiments for one bottle at the same instant, and a conflicting insert fails loudly.
+Because `experiment_id` is not in the key, one chamber cannot hold the same timestamp in two experiments. That is correct behaviour: a device cannot genuinely report two experiments for one chamber at the same instant, and a conflicting insert fails loudly.
+
+### Chamber numbering
+
+Supabase and ESP32 keep their existing 0-based ids. The dashboard maps an internal id to a user-facing number by adding one at display boundaries: internal id `0` appears as Chamber 1, and internal id `7` appears as Chamber 8. The 24-chamber capacity still displays Chambers 1 through 24; channels without rows have no reading data and are shown as no-data or disconnected.
 
 ### `device_data.sessions`
 
@@ -137,7 +141,7 @@ Because `experiment_id` is not in the key, one bottle cannot hold the same times
 | Column | Type | Rules / meaning |
 |---|---|---|
 | `device_id` | `integer` | Primary key; foreign key to `devices.device_id`, cascading on delete. |
-| `bottle_count` | `integer` | Required, positive. Mirrors `devices.bottle_count`; seeded from it. |
+| `bottle_count` | `integer` | Required, positive. Mirrors `devices.bottle_count`; seeded from it. Defines the internal id range `0..bottle_count-1`; the dashboard displays those ids as `1..bottle_count`. |
 | `owner_name` | `text` | Nullable. Mirrors `devices.owner_name`. |
 | `owner_email` | `text` | Nullable. Mirrors `devices.owner_email`. |
 | `updated_at` | `timestamptz` | Required, defaults to `now()`. |
@@ -147,7 +151,7 @@ Because `experiment_id` is not in the key, one bottle cannot hold the same times
 The dashboard is an anonymous browser client with no Supabase Auth user, so access is granted per device by token exchange:
 
 - `authenticate(p_token)` hashes the supplied token with SHA-512 and matches it against `devices.token_hash`, then inserts a session row and returns the session token plus device details. `SECURITY DEFINER`, because `anon` cannot read `token_hash`. A wrong token and an unknown token raise the same error, so the function is not an oracle for which devices exist.
-- `push_readings(p_readings jsonb)` inserts one sample round (up to 24 bottle objects) for the calling session's device and returns the inserted row count. `SECURITY DEFINER` with `device_id` forced from `session_device_id()`; the payload carries no identity, so a forged `device_id` key is ignored. Rejects non-arrays, `bottle_id` outside the device's `bottle_count`, timestamps before 2025-01-01 or more than 10 minutes in the future, and batches over 24 rows. A missing `experiment_id` resolves to the device's highest experiment, else `0`. Inserts use `ON CONFLICT (device_id, bottle_id, timestamp) DO NOTHING`, so replays are idempotent. The only write entry point: `readings` keeps its `SELECT`-only grants.
+- `push_readings(p_readings jsonb)` inserts one sample round (up to 24 chamber objects) for the calling session's device and returns the inserted row count. `SECURITY DEFINER` with `device_id` forced from `session_device_id()`; the payload carries no identity, so a forged `device_id` key is ignored. Rejects non-arrays, `bottle_id` outside `0..bottle_count-1`, timestamps before 2025-01-01 or more than 10 minutes in the future, and batches over 24 rows. A missing `experiment_id` resolves to the device's highest experiment, else `0`. Inserts use `ON CONFLICT (device_id, bottle_id, timestamp) DO NOTHING`, so replays are idempotent. The only write entry point: `readings` keeps its `SELECT`-only grants.
 - `revoke_session()` deletes the caller's own session.
 - `request_session_token()` reads the `x-device-session` request header. `session_device_id()` resolves it to a `device_id`, running `SECURITY DEFINER` so it can read the policy-free `sessions` table.
 
@@ -163,7 +167,7 @@ Realtime subscriptions are not used. Custom headers cannot be sent over the real
 
 It connects directly with `DATABASE_URL` using Bun's built-in Postgres client, so `psql` is not required. It deliberately avoids `supabase db push`, which applies pending migrations once and would make a second run a no-op, and there is no `seed_readings.sql` because a second copy of the same SQL in a seed file would only let the two drift apart. Migration `20260930172000` seeds experiment 0, so a `supabase db reset` still produces a dashboard with data in it.
 
-Every value reaches the database as a bound parameter rather than interpolated text. The readings are written in a single transaction, so a failure part-way through leaves the database untouched. Experiment `N` is placed one full span (`sample_count * gap`) further into the past than experiment `N-1`, so experiments occupy disjoint timestamp windows and generating one leaves the others intact. Bottles reporting are those below `bottle_count`; higher-numbered bottles never appear, which the dashboard reports as disconnected.
+Every value reaches the database as a bound parameter rather than interpolated text. The readings are written in a single transaction, so a failure part-way through leaves the database untouched. Experiment `N` is placed one full span (`sample_count * gap`) further into the past than experiment `N-1`, so experiments occupy disjoint timestamp windows and generating one leaves the others intact. Chambers `1..bottleCount` report; higher-numbered chambers never appear, which the dashboard reports as disconnected.
 
 ---
-Content generated by `opencode/muse-spark-1.3-contributor-free` in `opencode`.
+Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.
