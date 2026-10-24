@@ -39,12 +39,132 @@
 .nav-tab { border: 1px solid #dce2e8; border-radius: 6px; padding: 9px 13px; color: #697584; background: #f8fafc; cursor: pointer; font-size: 12px; }
 .nav-tab:hover { border-color: #2462ee; color: #2462ee; }
 .nav-tab.active { border-color: #2462ee; background: #2462ee; color: white; box-shadow: 0 3px 8px rgba(36, 98, 238, .18); }
-.login-panel { display: grid; gap: 16px; justify-items: start; max-width: 480px; }
-.login-field { display: grid; gap: 7px; width: 100%; }
-.login-field input { font: inherit; padding: 11px 13px; border: 1px solid #dce2e8; border-radius: 7px; width: 100%; }
-.login-field input:focus { outline: 2px solid #2462ee; outline-offset: 1px; border-color: #2462ee; }
-.login-error { margin-bottom: 0; width: 100%; }
-.login-hint { color: #87919e; font-size: 11px; margin: 0; }
+.login-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 28px 32px 40px;
+  background: #f4f6f8;
+}
+.login-header {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.login-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.02em; }
+.login-brand small { color: #87919e; font-weight: 500; margin-left: 3px; }
+.login-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #2462ee;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+}
+.login-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 40px 0;
+}
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  padding: 36px;
+  background: white;
+  border: 1px solid #e2e6eb;
+  border-radius: 12px;
+  box-shadow: 0 20px 50px -30px rgba(32, 41, 54, .28);
+}
+.login-heading { margin-bottom: 26px; }
+.login-heading .eyebrow { margin-bottom: 10px; }
+.login-title { margin: 0 0 8px; font-size: 27px; line-height: 1.15; letter-spacing: -.035em; }
+.login-subtitle { margin: 0; color: #687586; font-size: 14px; line-height: 1.55; }
+.login-form { display: grid; gap: 16px; }
+.login-field { display: grid; gap: 8px; width: 100%; color: #586575; font-size: 12px; font-weight: 500; }
+.login-field input {
+  width: 100%;
+  height: 44px;
+  padding: 0 13px;
+  font: 400 15px 'DM Sans', sans-serif;
+  color: #202936;
+  background: white;
+  border: 1px solid #d7dce3;
+  border-radius: 8px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.login-field input::placeholder { color: #a0a9b3; }
+.login-field input:hover { border-color: #c3ccd6; }
+.login-field input:focus {
+  outline: none;
+  border-color: #2462ee;
+  box-shadow: 0 0 0 3px rgba(36, 98, 238, .12);
+}
+.login-error {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #f1d5d0;
+  border-radius: 8px;
+  background: #fdf3f2;
+  color: #983a2c;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.login-error::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #c0392b;
+}
+.login-submit {
+  width: 100%;
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: #2462ee;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease, opacity .15s ease;
+}
+.login-submit:hover:not(:disabled) { background: #1c53d4; }
+.login-submit:focus-visible { outline: 2px solid #202936; outline-offset: 2px; }
+.login-submit:disabled { opacity: .55; cursor: not-allowed; }
+.login-hint {
+  margin: 24px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid #e2e6eb;
+  color: #687586;
+  font-size: 12px;
+  line-height: 1.55;
+}
+@media (max-width: 760px) {
+  .login-shell { padding: 20px 16px 32px; }
+  .login-main { padding: 28px 0; }
+  .login-card { padding: 28px 24px; }
+  .login-field input { font-size: 16px; }
+}
+@media (max-width: 480px) {
+  .login-title { font-size: 24px; }
+  .login-card { padding: 26px 20px; border-radius: 10px; }
+  .login-heading { margin-bottom: 22px; }
+}
 .link-button { background: none; border: 0; padding: 0; color: #2462ee; cursor: pointer; font: inherit; text-decoration: underline; }
 .refresh:disabled { opacity: .55; cursor: not-allowed; }
 .history-chart-grid { display: grid; gap: 16px; }
@@ -53,8 +173,6 @@
 .chart-tooltip { position: absolute; z-index: 2; top: 9px; right: 0; display: grid; gap: 3px; max-width: min(280px, 80%); padding: 8px 10px; border: 1px solid #dce2e8; border-radius: 5px; background: rgba(255, 255, 255, .96); color: #384453; box-shadow: 0 5px 16px rgba(32, 41, 54, .1); font-size: 11px; line-height: 1.35; }
 .metric strong { font-variant-numeric: tabular-nums; }
 .metric .unit { display: block; margin-top: 4px; color: #687586; font-size: 10px; }
-.device-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; background: #f8fafc; border-color: #e2e6eb; color: #687586; }
-.device-summary span { opacity: 1; }
 .device-id { color: #384453; font: 500 11px 'DM Mono', monospace; }
 .device-owner { font-size: 12px; }
 .chart .axis { position: absolute; left: 0; right: 0; bottom: 22px; padding-top: 0; font-variant-numeric: tabular-nums; }
@@ -71,3 +189,56 @@
 .result-stat-values strong { color: #202936; font: 500 11px 'DM Mono', monospace; font-variant-numeric: tabular-nums; }
 .result-empty { color: #778392; font: 10px 'DM Sans', sans-serif; }
 @media (max-width: 760px) { .section-navigation { flex-direction: row; align-items: stretch; overflow-x: auto; }.nav-tab { flex: 1 0 auto; }.history-chart-grid { gap: 12px; }.telemetry-chart-panel { padding: 18px 15px 12px; }.telemetry-chart-panel .chart { height: 235px; } }
+
+/* Monitoring view */
+.monitoring-view { display: grid; gap: 16px; align-content: start; }
+.monitoring-view > * { margin: 0; }
+.monitoring-view .status-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.monitoring-view .status-card { min-width: 0; min-height: 88px; padding: 15px 16px; display: grid; align-content: center; gap: 7px; }
+.monitoring-view .status-card > p { margin: 0; color: #708092; font: 500 10px 'DM Mono', monospace; letter-spacing: .1em; text-transform: uppercase; }
+.monitoring-view .status-card > strong { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: #202936; font: 500 15px/1.35 'DM Sans', sans-serif; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.status-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #a0a9b3; }
+.status-dot.live { background: #2ab579; box-shadow: 0 0 0 3px rgba(42, 181, 121, .14); }
+.status-dot.warning { background: #d9822b; box-shadow: 0 0 0 3px rgba(217, 130, 43, .16); }
+.pulse.pending { background: #d9a02b; }
+.pulse.error { background: #c0392b; }
+.pulse.idle { background: #a0a9b3; }
+.monitoring-view .monitoring-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px 18px; }
+.monitoring-view .monitoring-controls > label { justify-self: end; }
+.monitoring-view .monitoring-device { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 14px; padding-top: 13px; border-top: 1px solid #eef1f5; }
+.monitoring-view .readings-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; width: 100%; }
+.monitoring-view .metric-compact { min-width: 0; min-height: 104px; padding: 16px; display: grid; align-content: center; gap: 6px; }
+.monitoring-view .metric-compact > p { margin: 0; color: #657384; font-size: 11px; font-weight: 600; letter-spacing: .01em; }
+.monitoring-view .metric-compact > strong { font: 500 21px/1.25 'DM Mono', monospace; letter-spacing: -.04em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.monitoring-view .metric-compact .unit { margin-top: 0; }
+.monitoring-view .notice-error { background: #fdf3f2; border-color: #f1d5d0; color: #983a2c; }
+.monitoring-view .notice-info { background: #f5f8fc; border-color: #dfe7f1; color: #4a6076; }
+.monitoring-view .connection-warning { position: relative; width: 100%; padding: 12px 16px 12px 34px; background: #fff8ea; border-color: #efdcb2; color: #7d6229; line-height: 1.5; overflow-wrap: anywhere; }
+.monitoring-view .connection-warning::before { content: ""; position: absolute; left: 13px; top: 15px; width: 7px; height: 7px; border-radius: 50%; background: #d9822b; }
+.monitoring-view .connection-warning .notice-label { display: block; margin-bottom: 2px; opacity: 1; color: #8a6c32; font-weight: 600; }
+.monitoring-view .connection-warning p { margin: 0; color: #765d2b; line-height: 1.5; }
+.monitoring-view .monitoring-empty-state { padding: 44px 24px; text-align: center; }
+.monitoring-view .monitoring-empty-state .subtitle { margin-top: 6px; }
+.monitoring-view .monitoring-chart { padding: 22px 20px 14px; }
+.monitoring-view .chart-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+.monitoring-view .chart-controls select { margin-left: 0; }
+.monitoring-view .chart-empty { display: grid; place-items: center; height: 100%; border: 1px dashed #e2e6eb; border-radius: 8px; color: #87919e; font-size: 12px; }
+.monitoring-view footer { padding-top: 0; }
+@media (max-width: 980px) {
+  .monitoring-view .status-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .monitoring-view .readings-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+  .monitoring-view .readings-grid > .metric { grid-column: span 2; }
+  .monitoring-view .readings-grid > .metric:nth-child(4) { grid-column: 2 / span 2; }
+  .monitoring-view .readings-grid > .metric:nth-child(5) { grid-column: 4 / span 2; }
+  .monitoring-view .status-summary > .metric:last-child { grid-column: auto; }
+}
+@media (max-width: 640px) {
+  .monitoring-view .status-summary { gap: 10px; }
+  .monitoring-view .readings-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .monitoring-view .readings-grid > .metric { grid-column: auto; }
+  .monitoring-view .metric-compact { min-height: 88px; }
+  .monitoring-view .monitoring-controls { grid-template-columns: 1fr; align-items: start; }
+  .monitoring-view .monitoring-controls > label { justify-self: start; }
+  .monitoring-view .chart-controls { justify-content: flex-start; }
+  .monitoring-view .monitoring-chart { padding: 18px 15px 12px; }
+}
