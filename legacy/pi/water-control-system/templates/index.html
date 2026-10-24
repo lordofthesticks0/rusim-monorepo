@@ -1070,7 +1070,7 @@
                     <div class="status-container">
                         <div class="indicator"><span>WATER LEVEL</span> <span id="water">--</span></div>
                         <div class="indicator"><span id="homeHeaterLabel">HEATER (39.0°C)</span> <span id="heater">--</span></div>
-                        <div class="indicator"><span id="homePumpLabel">PUMP (AUTO)</span> <span id="pump">--</span></div>
+                        <div class="indicator"><span id="homePumpLabel">PUMP (OFF)</span> <span id="pump">--</span></div>
                         <div class="indicator"><span id="homeStirLabel">STIRRER (OFF)</span> <span id="stirrer">--</span></div>
                         <div class="indicator"><span>EXHAUST FAN</span> <span class="on">ALWAYS ON</span></div>
                     </div>
@@ -1090,17 +1090,17 @@
                             <div class="seg-row">
                                 <span class="seg-label">HEATER</span>
                                 <div class="seg-group">
-                                    <button id="btnHeatAuto" class="seg-btn active" onclick="setActuator('heater', 'AUTO')">AUTO</button>
+                                    <button id="btnHeatAuto" class="seg-btn" onclick="setActuator('heater', 'AUTO')">AUTO</button>
                                     <button id="btnHeatOn" class="seg-btn" onclick="setActuator('heater', 'ON')">FORCE ON</button>
-                                    <button id="btnHeatOff" class="seg-btn" onclick="setActuator('heater', 'OFF')">OFF</button>
+                                    <button id="btnHeatOff" class="seg-btn active-red" onclick="setActuator('heater', 'OFF')">OFF</button>
                                 </div>
                             </div>
                             <div class="seg-row">
                                 <span class="seg-label">PUMP</span>
                                 <div class="seg-group">
-                                    <button id="btnPumpAuto" class="seg-btn active" onclick="setActuator('pump', 'AUTO')">AUTO</button>
+                                    <button id="btnPumpAuto" class="seg-btn" onclick="setActuator('pump', 'AUTO')">AUTO</button>
                                     <button id="btnPumpOn" class="seg-btn" onclick="setActuator('pump', 'ON')">FORCE ON</button>
-                                    <button id="btnPumpOff" class="seg-btn" onclick="setActuator('pump', 'OFF')">OFF</button>
+                                    <button id="btnPumpOff" class="seg-btn active-red" onclick="setActuator('pump', 'OFF')">OFF</button>
                                 </div>
                             </div>
                         </div>
@@ -1771,8 +1771,8 @@
                 setClass(DOM.water, data.water_low ? "warning" : "on");
 
                 const targ = Number(data.target_temp || 39.0).toFixed(1);
-                const hMode = data.heater_mode || "AUTO";
-                const pMode = data.pump_mode || "AUTO";
+                const hMode = data.heater_mode || "OFF";
+                const pMode = data.pump_mode || "OFF";
                 const sMode = data.stir_mode || "OFF";
 
                 setText(DOM.homeHeaterLabel, `HEATER (${hMode === "AUTO" ? targ + "°C" : hMode})`);

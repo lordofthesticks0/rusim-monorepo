@@ -48,10 +48,18 @@ os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(MOUNT_POINT, exist_ok=True)
 
 serial_write_lock = threading.Lock()
+raw_lines_lock = threading.Lock()
+raw_lines = deque(maxlen=500)
+raw_line_seq = 0
 serial_conn = None
 logging_active = False
 last_slave_rx_time = 0.0
 last_master_rx_time = 0.0
+
+# Actuators start OFF. These are sent once on the first serial connection so
+# the master is off even when it was flashed with AUTO boot defaults.
+BOOT_DEFAULT_COMMANDS = ("HEATER_OFF", "PUMP_OFF", "STIR:0:10:30")
+boot_defaults_applied = False
 
 packet_stats = {
     'total': 0,
@@ -69,8 +77,8 @@ current_data = {
     'heater': False,
     'pump': False,
     'stirrer': False,
-    'heater_mode': 'AUTO',
-    'pump_mode': 'AUTO',
+    'heater_mode': 'OFF',
+    'pump_mode': 'OFF',
     'stir_mode': 'OFF',
     'stir_int_min': 10,
     'stir_pulse_sec': 30,
@@ -368,7 +376,7 @@ def telemetry_worker():
 
 # --- BACKGROUND WORKER 1: LOCK-FREE SERIAL INGESTION ---
 def serial_worker():
-    global serial_conn, last_slave_rx_time, last_master_rx_time
+    global serial_conn, last_slave_rx_time, last_master_rx_time, raw_line_seq
     possible_ports = ['/dev/ttyACM0', '/dev/ttyUSB0', '/dev/ttyACM1', '/dev/ttyUSB1']
 
     while True:
@@ -388,7 +396,16 @@ def serial_worker():
 
         try:
             if serial_conn and serial_conn.in_waiting:
-                raw_line = serial_conn.readline().decode('utf-8', errors='ignore').strip()
+                wire_line = serial_conn.readline().decode('utf-8', errors='ignore').rstrip('\r\n')
+                raw_line = wire_line.strip()
+                if wire_line:
+                    with raw_lines_lock:
+                        raw_line_seq += 1
+                        raw_lines.append({
+                            'seq': raw_line_seq,
+                            'ts': time.time(),
+                            'line': wire_line
+                        })
             else:
                 time.sleep(0.02)
                 continue
@@ -465,8 +482,21 @@ def serial_worker():
 
 # --- BACKGROUND WORKER 2: POLLING & LOGGING ---
 def polling_worker():
+    global boot_defaults_applied
     while True:
         if serial_conn:
+            if not boot_defaults_applied:
+                # Force OFF on first connection only, so a later reconnect does
+                # not override a mode the operator selected.
+                if all(send_serial_cmd(c) for c in BOOT_DEFAULT_COMMANDS):
+                    boot_defaults_applied = True
+                    current_data['heater_mode'] = 'OFF'
+                    current_data['pump_mode'] = 'OFF'
+                    current_data['stir_mode'] = 'OFF'
+                    current_data['heater'] = False
+                    current_data['pump'] = False
+                    current_data['stirrer'] = False
+                    print("Boot defaults applied: heater OFF, pump OFF, stirrer OFF")
             send_serial_cmd("STATUS")
         elif logging_active:
             packet_stats['outgoing'] += 1
@@ -650,6 +680,32 @@ def status():
     res['packets'] = packet_stats
     res['sys'] = cached_sys_stats
     return jsonify(res)
+
+@app.route('/raw')
+def raw():
+    try:
+        limit = int(request.args.get('limit', '100'))
+        after_arg = request.args.get('after')
+        after = int(after_arg) if after_arg is not None else None
+        if limit < 1 or (after is not None and after < 0):
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({'error': 'after must be non-negative and limit must be at least 1'}), 400
+
+    limit = min(limit, 500)
+    with raw_lines_lock:
+        buffered_lines = list(raw_lines)
+        newest_seq = raw_line_seq
+        selected = buffered_lines[-limit:] if after is None else [line for line in buffered_lines if line['seq'] > after][:limit]
+        response = jsonify({
+            'seq': newest_seq,
+            'count': len(selected),
+            'buffered': len(buffered_lines),
+            'connected': serial_conn is not None,
+            'lines': selected
+        })
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 @app.route('/control', methods=['POST'])
 def control_api():

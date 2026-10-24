@@ -31,8 +31,10 @@ enum SystemMode { MODE_OFF, MODE_AUTO };
 SystemMode currentMode = MODE_AUTO;
 
 // Per-Actuator Override Modes: 0 = AUTO, 1 = FORCE ON, 2 = FORCE OFF
-uint8_t heaterOverride = 0;
-uint8_t pumpOverride   = 0;
+// Boot default: heater and pump start FORCE OFF. The Pi or web UI must
+// explicitly select AUTO / FORCE ON after power-up.
+uint8_t heaterOverride = 2;
+uint8_t pumpOverride   = 2;
 
 // Stirrer Modes: 0 = OFF, 1 = CONSTANT ON, 2 = PULSE INTERVAL, 3 = TIMED RUN
 uint8_t stirMode = 0;

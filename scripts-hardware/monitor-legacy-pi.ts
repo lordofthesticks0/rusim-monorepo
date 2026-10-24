@@ -37,7 +37,7 @@ type MasterStatus = {
   bottle_temp_avg?: number | string;
   heater?: number | string | boolean;
   pump?: number | string | boolean;
-  fan?: number | string | boolean;
+  stirrer?: number | string | boolean;
   water_low?: number | string | boolean;
   water_adc?: number | string;
   system_mode?: string;
@@ -49,7 +49,7 @@ type FlaskStatus = {
   bottles?: Bottle[];
   heater?: boolean;
   pump?: boolean;
-  fan?: boolean;
+  stirrer?: boolean;
   water_low?: boolean;
   system_mode?: string;
   logging?: boolean;
@@ -167,7 +167,7 @@ function printStatusRow(data: FlaskStatus): void {
     cell(String(data.system_mode ?? "-"), STATUS_WIDTHS[3], "left"),
     cell(onOff(data.heater), STATUS_WIDTHS[4], "left"),
     cell(onOff(data.pump), STATUS_WIDTHS[5], "left"),
-    cell(onOff(data.fan), STATUS_WIDTHS[6], "left"),
+    cell(onOff(data.stirrer), STATUS_WIDTHS[6], "left"),
     String(data.packets?.rx_slave ?? "-").padStart(STATUS_WIDTHS[7]),
     ...BOTTLE_IDS.map((id) => numberCell(bottles.get(id)?.temp, 2, STATUS_WIDTHS[8])),
   ];
@@ -208,7 +208,7 @@ function printMasterRow(status: MasterStatus, atSeconds?: number): void {
     String(status.system_mode ?? "-"),
     `heat ${onOff(status.heater)}`,
     `pump ${onOff(status.pump)}`,
-    `stir ${onOff(status.fan)}`,
+    `stir ${onOff(status.stirrer)}`,
     `water ${onOff(status.water_low) === "ON" ? "LOW" : "OK"}`,
     `adc ${String(status.water_adc ?? "-")}`,
   ];

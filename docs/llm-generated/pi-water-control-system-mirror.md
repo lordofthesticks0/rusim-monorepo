@@ -22,6 +22,15 @@ and activated with `pm2 restart water-ui`. Newer changes should go through
 on the Pi at `/home/invitro/web_control.py.bak-raw-20261022`. Route details:
 [raspi-docs/04-backend-web-control.md](raspi-docs/04-backend-web-control.md).
 
+On 2026-10-24 the actuators were changed to start OFF. `web_control.py` now
+sends `HEATER_OFF`, `PUMP_OFF` and `STIR:0:10:30` once on its first serial
+connection, and its cached `heater_mode` / `pump_mode` start at `OFF`. The
+kiosk page highlights `OFF` for heater and pump instead of `AUTO`. The firmware
+side of the same change is in [`legacy/master/master.cpp`](../../legacy/master/master.cpp);
+see [legacy-master.md](legacy-master.md#3-boot-defaults). These edits are in the
+mirror only and are not yet deployed to the Pi; `sync_pi.sh` deploys from
+`origin/master`, so the change has to be committed and pushed first.
+
 ## Layout
 
 ```
@@ -51,9 +60,9 @@ repository snapshot, not the live file. See
 
 | File | MD5 |
 |---|---|
-| `web_control.py` | `1fb4f44d959f8ff40a192267e0a9b8d1` |
-| `templates/index.html` | `38c2d2782447cf02116113867048bf5c` |
-| `water_control_arduino/water_control_arduino.ino` | `a2d6f2a9c9d030d296b95feb721b4a48` |
+| `web_control.py` | `f48e5baf2e0ffa2832c584e86ca22c94` |
+| `templates/index.html` | `fdc75d51a7e12c486f6ea485447fadc5` |
+| `water_control_arduino/water_control_arduino.ino` | `38f7d5911d468ba87ccb9587ef805bce` |
 | `logs/2025-12-12.csv` | `f0015017bf14092087b80083d519977f` |
 | `logs/2026-10-19.csv` | `2e0ec0ad23c58eb2bd844ca07385a5d3` |
 | `.gitignore` | `2b4f59772005f5c43e50664c3d1f7b82` |
