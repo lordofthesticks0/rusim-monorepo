@@ -7,6 +7,7 @@ compile_commands.json
 .env
 .zed/
 .backup/
+.agents
 *.env
 .opencode
 .cache/
@@ -14,3 +15,6 @@ compile_commands.json
 .freebuff/
 */cache
 */.graphify*
+graphify-out/*/
+graphify-out/.graphify*
+graphify-out/cache/

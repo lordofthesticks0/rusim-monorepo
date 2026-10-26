@@ -39,6 +39,8 @@ Should you need to make changes, first pull the existing data to this repo, modi
 
 Your context is limited in the codebase. This is a very large monorepo, with many lines of code and documentation. It is best practice to not immediately open any documentation files unless you think it is relevant. Only open documentation files when you are going to work on that specific part. Do not open them if you are not going to work on it.
 
+Make great use of `graphify` to not litter your context.
+
 Humans however, are not limited in a similar way. Which is why, you MUST write and document everything you do. Every subsystem should be documented in `docs/llm-generated/`. Do not put any documentation written by you outside of that directory. Follow the existing format, where you must ALWAYS add a footer as such:
 
 ```
@@ -56,8 +58,7 @@ Should the user decides to put off work into another day or another session, wri
 
 When the user corrects you, document all mistakes in `docs/llm-generated/learned-mistakes.md`. You may also read the file to learn from previous mistakes.
 
-Documentation is also assisted by `graphify`. Use it to search the code.
-Install with: `uv tool install graphify` if not yet installed.
+Documentation is also assisted by `graphify`. Use it to search the code. Install with `uv tool install graphify` if not yet installed.
 
 ## Decisions
 
