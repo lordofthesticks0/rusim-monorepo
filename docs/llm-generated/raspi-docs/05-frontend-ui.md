@@ -1,22 +1,31 @@
 # 5. Frontend UI — `templates/index.html`
 
-Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-style** layout: a left dock with clock + nav (Home/Bottle/Logs/Settings) + REC button, and a main viewport.
+Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-style** layout: a left dock with clock + nav (Home/Controls/Bottle/Logs/Settings) + REC button, and a main viewport.
 
 ## Tabs
 
 | Tab | Content |
 |---|---|
-| **Home (Water)** | Bath water temp card; avg bottle temp card (expandable per-bottle breakdown); system indicators (water level, heater, pump, fan). |
+| **Home (Water)** | Bath water temp card; avg bottle temp card (expandable per-bottle breakdown); system status card (water level with tap-to-expand ADC drawer, heater, pump, stirrer, exhaust fan). |
+| **Controls** | Per-actuator mode overrides (`AUTO` / `FORCE ON` / `OFF`) for heater and pump; stirrer mode and timing controls; bottle hysteresis target controls. |
 | **Bottle** | 4-bottle grid: temp, pH, methane ppm + mL, CO2 ppm + mL, pressure. |
-| **Logs (Data)** | List of CSV log files; USB drive selector; EXPORT TO USB button. |
-| **Settings** | Pi perf strip (CPU load, RAM, SoC temp, SD storage, 5 V rail); device info (SSID/IP); refresh + shutdown; timezone + manual date/time. |
+| **Logs (Data)** | List of CSV log files; live log inspector; LAN QR download and USB drive export. |
+| **Settings** | Pi perf strip (CPU load, RAM, SoC temp, SD storage, 5 V rail); packet statistics strip; device info (SSID/IP); refresh + shutdown; timezone + manual date/time. |
 
 ## Live data flow
 
 - On load, `setInterval` polls `GET /status` every 1 s and calls `updateUI(data)`.
-- SocketIO `update` events are not consumed by the current JS (it relies on polling); the backend still emits them.
-- `updateUI` updates bath temp, system mode, water level, heater/pump/fan states, bottle grid (re-rendered when count changes), avg bottle temp, and the REC button.
-- Settings tab additionally calls `GET /sys_stats`... actually `/sys_stats` is **not** implemented in the backend (the frontend references it but the route is absent → stats strip stays empty). `GET /get_ip`, `/get_timezones` are implemented.
+- `updateUI` updates bath temp, water level status and expandable ADC details (`water_adc`, computed voltage, `water_thr`), heater/pump/stirrer states (`STOPPED` when `water_low` is true), bottle grid, avg bottle temp, and the REC button.
+
+## Expandable Water Level ADC Drawer
+
+On the Home (`water`) tab, the right-hand system status card (`#waterStatusCard`) is clickable (`onclick="toggleWaterDetails()"`):
+- By default, the `WATER LEVEL` row remains compact, displaying only `NORMAL` (green `.on` pill) or `CRITICAL LOW` (red `.warning` pill) alongside a chevron indicator.
+- Tapping the card toggles `.expanded` on `#waterStatusCard`, revealing `.water-adc-drawer` directly beneath `WATER LEVEL` with three pills:
+  - **RAW ADC** (`#waterAdcVal`): `<water_adc> / 1023` (or `--` before the first master frame).
+  - **VOLTAGE** (`#waterVoltVal`): `<(water_adc * 5.0 / 1023).toFixed(2)> V`.
+  - **MIN THR** (`#waterThrVal`): `≥ <water_thr>` (defaults to `≥ 200`).
+- When `data.water_low` is true, `HEATER`, `PUMP`, and `STIRRER` badges on the Home card all display `STOPPED`.
 
 ## REC button
 
@@ -24,8 +33,7 @@ Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-st
 
 ## Mode button
 
-- Not present in the current live copy. Neither `~/water-control-system/templates/index.html` nor the repository mirror contains `set_mode`, `system_mode` or `toggleSystemMode()` in its JavaScript, and the Home tab has no mode badge. Mode changes therefore require `POST /set_mode` or the physical `D6` switch on the master. See [13-rest-api-reference.md](13-rest-api-reference.md).
-- Older/source copies may still contain the button; it posts `AUTO`/`OFF` to `/set_mode`.
+- Not present in the current live copy. Mode changes require `POST /set_mode` or the physical `D6` switch on the master. See [13-rest-api-reference.md](13-rest-api-reference.md).
 
 ## Export flow
 
@@ -41,21 +49,17 @@ Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-st
 
 iOS-style with solid surfaces: CSS variables (`--ios-blue`, `--ios-green`,
 etc.), white cards on a pale blue background, 1 px dividers, rounded corners,
-and the left CarPlay dock. No blur or glass effect. The older Desktop copy uses
-a simpler flat blue theme and a top header bar instead of the left dock.
+and the left CarPlay dock.
 
 ### Text scale
 
-Every text size is written as `calc(Npx * var(--font-scale))`, with
-`--font-scale: 1.2` in `:root`, and `body` uses
-`calc(16px * var(--font-scale))` for text that does not set its own size. This
-raises all text by 20 %. Changing the one variable rescales the page. See
+`--font-scale: 1.2` in `:root` scales text elements that reference it by 20 %. See
 [pi-kiosk-font-scale.md](../pi-kiosk-font-scale.md) for the deploy and reload
 procedure.
 
 ### Sidebar navigation buttons
 
-The left CarPlay sidebar tabs (`.nav-btn`) have dimensions of 92×62 px (up from 78×54 px), 25×25 px SVG icons (up from 21×21 px), and `.nav-label` scaled via `calc(11.5px * var(--font-scale))` with font-weight 700 to improve touch target size and legibility on the 7-inch display. The clock time is scaled at `calc(21px * var(--font-scale))` (bold), while the date is rendered smaller at `calc(9px * var(--font-scale))` with normal weight (400).
+The left CarPlay sidebar tabs (`.nav-btn`) have dimensions of 92×62 px, 25×25 px SVG icons, and `.nav-label` scaled via `calc(11.5px * var(--font-scale))` with font-weight 700. The clock time is scaled at `calc(21px * var(--font-scale))` (bold), while the date is rendered smaller at `calc(9px * var(--font-scale))` with normal weight (400).
 
 ## Physical Buttons Info Bar
 
@@ -66,31 +70,15 @@ To align with physical buttons mounted on the chassis bezel outside the screen, 
 - **Horizontal resolution**: 1024 px (as documented in [`pi-kiosk-font-scale.md`](../pi-kiosk-font-scale.md)).
 - **Pixel density**: $1024\text{ px} / 15.5\text{ cm} \approx 66.06\text{ px/cm}$.
 - **Offset calculation**: $1.5\text{ cm} \times 66.0645\text{ px/cm} = \frac{1.5}{15.5} \times 1024\text{ px} \approx 99.1\text{ px} \approx 99\text{ px}$.
-- **Implementation**: Defined in `:root` as `--hw-bar-offset-x: -99px` and applied via `transform: translateX(var(--hw-bar-offset-x, -99px))` on `.hw-btn-labels`. (If deployed on an 800 px panel: $\frac{1.5}{15.5} \times 800 \approx 77.4\text{ px} \approx 77\text{ px}$).
+- **Implementation**: Defined in `:root` as `--hw-bar-offset-x: -99px` and applied via `transform: translateX(var(--hw-bar-offset-x, -99px))` on `.hw-btn-labels`.
 
 ## Bottle Cards Styling
 
-Bottle cards in `#pageBottles` match the standard dashboard card aesthetic:
-- 1 px solid `--divider` border without the previous 5 px blue left accent line.
-- Header titles (`BOTTLE 1`, `BOTTLE 2`, etc.) styled in `--text-primary` rather than saturated blue (`#004799`).
-
-## Controls Layout Simplification
-
-On the Controls tab (`#pageControls`):
-- Actuator override card dropped technical pin notes (`SSR D5 · Relay D3`).
-- Temperature hysteresis target card simplified: removed the dynamic threshold string (`ON < X°C · OFF ≥ Y°C`) and renamed the card title to "Bottle Hysteresis Target".
+Bottle cards in `#pageBottles` use a 1 px solid `--divider` border and `--text-primary` header titles (`BOTTLE 1`–`BOTTLE 4`).
 
 ## pH Metric Display
 
-In the Bottle grid, pH is formatted via `fmtMetric(b.ph, "", -1)` as a dimensionless numerical value (e.g. `6.85`), replacing the former `V` unit display (`2.50 V`).
-
-## Caveats
-
-- The perf strip's `fetchSysStats()` calls `/sys_stats`, which exists in
-  `web_control.py` and returns the cached CPU, RAM, SoC temperature and disk
-  figures. The strip is populated (verified on the 2026-10-20 screenshot).
-- SocketIO is loaded but the page leans on 1 s polling.
-- No authentication anywhere in the UI.
+In the Bottle grid, pH is formatted via `fmtMetric(b.ph, "", -1)` as a dimensionless numerical value (e.g. `6.85`).
 
 ---
-Content generated by `google/gemini-3.8-flash` in `antigravity`.
+Content generated by `google/gemini-4-argon` in `antigravity`.

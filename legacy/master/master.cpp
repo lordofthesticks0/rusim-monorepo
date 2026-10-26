@@ -19,8 +19,10 @@
 float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
 float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define MAX_WATER_BATH_TEMP  41.0   // Hard safety bath ceiling clamp (°C)
-#define WATER_THRESHOLD      500    // Minimum dry-run ADC threshold
-#define WATER_FAULT_LIMIT    5      // 5 consecutive cycles to trip
+#define WATER_THRESHOLD      200    // Minimum dry-run ADC threshold (~0.98V on 5V ADC)
+#define WATER_FAULT_LIMIT    5      // 5 consecutive 500ms checks (2.5s) to trip/clear
+#define WATER_CHECK_MS       500UL  // Time-gated water level sampling interval (ms)
+#define WATER_ADC_SAMPLES    16     // Number of ADC samples averaged per check
 #define SLAVE_TIMEOUT_MS     12000  // Failsafe timeout if Slave stops responding
 #define TEMP_INTERVAL_MS     750    // Non-blocking DS18B20 cadence
 #define SLAVE_POLL_INTERVAL  3500   // Acquisition cadence matching Slave cycle time
@@ -65,9 +67,12 @@ uint8_t pumpPwm = 0;
 bool stirrerState = false;
 uint8_t stirrerPwm = 0;
 bool bottleTelemetryValid = false;
+int waterRaw = 0;
 int waterFaultCounter = 0;
+bool waterDepleted = false;
 
 unsigned long lastTempRequest = 0;
+unsigned long lastWaterCheck = 0;
 unsigned long lastSlavePollTime = 0;
 unsigned long lastSlavePacketTime = 0;
 String slaveRxBuffer = "";
@@ -166,6 +171,15 @@ void forceAllOff() {
   driveStirrerPwm(0);
 }
 
+int readWaterSensorAdc() {
+  analogRead(WATER_SENSOR_PIN); // Discard first mux switch reading to settle S/H capacitor
+  long sum = 0;
+  for (int i = 0; i < WATER_ADC_SAMPLES; i++) {
+    sum += analogRead(WATER_SENSOR_PIN);
+  }
+  return (int)(sum / WATER_ADC_SAMPLES);
+}
+
 // ==========================================
 // DIRECT UART POLLER (Serial1 RX/TX)
 // ==========================================
@@ -245,8 +259,14 @@ void setup() {
   bathSensor.begin();
   bathSensor.setWaitForConversion(false);
   bathSensor.requestTemperatures();
-  lastTempRequest = millis();
-  stirCycleStart = millis();
+  unsigned long bootNow = millis();
+  lastTempRequest = bootNow;
+  stirCycleStart = bootNow;
+
+  waterRaw = readWaterSensorAdc();
+  waterDepleted = (waterRaw < WATER_THRESHOLD);
+  waterFaultCounter = waterDepleted ? WATER_FAULT_LIMIT : 0;
+  lastWaterCheck = bootNow;
 }
 
 // ==========================================
@@ -333,10 +353,31 @@ void loop() {
     currentMode = MODE_OFF;
   }
 
-  // 5. Water Level Verification (Virtual Bypass)
-  int waterRaw = 1023;
-  waterFaultCounter = 0;
-  bool waterDepleted = false;
+  // 5. Time-Gated Debounced Water Level Verification (500ms cadence, 16x ADC avg)
+  if (now - lastWaterCheck >= WATER_CHECK_MS) {
+    waterRaw = readWaterSensorAdc();
+    if (!waterDepleted) {
+      if (waterRaw < WATER_THRESHOLD) {
+        waterFaultCounter++;
+        if (waterFaultCounter >= WATER_FAULT_LIMIT) {
+          waterFaultCounter = WATER_FAULT_LIMIT;
+          waterDepleted = true;
+        }
+      } else {
+        waterFaultCounter = 0;
+      }
+    } else {
+      if (waterRaw >= WATER_THRESHOLD) {
+        if (waterFaultCounter > 0) waterFaultCounter--;
+        if (waterFaultCounter == 0) {
+          waterDepleted = false;
+        }
+      } else {
+        waterFaultCounter = WATER_FAULT_LIMIT;
+      }
+    }
+    lastWaterCheck = now;
+  }
 
   bool bathSensorOk = (waterTemp > 0.0 && waterTemp < 85.0);
   bool slaveActive = ((now - lastSlavePacketTime) < SLAVE_TIMEOUT_MS);
@@ -434,7 +475,7 @@ void loop() {
 }
 
 void sendTelemetryStatus(int waterRaw, unsigned long now) {
-  StaticJsonDocument<384> doc;
+  StaticJsonDocument<448> doc;
   doc["type"] = "master_status";
   doc["water_temp"] = (waterTemp > -50.0) ? serialized(String(waterTemp, 2)) : serialized(String(-999.0));
   doc["bottle_temp_avg"] = bottleTelemetryValid ? serialized(String(currentBottleTemp, 2)) : serialized(String(-999.0));
@@ -461,7 +502,9 @@ void sendTelemetryStatus(int waterRaw, unsigned long now) {
 
   doc["target_temp"] = serialized(String(targetBottleTemp, 1));
   doc["hysteresis"] = serialized(String(bottleHysteresis, 1));
-  doc["water_low"] = (waterFaultCounter >= WATER_FAULT_LIMIT) ? 1 : 0;
+  doc["water_low"] = waterDepleted ? 1 : 0;
+  doc["water_adc"] = waterRaw;
+  doc["water_thr"] = WATER_THRESHOLD;
   doc["system_mode"] = (currentMode == MODE_AUTO) ? "AUTO" : "OFF";
 
   serializeJson(doc, Serial);

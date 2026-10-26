@@ -424,6 +424,32 @@
                 border: 1px solid var(--divider);
                 padding: 20px 22px;
                 border-radius: 20px;
+                transition: transform 0.1s ease-out;
+            }
+            .status-container.clickable {
+                cursor: pointer;
+            }
+            .status-container.clickable:active {
+                transform: scale(0.99);
+            }
+            .water-label-wrap {
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+            }
+            .status-container.expanded .chevron-icon {
+                transform: rotate(180deg);
+            }
+            .water-adc-drawer {
+                display: none;
+                width: 100%;
+                padding-bottom: 8px;
+                border-bottom: 1px solid var(--divider);
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+            }
+            .status-container.expanded .water-adc-drawer {
+                display: grid;
             }
             .indicator {
                 font-size: 16px;
@@ -1075,8 +1101,16 @@
                         </div>
                     </div>
 
-                    <div class="status-container">
-                        <div class="indicator"><span>WATER LEVEL</span> <span id="water">--</span></div>
+                    <div id="waterStatusCard" class="status-container clickable" onclick="toggleWaterDetails()">
+                        <div class="indicator">
+                            <span class="water-label-wrap">WATER LEVEL <svg class="chevron-icon" viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" /></svg></span>
+                            <span id="water">--</span>
+                        </div>
+                        <div class="water-adc-drawer">
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">RAW ADC</span><span class="mini-bottle-val" id="waterAdcVal">--</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">VOLTAGE</span><span class="mini-bottle-val" id="waterVoltVal">-- V</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">MIN THR</span><span class="mini-bottle-val" id="waterThrVal">≥ 200</span></div>
+                        </div>
                         <div class="indicator"><span id="homeHeaterLabel">HEATER (39.0°C)</span> <span id="heater">--</span></div>
                         <div class="indicator"><span id="homePumpLabel">PUMP (OFF)</span> <span id="pump">--</span></div>
                         <div class="indicator"><span id="homeStirLabel">STIRRER (OFF)</span> <span id="stirrer">--</span></div>
@@ -1334,7 +1368,7 @@
 
             const DOM = {};
             [
-                "clockTime", "clockDate", "mainViewport", "temp", "water", "heater", "pump", "stirrer",
+                "clockTime", "clockDate", "mainViewport", "temp", "water", "waterStatusCard", "waterAdcVal", "waterVoltVal", "waterThrVal", "heater", "pump", "stirrer",
                 "homeHeaterLabel", "homePumpLabel", "homeStirLabel",
                 "btnRec", "avgBottleCard", "avgBottleTemp", "bottleTapHint", "homeBTemp1", "homeBTemp2",
                 "homeBTemp3", "homeBTemp4", "bottleGrid", "piCpuVal", "piCpuBar", "piRamVal", "piRamBar",
@@ -1366,6 +1400,12 @@
             function toggleBottleTemps() {
                 const exp = DOM.avgBottleCard.classList.toggle("expanded");
                 setText(DOM.bottleTapHint, exp ? "Tap to collapse" : "Tap to view bottles");
+            }
+
+            function toggleWaterDetails() {
+                if (DOM.waterStatusCard) {
+                    DOM.waterStatusCard.classList.toggle("expanded");
+                }
             }
 
             function updateClock() {
@@ -1780,6 +1820,17 @@
                 setText(DOM.water, data.water_low ? "CRITICAL LOW" : "NORMAL");
                 setClass(DOM.water, data.water_low ? "warning" : "on");
 
+                const wAdc = Number(data.water_adc);
+                const wThr = Number.isFinite(Number(data.water_thr)) && Number(data.water_thr) > 0 ? Number(data.water_thr) : 200;
+                if (Number.isFinite(wAdc) && wAdc >= 0) {
+                    setText(DOM.waterAdcVal, `${Math.round(wAdc)} / 1023`);
+                    setText(DOM.waterVoltVal, `${((wAdc * 5.0) / 1023.0).toFixed(2)} V`);
+                } else {
+                    setText(DOM.waterAdcVal, "--");
+                    setText(DOM.waterVoltVal, "-- V");
+                }
+                setText(DOM.waterThrVal, `≥ ${Math.round(wThr)}`);
+
                 const targ = Number(data.target_temp || 39.0).toFixed(1);
                 const hMode = data.heater_mode || "OFF";
                 const pMode = data.pump_mode || "OFF";
@@ -1794,7 +1845,7 @@
                 setClass(DOM.pump, data.pump ? "on" : "");
 
                 setText(DOM.homeStirLabel, `STIRRER (${sMode})`);
-                setText(DOM.stirrer, data.stirrer ? "RUNNING" : "IDLE");
+                setText(DOM.stirrer, data.water_low ? "STOPPED" : data.stirrer ? "RUNNING" : "IDLE");
                 setClass(DOM.stirrer, data.stirrer ? "on" : "");
 
                 // Update Controls Tab Live Status Badge

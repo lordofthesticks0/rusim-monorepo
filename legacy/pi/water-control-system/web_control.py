@@ -87,6 +87,8 @@ current_data = {
     'target_temp': 39.0,
     'hysteresis': 0.3,
     'water_low': False,
+    'water_adc': -1,
+    'water_thr': 200,
     'system_mode': 'AUTO',
     'bottles': []
 }
@@ -411,6 +413,10 @@ def serial_worker():
                         current_data['target_temp'] = float(payload.get('target_temp', current_data['target_temp']))
                         current_data['hysteresis'] = float(payload.get('hysteresis', current_data['hysteresis']))
                         current_data['water_low'] = bool(payload.get('water_low', 0))
+                        if 'water_adc' in payload:
+                            current_data['water_adc'] = int(payload.get('water_adc', -1))
+                        if 'water_thr' in payload:
+                            current_data['water_thr'] = int(payload.get('water_thr', 200))
                         current_data['system_mode'] = payload.get('system_mode', current_data['system_mode'])
 
                     else:
@@ -669,8 +675,10 @@ def control_api():
         if mode in ('AUTO', 'ON', 'OFF'):
             send_serial_cmd(f"HEATER_{mode}")
             current_data['heater_mode'] = mode
-            if mode == 'ON': current_data['heater'] = True
-            elif mode == 'OFF': current_data['heater'] = False
+            if mode == 'ON' and not current_data.get('water_low'):
+                current_data['heater'] = True
+            elif mode == 'OFF' or current_data.get('water_low'):
+                current_data['heater'] = False
             return jsonify({'status': 'success'})
 
     elif action == 'pump':
@@ -678,8 +686,10 @@ def control_api():
         if mode in ('AUTO', 'ON', 'OFF'):
             send_serial_cmd(f"PUMP_{mode}")
             current_data['pump_mode'] = mode
-            if mode == 'ON': current_data['pump'] = True
-            elif mode == 'OFF': current_data['pump'] = False
+            if mode == 'ON' and not current_data.get('water_low'):
+                current_data['pump'] = True
+            elif mode == 'OFF' or current_data.get('water_low'):
+                current_data['pump'] = False
             return jsonify({'status': 'success'})
 
     elif action == 'stirrer':
@@ -696,7 +706,7 @@ def control_api():
         elif mode_str == 'TIMED':
             current_data['stir_timed_min'] = mins
             current_data['stir_rem_sec'] = mins * 60
-        current_data['stirrer'] = (mode_str != 'OFF')
+        current_data['stirrer'] = (mode_str != 'OFF') and not current_data.get('water_low')
         return jsonify({'status': 'success'})
 
     elif action == 'temp_target':

@@ -10,9 +10,20 @@ current_data = {
     'temp': -999.0,           # bath DS18B20 reading
     'bottle_avg_temp': -999.0,# cascaded bottle average from master
     'heater': False,
-    'fan': False,             # stirrer, kept under the old key
     'pump': False,
+    'stirrer': False,
+    'heater_mode': 'OFF',
+    'pump_mode': 'OFF',
+    'stir_mode': 'OFF',
+    'stir_int_min': 10,
+    'stir_pulse_sec': 30,
+    'stir_timed_min': 15,
+    'stir_rem_sec': 0,
+    'target_temp': 39.0,
+    'hysteresis': 0.3,
     'water_low': False,
+    'water_adc': -1,          # 16-sample averaged water sensor ADC (0..1023)
+    'water_thr': 200,         # dry-run ADC threshold reported by master
     'system_mode': 'AUTO',    # 'AUTO' | 'OFF'
     'bottles': []             # up to 4 bottle dicts
 }
@@ -30,16 +41,14 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
 | Name | Meaning |
 |---|---|
 | `raw_lines` | `deque(maxlen=500)` of `{'seq', 'ts', 'line'}` |
-| `raw_seq` | Counter, incremented once per stored line |
-| `raw_lock` | `threading.Lock` around both |
-| `RAW_BUFFER_LINES` | Buffer size, `500` |
+| `raw_line_seq` | Counter, incremented once per stored line |
+| `raw_lines_lock` | `threading.Lock` around both |
 
-`record_raw_line()` strips the line, appends it with `time.time()` rounded to
-milliseconds, and takes the lock. Non-JSON lines are kept; the debug output of
-a board that is still booting is exactly what the buffer is for. The buffer is
-in memory, so a restart clears it and resets `seq` to `0`. At the live rate of
-about 2.1 lines/s (one `master_status` per second plus one slave packet per
-3.5 s) 500 lines cover roughly four minutes.
+Non-JSON lines are kept; the debug output of a board that is still booting is
+what the buffer is for. The buffer is in memory, so a restart clears it and
+resets `seq` to `0`. At the live rate of about 2.1 lines/s (one `master_status`
+per second plus one slave packet per 3.5 s) 500 lines cover roughly four
+minutes.
 
 ## Background workers
 
@@ -52,7 +61,8 @@ about 2.1 lines/s (one `master_status` per second plus one slave packet per
      `current_data['bottles']` by id.
   2. Single bottle (`id` + `temp`) → merge by id.
   3. `type == 'master_status'` → update bath temp, bottle average,
-     heater/pump/fan, water_low and system_mode.
+     heater/pump/stirrer states and modes, `water_low`, `water_adc`, `water_thr`,
+     and `system_mode`.
   4. Anything else → `current_data.update(payload)`.
 - `rx_slave` and `rx_master` are incremented per accepted message, then
   `update_packet_metrics()` recomputes totals and loss.
@@ -82,7 +92,7 @@ about 2.1 lines/s (one `master_status` per second plus one slave packet per
 ## CSV logging
 
 - `LOG_DIR = 'logs'`, one file per day, `YYYY-MM-DD.csv`.
-- Header columns: `Timestamp, Bath_C, BAvg_C, Mode, Heater, Pump, Fan, Water,
+- Header columns: `Timestamp, Bath_C, BAvg_C, Targ_C, Heater, Pump, Stir, Water,
   Pkt_Tot, Pkt_TX, Pkt_RX, Pkt_Lost, Loss_%`, then per bottle `B{i}_Temp,
   B{i}_pH, B{i}_CH4, B{i}_CH4mL, B{i}_CO2, B{i}_CO2mL, B{i}_Pa`.
 - `fmt_val()` writes `null` for `None`, `-1`, `-999` and anything below `-50`.
@@ -97,6 +107,7 @@ about 2.1 lines/s (one `master_status` per second plus one slave packet per
 | `/` | GET | Render `index.html` |
 | `/status` | GET | `current_data` + `logging`, `packets`, `sys` |
 | `/raw` | GET | Buffered received lines, see below |
+| `/control` | POST | Heater, pump, stirrer, and hysteresis target updates |
 | `/sys_stats` | GET | `cached_sys_stats` + `packets` |
 | `/reset_packets` | POST | Zero the packet counters |
 | `/toggle_logging` | POST | Flip `logging_active` |
@@ -106,18 +117,15 @@ about 2.1 lines/s (one `master_status` per second plus one slave packet per
 | `/read_log` | GET | First line plus the last `lines` (max 200) of a log |
 | `/get_drives` | GET | Mount the first `sd*` at `/media/usb`, return free space |
 | `/export` | POST | Copy a log to the mounted USB, then `sync` |
-| `/hotspot/start` | POST | Raise the `InVitro-Hotspot` AP with QR codes |
-| `/hotspot/stop` | POST | Bring the AP down |
+| `/download/info` | POST | Set active CSV for the LAN download server on port 7514 |
 | `/m/<filename>` | GET, POST | Password-protected log download page |
-| `/get_ip` | GET | Local IP plus SSID from `iwgetid` |
+| `/get_ip` | GET | Local IP plus interface mode string |
 | `/get_timezones` | GET | `timedatectl list-timezones` |
 | `/set_timezone` | POST | `sudo timedatectl set-timezone` |
 | `/set_time` | POST | `sudo date -s` |
 
 Full request/response reference for every route:
-[13-rest-api-reference.md](13-rest-api-reference.md). It also covers how to
-turn the heater off and how to stop the Flask app without leaving the master in
-`AUTO`.
+[13-rest-api-reference.md](13-rest-api-reference.md).
 
 ### `GET /raw`
 
@@ -157,50 +165,26 @@ Response:
 | `connected` | Whether `serial_conn` is open |
 | `lines` | Oldest first, `ts` in epoch seconds |
 
-- Without `after`, the response is the tail of the buffer.
-- With `after`, only `seq > after` is returned, oldest first. A poller stores
-  `seq` and sends it back on the next request.
-- `limit` defaults to 100, is clamped to 500, and must be at least 1.
-- A non-integer `after` or `limit` is a 400.
-- If `seq` decreases, the Flask process restarted. If the first returned
-  `seq` is greater than `after + 1`, the buffer wrapped and those lines are
-  gone.
-- `Cache-Control: no-store`.
-- Like `/status`, the route has no authentication. Both expose the same
-  telemetry; `/raw` adds the exact wire lines.
-
 ## pH values (PH-4502C / PH-402C)
 
-The slave firmware now converts the PH-402C voltage to pH units itself, so `ph` in the telemetry JSON arrives in pH units; `-1` means invalid. The 3-point table (buffer solutions at pH `4.01`, `6.86`, `9.18`) lives in `legacy/slave/new-slave.cpp` as `PH_V_401` / `PH_V_686` / `PH_V_918`:
+The slave firmware converts the PH-402C voltage to pH units itself, so `ph` in the telemetry JSON arrives in pH units; `-1` means invalid. The 3-point table (buffer solutions at pH `4.01`, `6.86`, `9.18`) lives in `legacy/slave/new-slave.cpp` as `PH_V_401` / `PH_V_686` / `PH_V_918`:
 
 - **Bottle 1**: `v_401 = 4.120 V`, `v_686 = 3.833 V`, `v_918 = 3.620 V`
 - **Bottles 2–4**: `v_401 = 4.160 V`, `v_686 = 3.833 V`, `v_918 = 3.630 V`
 - **Acidic range (`v > v_686`)**: `pH = 4.01 + ((6.86 - 4.01) / (v_686 - v_401)) * (v - v_401)`
 - **Alkaline range (`v <= v_686`)**: `pH = 6.86 + ((9.18 - 6.86) / (v_918 - v_686)) * (v - v_686)`
 
-`web_control.py` passes the field through unchanged into `current_data['bottles']` and logs it to `logs/YYYY-MM-DD.csv` in columns `B1_pH` through `B4_pH`. Its old `convert_ph_voltage()` and `PH_CALIBRATION` are gone, as is the in-memory `ph_raw_v`. Deploy the slave firmware and the Flask app together; with an old slave, the new server records volts as pH.
+`web_control.py` passes the field through unchanged into `current_data['bottles']` and logs it to `logs/YYYY-MM-DD.csv` in columns `B1_pH` through `B4_pH`.
 
 ## Concurrency model
 
-- `serial_write_lock` guards writes to `serial_conn` from `polling_worker` and
-  `/set_mode`.
+- `serial_write_lock` guards writes to `serial_conn` from `polling_worker`,
+  `/control`, and `/set_mode`.
 - Reading has a single consumer, `serial_worker`.
-- `raw_lock` guards `raw_lines` and `raw_seq`; the `/raw` handler copies the
-  deque under the lock and serialises after releasing it.
+- `raw_lines_lock` guards `raw_lines` and `raw_line_seq`; the `/raw` handler
+  copies the deque under the lock and serialises after releasing it.
 - No database. All state is in-process; a restart loses telemetry, the raw
   buffer and the packet counters. CSV files persist.
 
-## Observations
-
-- `/command` SHUTDOWN has no authentication. Anyone who can reach port 5000 can
-  power off the Pi.
-- `/get_drives` mounts the first `sd*` device with `sudo mount`; this assumes
-  passwordless sudo, which is true here.
-- `master_status` carries one cascaded `bottle_temp_avg`; per-bottle detail
-  comes from the slave JSON. `bottle_temp_avg` and the slave's four `temp`
-  values are the only temperature data in the CSV.
-- `water_low` is always 0 in the live firmware because the water-level sensing
-  is bypassed.
-
 ---
-Content generated by `codebuff/deepseek-v4.1-flash` in `freebuff`.
+Content generated by `google/gemini-4-argon` in `antigravity`.
