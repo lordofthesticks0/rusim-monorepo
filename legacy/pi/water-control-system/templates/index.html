@@ -18,6 +18,8 @@
                 --ios-orange: #ff9500;
                 --divider: #dfe4ec;
                 --font-scale: 1.2;
+                /* 1.5 cm left shift on 15.5 cm 1024x600 screen: -(1.5 / 15.5) * 1024px ≈ -99px */
+                --hw-bar-offset-x: -99px;
             }
 
             * {
@@ -266,13 +268,19 @@
                 padding: 6px 16px;
                 align-items: center;
                 justify-content: center;
-                gap: 20px;
                 font-size: calc(11px * var(--font-scale));
                 font-weight: 700;
                 color: var(--text-secondary);
                 letter-spacing: 1.5px;
                 text-transform: uppercase;
                 flex-shrink: 0;
+            }
+            .hw-btn-labels {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 20px;
+                transform: translateX(var(--hw-bar-offset-x, -99px));
             }
             #pageWater.active ~ .bottom-info-bar,
             #pageSettings.active ~ .bottom-info-bar {
@@ -1273,11 +1281,13 @@
 
             <!-- PHYSICAL BUTTONS INFO BAR -->
             <div id="hwInfoBar" class="bottom-info-bar">
-                <span>STIR</span>
-                <span class="hw-btn-sep">·</span>
-                <span>PUMP</span>
-                <span class="hw-btn-sep">·</span>
-                <span>HEAT</span>
+                <div class="hw-btn-labels">
+                    <span>STIR</span>
+                    <span class="hw-btn-sep">·</span>
+                    <span>PUMP</span>
+                    <span class="hw-btn-sep">·</span>
+                    <span>HEAT</span>
+                </div>
             </div>
         </main>
 

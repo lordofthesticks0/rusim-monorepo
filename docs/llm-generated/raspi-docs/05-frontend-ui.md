@@ -61,6 +61,13 @@ The left CarPlay sidebar tabs (`.nav-btn`) have dimensions of 92×62 px (up from
 
 An on-screen bottom legend bar (`#hwInfoBar`, class `.bottom-info-bar`) is displayed at the bottom of the main viewport exclusively on the Home (`water`) and Settings (`settings`) tabs with text `STIR · PUMP · HEAT`. It is hidden on Controls, Bottle, and Logs tabs to provide maximum vertical space for data grids and controls.
 
+To align with physical buttons mounted on the chassis bezel outside the screen, the inner labels wrapper (`.hw-btn-labels`) is shifted 1.5 cm to the left:
+- **Physical screen width**: 15.5 cm (7-inch panel).
+- **Horizontal resolution**: 1024 px (as documented in [`pi-kiosk-font-scale.md`](../pi-kiosk-font-scale.md)).
+- **Pixel density**: $1024\text{ px} / 15.5\text{ cm} \approx 66.06\text{ px/cm}$.
+- **Offset calculation**: $1.5\text{ cm} \times 66.0645\text{ px/cm} = \frac{1.5}{15.5} \times 1024\text{ px} \approx 99.1\text{ px} \approx 99\text{ px}$.
+- **Implementation**: Defined in `:root` as `--hw-bar-offset-x: -99px` and applied via `transform: translateX(var(--hw-bar-offset-x, -99px))` on `.hw-btn-labels`. (If deployed on an 800 px panel: $\frac{1.5}{15.5} \times 800 \approx 77.4\text{ px} \approx 77\text{ px}$).
+
 ## Bottle Cards Styling
 
 Bottle cards in `#pageBottles` match the standard dashboard card aesthetic:
