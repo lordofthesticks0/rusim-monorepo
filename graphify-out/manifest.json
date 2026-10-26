@@ -443,5 +443,413 @@
     "seen": 1792987579.087874,
     "ast_hash": "ee61ea72f126c44132e4864ba37f1b42",
     "semantic_hash": "ee61ea72f126c44132e4864ba37f1b42"
+  },
+  ".agents/skills/memory-safety-patterns/SKILL.md": {
+    "mtime": 1792657431.9318798,
+    "seen": 1792988778.3326957,
+    "ast_hash": "4ed88c3d0ab2a55677fbfec3cba8871f",
+    "semantic_hash": ""
+  },
+  ".agents/skills/memory-safety-patterns/references/details.md": {
+    "mtime": 1792657431.9320693,
+    "seen": 1792988778.332698,
+    "ast_hash": "0460260bbc1ab3b8fc6d769e6e0858ec",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1792988523.665999,
+    "seen": 1792988778.3326993,
+    "ast_hash": "500fae4b57882aaa54c62ea83445ee28",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1791178809.6996467,
+    "seen": 1792988778.3327005,
+    "ast_hash": "bfe53ac8aeded3f411eccc5787f6dada",
+    "semantic_hash": ""
+  },
+  "backlog.md": {
+    "mtime": 1792832743.3189566,
+    "seen": 1792988778.3327017,
+    "ast_hash": "d51104ae35ba7aadefb7758d966ae080",
+    "semantic_hash": ""
+  },
+  "dashboard/index.html": {
+    "mtime": 1790171585.0117533,
+    "seen": 1792988778.3327024,
+    "ast_hash": "8ca56693c7b274d102a7df4c5305b1d9",
+    "semantic_hash": ""
+  },
+  "docs/calibration.md": {
+    "mtime": 1790308908.716823,
+    "seen": 1792988778.3327036,
+    "ast_hash": "b47532591c1f6ebe088a697b67ff8564",
+    "semantic_hash": ""
+  },
+  "docs/hardware.md": {
+    "mtime": 1791192870.212895,
+    "seen": 1792988778.3327045,
+    "ast_hash": "05861be8ffaed1d9e3e4e422f88d84c8",
+    "semantic_hash": ""
+  },
+  "docs/index.md": {
+    "mtime": 1792832747.2799592,
+    "seen": 1792988778.3327053,
+    "ast_hash": "e5bc70c8dc9b3a143790186ed7feb5ce",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/SUNTON-luna.md": {
+    "mtime": 1790837458.8432517,
+    "seen": 1792988778.3327062,
+    "ast_hash": "98f3bd4d34f9539ca3ddbfe1c6da9929",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/SUNTON-qwen.md": {
+    "mtime": 1789611586.6914988,
+    "seen": 1792988778.3327074,
+    "ast_hash": "2fcf3f7508beaf27fe3bed81fa542842",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/atmega2560-mega-mini.md": {
+    "mtime": 1790840833.9541898,
+    "seen": 1792988778.3327084,
+    "ast_hash": "b8f9b86e91ed456d67f71a2ab99864e1",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/captive-portal-login-script.md": {
+    "mtime": 1791881124.609185,
+    "seen": 1792988778.3327117,
+    "ast_hash": "1f6ee43ed25b46d34e68fc380825b9cb",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/captive-portal-workaround.md": {
+    "mtime": 1791352003.5776224,
+    "seen": 1792988778.3327127,
+    "ast_hash": "53a9c8e0eec0f589560bd729bae16e97",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/comms-rework-plan.md": {
+    "mtime": 1792834723.2232826,
+    "seen": 1792988778.3327138,
+    "ast_hash": "0ba2de713b10d7312fa433608dabf278",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/compile-commands.md": {
+    "mtime": 1792834533.9691558,
+    "seen": 1792988778.3327146,
+    "ast_hash": "c67610e48df52658eb440645e9f84d2d",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/dashboard.md": {
+    "mtime": 1792835058.8345072,
+    "seen": 1792988778.3327155,
+    "ast_hash": "6760a80e8739f4962c70f604c6af6e8c",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/database.md": {
+    "mtime": 1792835058.8535073,
+    "seen": 1792988778.3327162,
+    "ast_hash": "629dbd12d1387c6b75a3cedab28e20e7",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/db-sync-experiment-ntp.md": {
+    "mtime": 1792823210.497412,
+    "seen": 1792988778.3327174,
+    "ast_hash": "03cb49d58b36be94359a7f049c68edef",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/display-debug-flag.md": {
+    "mtime": 1792823210.4974751,
+    "seen": 1792988778.3327181,
+    "ast_hash": "a57ca0a257e9a51caf9876d7c8343fd3",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/display-docs.md": {
+    "mtime": 1792834640.256227,
+    "seen": 1792988778.332719,
+    "ast_hash": "50228e3d811532becb1fbc6f8b839fbb",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/display-info-reboot.md": {
+    "mtime": 1792040807.2939854,
+    "seen": 1792988778.3327198,
+    "ast_hash": "84409f592942e8f0955a7a7df35c2cab",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/display-lvgl-9-6-port.md": {
+    "mtime": 1792834640.262227,
+    "seen": 1792988778.332721,
+    "ast_hash": "4175c7c38efeb4504dcf9f7a0e88b82e",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/display-provisioning-ap.md": {
+    "mtime": 1792834723.2172825,
+    "seen": 1792988778.332722,
+    "ast_hash": "e85008a1d26cbc93057e93c520d13917",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/display-sim.md": {
+    "mtime": 1792823210.49732,
+    "seen": 1792988778.332723,
+    "ast_hash": "735bc5f442fa60518229256e3afee402",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/display-wt32-link.md": {
+    "mtime": 1792823023.6174521,
+    "seen": 1792988778.3327239,
+    "ast_hash": "856f7d40e07dec4cf85cd7069a6e5be1",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/esp-db-sync.md": {
+    "mtime": 1792834881.5993886,
+    "seen": 1792988778.3327248,
+    "ast_hash": "fa0db5c1f6e47dc0fa4f098bca91ed35",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/flash-factory-tool.md": {
+    "mtime": 1790844831.051497,
+    "seen": 1792988778.3327258,
+    "ast_hash": "64dcdc279e87b47994c726087258109d",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/learned-mistakes.md": {
+    "mtime": 1792830145.0440161,
+    "seen": 1792988778.3327267,
+    "ast_hash": "2b6b9b046e6b8c25964879682a53498c",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/legacy-master.md": {
+    "mtime": 1792816311.4353194,
+    "seen": 1792988778.3327277,
+    "ast_hash": "a36d8b552c4cd249d1f76e0392450316",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/legacy-pi-remote-monitor.md": {
+    "mtime": 1792832845.6560252,
+    "seen": 1792988778.3327286,
+    "ast_hash": "30cfd4ed149227657fd8a67589efdd59",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/legacy-slave-json-wrapper.md": {
+    "mtime": 1792832845.6520252,
+    "seen": 1792988778.3327293,
+    "ast_hash": "0b88e4909eac600572719f69ed4e1ed9",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/legacy-slave.md": {
+    "mtime": 1792832773.6219769,
+    "seen": 1792988778.33273,
+    "ast_hash": "6da7302a1e6c525d5b834c768c472497",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/link-serial-protocol.md": {
+    "mtime": 1792831946.9124231,
+    "seen": 1792988778.3327312,
+    "ast_hash": "55df5e0e8a4215c91e8397fd718277b7",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/lvgl-redesign.md": {
+    "mtime": 1791966810.681192,
+    "seen": 1792988778.3327322,
+    "ast_hash": "d278bcfe3d0679286499bbba57a1ea23",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/memory-safety-hardening.md": {
+    "mtime": 1792834586.2401907,
+    "seen": 1792988778.332733,
+    "ast_hash": "74cddb0f6719018117aa0a5f0f142737",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/migration-notes.md": {
+    "mtime": 1790841263.2017426,
+    "seen": 1792988778.3327339,
+    "ast_hash": "9bf46d8f297710c27463b470ea5579e8",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/migration-plan.md": {
+    "mtime": 1792832940.3680885,
+    "seen": 1792988778.332735,
+    "ast_hash": "dbea0790cfd77f9cc20c70ed7ec86f46",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/network-master.md": {
+    "mtime": 1792834881.5993886,
+    "seen": 1792988778.3327358,
+    "ast_hash": "a0ea4866e9d006fb2bd88ab8b94e213a",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/pi-kiosk-font-scale.md": {
+    "mtime": 1792487624.944448,
+    "seen": 1792988778.3327365,
+    "ast_hash": "a48781d672ce689770d447c90f08970e",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/pi-kiosk-ui-css-redesign.md": {
+    "mtime": 1792485164.0105195,
+    "seen": 1792988778.3327372,
+    "ast_hash": "f36eaaf7105bf3d1bef1173d61736f4f",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/pi-sync-script.md": {
+    "mtime": 1792658916.9928226,
+    "seen": 1792988778.3327384,
+    "ast_hash": "578ee7c085f79d5b30d6f9535d748354",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/pi-water-control-system-mirror.md": {
+    "mtime": 1792832929.5380814,
+    "seen": 1792988778.332739,
+    "ast_hash": "a5ec8284f2cd7d84adf05c5c688d3b7b",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/platformio-environments.md": {
+    "mtime": 1792834533.9721558,
+    "seen": 1792988778.3327398,
+    "ast_hash": "e641dd67d8dddb08c6a63dbf8ed60525",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/01-hardware-and-os.md": {
+    "mtime": 1792483140.67081,
+    "seen": 1792988778.3327405,
+    "ast_hash": "a5085951647e95e69c046c94d0ca3a84",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/02-boot-and-kiosk.md": {
+    "mtime": 1792482804.1206963,
+    "seen": 1792988778.3327417,
+    "ast_hash": "919c7af57f98990f92ef246413602671",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/03-project-overview.md": {
+    "mtime": 1792486047.2178257,
+    "seen": 1792988778.3327432,
+    "ast_hash": "ce51d0bea3df7e0a69023cfc43a00abe",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/04-backend-web-control.md": {
+    "mtime": 1792832783.3329835,
+    "seen": 1792988778.3327441,
+    "ast_hash": "9125599e5832cc675d0148bcab274f1e",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/05-frontend-ui.md": {
+    "mtime": 1792742731.2261832,
+    "seen": 1792988778.3327456,
+    "ast_hash": "6406390449e8e7add6be797cc08e4c70",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/06-master-firmware.md": {
+    "mtime": 1792816311.435764,
+    "seen": 1792988778.3327465,
+    "ast_hash": "ed4698b20ee352fe10d5662b9c6dfbdb",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/07-data-and-logging.md": {
+    "mtime": 1792483286.2068594,
+    "seen": 1792988778.3327477,
+    "ast_hash": "11cf2bd248e02d55d51c79318c315378",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/08-auxiliary-tools.md": {
+    "mtime": 1792483286.2068594,
+    "seen": 1792988778.332749,
+    "ast_hash": "cd0b4e0b7a10af9445faea6b5ae0acdf",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/09-network-and-services.md": {
+    "mtime": 1792728178.436999,
+    "seen": 1792988778.3327498,
+    "ast_hash": "1c68ff3319f465370896bff2bb4b83f5",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/10-security-and-caveats.md": {
+    "mtime": 1792483255.820849,
+    "seen": 1792988778.3327506,
+    "ast_hash": "48095c79a0c2a23b4e9ed55ce38ca92d",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/11-key-paths.md": {
+    "mtime": 1792483255.809849,
+    "seen": 1792988778.3327515,
+    "ast_hash": "8328dbcd00c592ecdffc3435cabbbbf7",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/12-copies-and-git-state.md": {
+    "mtime": 1792395208.1776805,
+    "seen": 1792988778.3327527,
+    "ast_hash": "10986a9ce32d4290ef6653a728b92ea0",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/13-rest-api-reference.md": {
+    "mtime": 1792728135.0928776,
+    "seen": 1792988778.3327537,
+    "ast_hash": "80f5c37bd612bec054af0e7df3c259f1",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/14-leaf-reader.md": {
+    "mtime": 1792742733.8841832,
+    "seen": 1792988778.3327546,
+    "ast_hash": "be83bb652361d3374b5e420f4de7ec7f",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/raspi-docs/README.md": {
+    "mtime": 1792742733.8801832,
+    "seen": 1792988778.332756,
+    "ast_hash": "5fc81f013d33bfd3efc14a769b94309a",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/rs485-loopback-test.md": {
+    "mtime": 1790844795.633434,
+    "seen": 1792988778.332757,
+    "ast_hash": "a987ed105e73253a1f551645eb95b89a",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/security-report.md": {
+    "mtime": 1790844284.6825237,
+    "seen": 1792988778.332758,
+    "ast_hash": "f9e02ed2b849ecd034600eee9f60dd4b",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/sensor-calibration-firmware.md": {
+    "mtime": 1792474554.157113,
+    "seen": 1792988778.3327591,
+    "ast_hash": "5da30ef8eec1d1f4d2f2aff54a23cfb6",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/wt32-eth01-captive-recon.md": {
+    "mtime": 1790923722.8466618,
+    "seen": 1792988778.3327603,
+    "ast_hash": "0bf8d2ef9c88c95202be48f26151c9eb",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/wt32-eth01-ping-test.md": {
+    "mtime": 1791352238.8360605,
+    "seen": 1792988778.3327613,
+    "ast_hash": "06c3a09e4eb623cde75eb28dc1b79df3",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/wt32-eth01.md": {
+    "mtime": 1789611589.0054963,
+    "seen": 1792988778.3327625,
+    "ast_hash": "3b9685fda8408605a0852556f70565bf",
+    "semantic_hash": ""
+  },
+  "legacy/pi/water-control-system/templates/index.html": {
+    "mtime": 1792816224.8748605,
+    "seen": 1792988778.3327637,
+    "ast_hash": "fdc75d51a7e12c486f6ea485447fadc5",
+    "semantic_hash": ""
+  },
+  "reusable-prompts/backlog-filling.md": {
+    "mtime": 1792144285.552382,
+    "seen": 1792988778.3327644,
+    "ast_hash": "093d7f7ebfdd69e30a19c7e91a5b6abc",
+    "semantic_hash": ""
+  },
+  "reusable-prompts/lvgl-redesign.md": {
+    "mtime": 1791957179.8530734,
+    "seen": 1792988778.3327653,
+    "ast_hash": "56cca1458ae664fcddcaf62772e4aee6",
+    "semantic_hash": ""
   }
 }

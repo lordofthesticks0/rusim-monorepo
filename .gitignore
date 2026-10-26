@@ -14,3 +14,6 @@ compile_commands.json
 .freebuff/
 */cache
 */.graphify*
+graphify-out/*/
+graphify-out/.graphify*
+graphify-out/cache/
