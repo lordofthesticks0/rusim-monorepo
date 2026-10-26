@@ -6,7 +6,11 @@ Do not open any documentation files unless you think it is relevant. There is pl
 
 ## Prerequisites
 
-This project requires mainly two things: `bun` and `pio`. Both need to be available in the terminal. Install them for the user if they are not yet installed.
+This project requires mainly two things: `bun`, `pio`, and `uv`. All need to be available in the terminal. Install them for the user if they are not yet installed.
+
+- `bun`: https://bun.com/docs/installation
+- `pio`: https://docs.platformio.org/en/latest/core/installation/methods/installer-script.html
+- `uv`: https://docs.astral.sh/uv/getting-started/installation
 
 Before touching anything, always make sure you have the latest version of the code by pulling from the remote.
 
@@ -51,6 +55,9 @@ Your users are students. It would help us if you were to be particularly astute 
 Should the user decides to put off work into another day or another session, write it to [the backlog](backlog.md). Remind the user from time to time about the backlog. 
 
 When the user corrects you, document all mistakes in `docs/llm-generated/learned-mistakes.md`. You may also read the file to learn from previous mistakes.
+
+Documentation is also assisted by `graphify`. Use it to search the code.
+Install with: `uv tool install graphify` if not yet installed.
 
 ## Decisions
 

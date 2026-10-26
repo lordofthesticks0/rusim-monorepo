@@ -12,3 +12,5 @@ compile_commands.json
 .cache/
 .logs/
 .freebuff/
+*/cache
+*/.graphify*
