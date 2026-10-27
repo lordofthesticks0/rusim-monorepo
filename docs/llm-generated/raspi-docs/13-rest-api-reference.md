@@ -19,22 +19,23 @@ can reach port 5000. The port 7514 server is open to anyone who can reach it.
 | 1 | `/` | GET | — | No |
 | 2 | `/status` | GET | — | No |
 | 3 | `/raw` | GET | query `after`, `limit` | No |
-| 4 | `/sys_stats` | GET | — | No |
-| 5 | `/reset_packets` | POST | — | No |
-| 6 | `/toggle_logging` | POST | — | No |
-| 7 | `/download/info` | POST | `filename` | No |
-| 8 | `GET http://<pi>:7514/` | GET | — | No (separate server) |
-| 9 | `/m/<filename>` | GET, POST | form `username`, `password` | No |
-| 10 | `/set_mode` | POST | `mode` | **Yes — heater, pump, fan** |
-| 11 | `/command` | POST | `command` | No (powers off the Pi) |
-| 12 | `/files` | GET | — | No |
-| 13 | `/read_log` | GET | query `filename`, `lines` | No |
-| 14 | `/get_drives` | GET | — | No (mounts USB) |
-| 15 | `/export` | POST | `filename`, `dest_path` | No |
-| 16 | `/get_ip` | GET | — | No |
-| 17 | `/get_timezones` | GET | — | No |
-| 18 | `/set_timezone` | POST | `timezone` | No |
-| 19 | `/set_time` | POST | `datetime` | No |
+| 4 | `/control` | POST | JSON `action`: `heater` / `pump` / `stirrer` / `temp_target` | **Yes — heater, pump, stirrer, target** |
+| 5 | `/sys_stats` | GET | — | No |
+| 6 | `/reset_packets` | POST | — | No |
+| 7 | `/toggle_logging` | POST | — | No |
+| 8 | `/download/info` | POST | `filename` | No |
+| 9 | `GET http://<pi>:7514/` | GET | — | No (separate server) |
+| 10 | `/m/<filename>` | GET, POST | form `username`, `password` | No |
+| 11 | `/set_mode` | POST | `mode` | **Yes — system mode (`MODE_AUTO` / `MODE_OFF`)** |
+| 12 | `/command` | POST | `command` | No (powers off the Pi) |
+| 13 | `/files` | GET | — | No |
+| 14 | `/read_log` | GET | query `filename`, `lines` | No |
+| 15 | `/get_drives` | GET | — | No (mounts USB) |
+| 16 | `/export` | POST | `filename`, `dest_path` | No |
+| 17 | `/get_ip` | GET | — | No |
+| 18 | `/get_timezones` | GET | — | No |
+| 19 | `/set_timezone` | POST | `timezone` | No |
+| 20 | `/set_time` | POST | `datetime` | No |
 
 ## Turning the heater off
 
@@ -59,8 +60,10 @@ Verify:
 curl -s http://127.0.0.1:5000/status | python3 -m json.tool
 ```
 
-Expected: `"system_mode": "OFF"`, `"heater": false`, `"pump": false`,
-`"fan": false`.
+Expected: `"system_mode": "OFF"`, `"heater": false`, `"pump": false`. The
+heater and pump also start at `"heater_mode": "OFF"` / `"pump_mode": "OFF"`
+because `web_control.py` sends `HEATER_OFF`, `PUMP_OFF` and `STIR:0:10:30` once
+on its first serial connection.
 
 Caveats:
 
@@ -75,16 +78,24 @@ Caveats:
   works with the Pi powered down.
 - `MODE_AUTO` does not immediately re-enable the heater; the normal thermostat
   conditions apply on the next loop.
+- `POST /control` with `{"action":"heater","mode":"OFF"}` is the narrower
+  alternative: it sends `HEATER_OFF`, which sets the heater override to forced
+  off while leaving `system_mode` alone. The same works for `pump`.
 
 ### Stopping the Flask app does not stop the heater
 
 The master has no Pi heartbeat or command timeout. It keeps running whatever
 `currentMode` it last received. If you stop Flask while the system is in
 `MODE_AUTO`, the master continues heating on its own (subject to the bottle
-thermostat, bath ceiling 39.8 °C, and the 12 s slave timeout). To make a
+thermostat, the 41.0 °C hard bath ceiling, and the 12 s slave timeout). To make a
 shutdown safe:
 
-1. Send `MODE_OFF` and confirm `heater: false`.
+The master boots with `currentMode = MODE_AUTO` but `heaterOverride` and
+`pumpOverride` already forced off, so a reset leaves the heater off until
+something selects `ON` or `AUTO` for it.
+
+1. Send `MODE_OFF` (or `POST /control` with `action=heater`, `mode=OFF`) and
+   confirm `heater: false`.
 2. Then stop the service.
 
 PM2 runs the app as `water-ui` (id 0), resurrected at boot by
@@ -117,9 +128,12 @@ Response fields:
 | `temp` | float | Bath DS18B20 temperature; `-999.0` when invalid |
 | `bottle_avg_temp` | float | Average bottle temperature from the master; `-999.0` when invalid |
 | `heater` | bool | Last reported heater state |
-| `fan` | bool | Last reported stirrer/fan state |
+| `stirrer` | bool | Last reported stirrer state. There is no `fan` field; the exhaust-fan badge in the UI is a static label, not telemetry. |
 | `pump` | bool | Last reported pump state |
-| `water_low` | bool | Always `false` in the live firmware (sensing bypassed) |
+| `heater_mode` / `pump_mode` / `stir_mode` | string | Cached override mode (`AUTO` / `ON` / `OFF`, and `OFF` / `ON` / `PULSE` / `TIMED` for the stirrer) from the last master frame or `POST /control` |
+| `target_temp` / `hysteresis` | float | Setpoint sent with `TEMP:` (defaults 39.0 / 0.3) |
+| `water_low` | bool | Dry-run flag from the master. `false` until the master reports it; the current firmware drives it from `A7` with a 5-check debounce (see `06-master-firmware.md`). An older firmware build reported a constant `false`. |
+| `water_adc` / `water_thr` | int | 16-sample averaged water-sensor ADC and the threshold (`200`) the master trips on |
 | `system_mode` | string | `AUTO` or `OFF`, cached from the last master frame or `/set_mode` |
 | `bottles` | array | Per-bottle objects; forced to `[]` when the slave is older than 12 s |
 | `logging` | bool | Whether CSV logging is active |
@@ -157,13 +171,30 @@ Response:
 - `Cache-Control: no-store`.
 - At the live rate (~2.1 lines/s) 500 lines cover about four minutes.
 
-### 4. `GET /sys_stats`
+### 4. `POST /control`
+
+The actuator and setpoint endpoint used by the Controls tab. The body is JSON
+with an `action` field; an unknown or missing action returns HTTP 400
+`{"status":"error","message":"Invalid control action"}`.
+
+| `action` | Extra fields | Behaviour |
+|---|---|---|
+| `heater` | `mode` = `AUTO` / `ON` / `OFF` (default `AUTO`) | Sends `HEATER_<mode>` and updates `current_data['heater_mode']`. `ON` sets the cached `heater` true unless `water_low` is set; `OFF`, or `water_low`, sets it false. |
+| `pump` | `mode` = `AUTO` / `ON` / `OFF` (default `AUTO`) | Sends `PUMP_<mode>` and updates `pump_mode`, with the same `water_low` guard. |
+| `stirrer` | `mode` = `OFF` / `ON` / `PULSE` / `TIMED` (default `OFF`), `minutes` (default 10), `seconds` (default 30) | Sends `STIR:<0-3>:<mins>:<secs>` and updates `stir_mode`, `stir_int_min` and `stir_pulse_sec` (or `stir_timed_min`). The cached `stirrer` is true when the mode is not `OFF` and `water_low` is false. |
+| `temp_target` | `target` (default 39.0), `hysteresis` (default 0.3) | Rounds both to one decimal and sends `TEMP:<target>:<hysteresis>`; updates `target_temp` and `hysteresis`. |
+
+A valid action returns `{"status":"success"}`. As with `/set_mode`, the cache is
+updated whether or not the serial write happened, so the response is not proof
+that the board changed.
+
+### 5. `GET /sys_stats`
 
 Returns `cached_sys_stats` plus `packets`. Same data as `/status`'s `sys` and
 `packets` fields, without the telemetry. The cache is refreshed every 4 s by
 `telemetry_worker`.
 
-### 5. `POST /reset_packets`
+### 6. `POST /reset_packets`
 
 Zeros `total`, `outgoing`, `incoming`, `rx_master`, `rx_slave`, `lost` and
 `loss_pct`.
@@ -172,7 +203,7 @@ Zeros `total`, `outgoing`, `incoming`, `rx_master`, `rx_slave`, `lost` and
 {"status": "success", "packets": {...}}
 ```
 
-### 6. `POST /toggle_logging`
+### 7. `POST /toggle_logging`
 
 Flips `logging_active`. On the transition to active it immediately writes one
 row via `log_data_to_csv()`. The polling worker then writes a row every second
@@ -182,7 +213,7 @@ while logging is on.
 {"status": "success", "logging": true}
 ```
 
-### 7. `POST /download/info`
+### 8. `POST /download/info`
 
 Body: `{"filename": "2026-10-22.csv"}`. The file must exist in `logs/` and end
 in `.csv`, otherwise HTTP 400 with
@@ -204,7 +235,7 @@ Sets the in-memory `download_target` to the selected basename and returns:
 `url_qr` is an empty string when the `qrcode` package is missing. No hotspot is
 started; `wlan0` stays off.
 
-### 8. `GET http://<pi>:7514/` (separate server)
+### 9. `GET http://<pi>:7514/` (separate server)
 
 A `ThreadingHTTPServer` started by `web_control.py` on `0.0.0.0:7514`. It has
 no HTML page, no login form, and no directory listing.
@@ -224,7 +255,7 @@ no HTML page, no login form, and no directory listing.
 Because there is no authentication, anyone on the same LAN can download any CSV
 in `logs/` by name.
 
-### 9. `GET|POST /m/<filename>`
+### 10. `GET|POST /m/<filename>`
 
 Password-protected download portal for one log file. `filename` is reduced with
 `os.path.basename`, then resolved inside `logs/`; a missing file is HTTP 404.
@@ -234,7 +265,7 @@ Password-protected download portal for one log file. `filename` is reduced with
   (`invitro` / `password`) return the CSV as an attachment. Wrong values
   re-render the form with `Invalid username or password.`
 
-### 10. `POST /set_mode`
+### 11. `POST /set_mode`
 
 Body: `{"mode": "AUTO"}` or `{"mode": "OFF"}`.
 
@@ -246,10 +277,11 @@ Body: `{"mode": "AUTO"}` or `{"mode": "OFF"}`.
 - Returns `{"status":"success","system_mode":"<mode>"}`.
 - Any other value returns `{"status":"error"}` with HTTP 200.
 
-This is the only endpoint that changes actuator state. See
+This endpoint changes the system mode only. Per-actuator overrides and the
+temperature setpoint go through [`POST /control`](#4-post-control). See
 [the heater section](#turning-the-heater-off).
 
-### 11. `POST /command`
+### 12. `POST /command`
 
 Body: `{"command": "SHUTDOWN"}`.
 
@@ -259,12 +291,12 @@ Body: `{"command": "SHUTDOWN"}`.
 
 No authentication. Anyone reaching port 5000 can power off the Pi.
 
-### 12. `GET /files`
+### 13. `GET /files`
 
 Returns a JSON array of `*.csv` basenames in `logs/`, sorted reverse
 lexicographically (newest date first). Empty array when there are none.
 
-### 13. `GET /read_log`
+### 14. `GET /read_log`
 
 Query: `filename` (required), `lines` (default 40, capped at 200).
 
@@ -277,7 +309,7 @@ Query: `filename` (required), `lines` (default 40, capped at 200).
 - A non-integer `lines` raises `ValueError` inside the handler and returns
   HTTP 500.
 
-### 14. `GET /get_drives`
+### 15. `GET /get_drives`
 
 Runs `lsblk -r -n -o NAME,TYPE,MOUNTPOINT`, picks the first device whose name
 starts with `sd`, and mounts it at `/media/usb` with
@@ -293,7 +325,7 @@ Returns an array with at most one object:
 Returns `[]` when no drive is mounted. Mount failures are swallowed.
 `mkfs`/partition handling does not exist; the first `sd*` may be the SD card.
 
-### 15. `POST /export`
+### 16. `POST /export`
 
 Body: `{"filename": "<name>.csv", "dest_path": "/media/usb"}`.
 
@@ -308,7 +340,7 @@ Body: `{"filename": "<name>.csv", "dest_path": "/media/usb"}`.
 escapes `logs/` and is copied to the USB drive. `dest_path` is only checked with
 `os.path.ismount`.
 
-### 16. `GET /get_ip`
+### 17. `GET /get_ip`
 
 Opens a UDP socket to `8.8.8.8:1` to learn the outbound interface address, then
 runs `iwgetid -r` for the SSID.
@@ -319,19 +351,19 @@ runs `iwgetid -r` for the SSID.
 
 Defaults to `"Unavailable"` and `"Ethernet (LAN)"` on failure.
 
-### 17. `GET /get_timezones`
+### 18. `GET /get_timezones`
 
 Returns `timedatectl list-timezones` as a JSON array of strings. Returns `[]`
 on failure.
 
-### 18. `POST /set_timezone`
+### 19. `POST /set_timezone`
 
 Body: `{"timezone": "Asia/Jakarta"}`. Runs
 `sudo timedatectl set-timezone <value>` with `check=True`. Returns
 `{"status":"success"}` or `{"status":"error"}`. The value is passed as a single
 argv element, so shell metacharacters are not interpreted.
 
-### 19. `POST /set_time`
+### 20. `POST /set_time`
 
 Body: `{"datetime": "2026-10-22 14:30:00"}`. Runs
 `sudo date -s <value>` with `check=True`. Returns `{"status":"success"}` or
@@ -358,3 +390,5 @@ Body: `{"datetime": "2026-10-22 14:30:00"}`. Runs
 
 ---
 Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.
+
+Update by `xiaomi/mimo-v2.6-flash-slow` in `freebuff` (2026-10-27): added the missing `POST /control` endpoint, fixed the `/status` field list, and corrected the heater-off procedure.

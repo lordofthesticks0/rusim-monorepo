@@ -161,7 +161,8 @@ each one produced a build failure rather than a warning.
    have been removed.
 
 All environments now build from a clean checkout with `pio run` (16 `[env:*]`
-sections at the 2026-10-24 verification).
+sections at the 2026-10-27 re-verification; `motor-driver` is included in that
+count).
 
 `network-master` is the production WT32 env: same board and libraries as
 `wt32-eth01_ping-test`, but credentials, network status, DB state and
@@ -193,3 +194,5 @@ says LVGL 9.6.0; `-DIS_DEBUG=1` in `[env:display-v9]` is now commented out as th
 document already recommended, so `IS_DEBUG` is off in production builds again.
 
 Update by `opencode/deepseek-v4.1-flash-free` in `opencode`: `network-master` now uses `rusim-line` v1 on UART0 `IO1`/`IO3` instead of Modbus RTU on `Serial1`.
+
+Update by `xiaomi/mimo-v2.6-flash-slow` in `freebuff` (2026-10-27): re-counted `[env:*]` sections (16) at the 2026-10-27 verification.

@@ -125,8 +125,7 @@ installing tools, stopping services, or touching the board.
 
 Flashing resets the Arduino. `setup()` calls `forceAllOff()` immediately, but
 the circulation pump stops for the duration of the upload. The master source
-still bypasses the water-level probe (`waterDepleted` is always `false`), so
-flashing does not add dry-run protection.
+implements water-level sensing with dry-run cutoff protection.
 
 ## What is and is not touched
 
@@ -220,8 +219,8 @@ branch tip from `origin`, not an arbitrary local commit.
 - The board must be connected and idle for the upload. Flashing resets it and
   stops the circulation pump for several seconds; it does not turn the heater
   on, because `setup()` calls `forceAllOff()`.
-- The water-level probe is still bypassed in `master.cpp`. A successful upload
-  does not add dry-run protection.
+- The water-level probe is implemented in `master.cpp` with time-gated debouncing
+  and dry-run cutoff protection (trips after 5 consecutive readings below threshold).
 - `templates/index.html` changes are served on the next page load; the kiosk
   browser must be reloaded manually.
 - The Pi's old `~/water-control-system/.git` still points at

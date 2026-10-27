@@ -30,10 +30,11 @@ document is the source of truth for anything measured on real hardware.
 | [`firmware/wt32-eth01_ping-test/`](../firmware/wt32-eth01_ping-test/) | WT32-ETH01 | [wt32-eth01-ping-test.md](llm-generated/wt32-eth01-ping-test.md), [wt32-eth01.md](llm-generated/wt32-eth01.md) |
 | [`firmware/wt32-eth01_captive-recon/`](../firmware/wt32-eth01_captive-recon/) | WT32-ETH01 | [wt32-eth01-captive-recon.md](llm-generated/wt32-eth01-captive-recon.md) |
 | [`firmware/network-master/`](../firmware/network-master/) | WT32-ETH01 | [network-master.md](llm-generated/network-master.md) (production), [link-serial-protocol.md](llm-generated/link-serial-protocol.md) |
+| [`firmware/motor-driver/`](../firmware/motor-driver/) | ATmega328 Nano | [platformio-environments.md](llm-generated/platformio-environments.md) §3 (L298N PWM ramp demo) |
 | [`firmware/methane-calibrate/`](../firmware/methane-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §6 |
-| [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §5 |
+| [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate/) | ATmega328 Uno | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §5 |
 | [`firmware/temp-probe/`](../firmware/temp-probe/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §7 |
-| [`firmware/co2-calibrate/`](../firmware/co2-calibrate/) | ATmega328 Nano | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §4 |
+| [`firmware/co2-calibrate/`](../firmware/co2-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §4 |
 | [`firmware/loadcell-test/`](../firmware/loadcell-test/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §3 |
 | [`firmware/blink-test/`](../firmware/blink-test/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §2 |
 | [`firmware/max485-test/`](../firmware/max485-test/) | ATmega2560 Mega Mini | [rs485-loopback-test.md](llm-generated/rs485-loopback-test.md) |
@@ -100,8 +101,9 @@ document is the source of truth for anything measured on real hardware.
 
 | Path | Role |
 |---|---|
-| [`legacy/pi/water-control-system/`](../legacy/pi/water-control-system/) | Mirror of the live Pi project: `web_control.py`, `templates/index.html`, `water_control_arduino/`, `logs/`. Edit here, then copy to the Pi. [pi-water-control-system-mirror.md](llm-generated/pi-water-control-system-mirror.md). The kiosk text is scaled by 20 %; see [pi-kiosk-font-scale.md](llm-generated/pi-kiosk-font-scale.md). Manual deploy plus automatic master-firmware flash: [`sync_pi.sh`](../sync_pi.sh), also installed at `/home/invitro/sync_pi.sh` on the Pi — [pi-sync-script.md](llm-generated/pi-sync-script.md). |
+| [`legacy/pi/water-control-system/`](../legacy/pi/water-control-system/) | Mirror of the live Pi project: `web_control.py`, `templates/index.html`, `water_control_arduino/`, `logs/`. Edit here, then copy to the Pi. [pi-water-control-system-mirror.md](llm-generated/pi-water-control-system-mirror.md). The kiosk text is scaled by 20 %; see [pi-kiosk-font-scale.md](llm-generated/pi-kiosk-font-scale.md). Manual deploy plus automatic master-firmware flash: [`sync_pi.sh`](../sync_pi.sh), also installed at `/home/invitro/sync_pi.sh` on the Pi — [pi-sync-script.md](llm-generated/pi-sync-script.md). Unshipped stylesheet experiment for the kiosk page (the file was deleted; it is kept for reference): [pi-kiosk-ui-css-redesign.md](llm-generated/pi-kiosk-ui-css-redesign.md). |
 | [`legacy/pi/captive-portal-login.sh`](../legacy/pi/captive-portal-login.sh) | Bash reimplementation of the master firmware's captive-portal login sequence. [captive-portal-login-script.md](llm-generated/captive-portal-login-script.md). |
+| [`legacy/pi/install-leaf.sh`](../legacy/pi/install-leaf.sh) | Installs the `leaf` terminal reader on the Pi. [raspi-docs/14-leaf-reader.md](llm-generated/raspi-docs/14-leaf-reader.md). |
 | [`legacy/slave/new-slave.cpp`](../legacy/slave/new-slave.cpp) | ATmega2560 Mega Mini sensor slave: 4 bottles of pH, CH4, temperature, CO2 and pressure, published as JSON over RS485 and USB. [legacy-slave.md](llm-generated/legacy-slave.md). |
 | [`legacy/master/master.cpp`](../legacy/master/master.cpp) | ATmega2560 Mega Mini water-bath master controller: bath DS18B20, Slave UART poller, heater/pump overrides, and 3-second MOSFET PWM ramping on D3 for the pump and D4 for the stirrer. [legacy-master.md](llm-generated/legacy-master.md). |
 | [`scripts-hardware/read-legacy-slave.ts`](../scripts-hardware/read-legacy-slave.ts) | Bun wrapper that reads the slave's JSON stream and prints a per-bottle table. [legacy-slave-json-wrapper.md](llm-generated/legacy-slave-json-wrapper.md). |
@@ -117,7 +119,7 @@ Agent-written documentation of the live `invitrocontroller` Raspberry Pi 3B syst
 | [raspi-docs/01-hardware-and-os.md](llm-generated/raspi-docs/01-hardware-and-os.md) | Board, OS, toolchain, packages |
 | [raspi-docs/02-boot-and-kiosk.md](llm-generated/raspi-docs/02-boot-and-kiosk.md) | Autologin, LightDM, openbox, PM2, Chromium kiosk |
 | [raspi-docs/03-project-overview.md](llm-generated/raspi-docs/03-project-overview.md) | `water-control-system` and its three copies |
-| [raspi-docs/04-backend-web-control.md](llm-generated/raspi-docs/04-backend-web-control.md) | Flask + SocketIO backend, routes, workers, CSV logging |
+| [raspi-docs/04-backend-web-control.md](llm-generated/raspi-docs/04-backend-web-control.md) | Flask backend, routes, workers, CSV logging |
 | [raspi-docs/05-frontend-ui.md](llm-generated/raspi-docs/05-frontend-ui.md) | Kiosk dashboard: tabs, indicators, bottle grid |
 | [raspi-docs/06-master-firmware.md](llm-generated/raspi-docs/06-master-firmware.md) | Arduino master sketch `water_control_arduino.ino` |
 | [raspi-docs/07-data-and-logging.md](llm-generated/raspi-docs/07-data-and-logging.md) | CSV schema, logs, USB export |
@@ -125,9 +127,11 @@ Agent-written documentation of the live `invitrocontroller` Raspberry Pi 3B syst
 | [raspi-docs/09-network-and-services.md](llm-generated/raspi-docs/09-network-and-services.md) | Network, enabled services, cloudflared |
 | [raspi-docs/10-security-and-caveats.md](llm-generated/raspi-docs/10-security-and-caveats.md) | Risks, offline state, observations |
 | [raspi-docs/11-key-paths.md](llm-generated/raspi-docs/11-key-paths.md) | Quick path reference |
-| [raspi-docs/12-copies-and-git-state.md](llm-generated/raspi-docs/12-copies-and-git-state.md) | The three project copies and their uncommitted changes |
+| [raspi-docs/12-copies-and-git-state.md](llm-generated/raspi-docs/12-copies-and-git-state.md) | The three project copies, their divergence, and the current git state |
 | [raspi-docs/13-rest-api-reference.md](llm-generated/raspi-docs/13-rest-api-reference.md) | Every Flask route with request/response shapes, heater-off procedure, stopping the service safely |
 | [raspi-docs/14-leaf-reader.md](llm-generated/raspi-docs/14-leaf-reader.md) | `leaf` 0.2.0 terminal reader: aarch64 cross-compile on the dev machine, verification, rebuild script |
+| [documentation-review-legacy.md](llm-generated/documentation-review-legacy.md) | Review of every document in `docs/` cross-checked against the repository (first pass covered `legacy/`); fixes applied and open items |
+| [learned-mistakes.md](llm-generated/learned-mistakes.md) | Mistakes this agent has made in this repository and how to avoid them |
 
 ## 4. Hardware references
 
@@ -146,7 +150,6 @@ These describe boards rather than this project's code.
 |---|---|
 | [`docs/hardware.md`](../docs/hardware.md) | PCB documentation: module pinouts, the full Mega pin map, sensors, MAX485 |
 | [`docs/calibration.md`](../docs/calibration.md) | Recorded calibration values and dates, per sensor |
-| [`docs/images/`](../docs/images/) | Images referenced by the human documentation |
 
 ## 6. Where new work belongs
 

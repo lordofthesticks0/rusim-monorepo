@@ -206,7 +206,9 @@ The code archive has Arduino demos but no first-party PlatformIO project or appl
 | `7-Character&Picture_Molding_Tool/` | Windows tools and compressed utilities | Asset/font conversion and serial utilities |
 | `8-Burn operation/` | Firmware images, Windows flasher, logs, burn guides | Factory firmware recovery |
 
-The schematics are raster JPG/PNG images; there are no editable EDA source files in the supplied archive. See [CODE-INDEX.md](CODE-INDEX.md) for per-demo entry points and library notes, and [FILE-MANIFEST.txt](FILE-MANIFEST.txt) for the extracted file inventory. `SHA256SUMS.txt` records hashes for the archive contents present when this repository was indexed.
+The schematics are raster JPG/PNG images; there are no editable EDA source files in the supplied archive. In that archive, `CODE-INDEX.md` holds the per-demo entry points and library
+notes, and `FILE-MANIFEST.txt` the extracted file inventory. Neither file was
+carried into this repository, so they are named here rather than linked. `SHA256SUMS.txt` records hashes for the archive contents present when this repository was indexed.
 
 ## Troubleshooting guide
 

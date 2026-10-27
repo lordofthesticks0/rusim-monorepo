@@ -11,3 +11,6 @@
 - [ALL] `experiments` table so the dashboard can command a run. Nothing stores run configuration server-side; duration comes from the display UI. See docs/llm-generated/esp-db-sync.md §6.
 - [SITE] Fix monitoring readings: Change it so only the latest experiment is shown on the monitoring tab.
 - [FIRMWARE] Find the heap corruption behind the /info reboot (getHeapSize walk hangs; corrupt by end of setup). See docs/llm-generated/display-info-reboot.md.
+- [ALL] Verify the raspi-docs live claims over SSH once the Pi is reachable: eth0 prefix (/21 vs /24), which firmware is flashed, the three project copies. See docs/llm-generated/documentation-review-legacy.md §3.
+- [ALL] docs/hardware.md has a broken link (`../../firmware/max485-test/main.cpp`); it is a human-owned file, so a human must fix it.
+- [ALL] Five llm-generated docs have no generation footer (raspi-docs/02, raspi-docs/08, migration-notes.md, wt32-eth01.md, learned-mistakes.md); their original generator is unknown. See docs/llm-generated/documentation-review-legacy.md §3.
