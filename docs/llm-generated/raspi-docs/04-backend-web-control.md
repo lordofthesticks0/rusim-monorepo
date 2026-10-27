@@ -1,7 +1,7 @@
 # 4. Backend — `web_control.py`
 
 Plain Flask, no SocketIO. Listens on `0.0.0.0:5000` with
-`debug=False, threaded=True`. The kiosk page polls `/status` once per second.
+`debug=False, threaded=True`. The kiosk page polls `/status` every 1.5 seconds.
 
 ## Global state
 
@@ -10,10 +10,20 @@ current_data = {
     'temp': -999.0,           # bath DS18B20 reading
     'bottle_avg_temp': -999.0,# cascaded bottle average from master
     'heater': False,
-    'pump': False,
-    'stirrer': False,
+    'pump': False,            # True if either pump1 or pump2 is active
+    'pump1': False,           # Pump 1 MOSFET (Pin D3) active state
+    'pump2': False,           # Pump 2 MOSFET (Pin D7) active state
+    'stirrer': False,         # Stirrer MOSFET (Pin D4) active state
     'heater_mode': 'OFF',
     'pump_mode': 'OFF',
+    'pump1_mode': 'OFF',
+    'pump2_mode': 'OFF',
+    'pwm_d3': 255,            # Target PWM ceiling (0..255) for Pump 1 (Pin D3)
+    'pwm_d7': 255,            # Target PWM ceiling (0..255) for Pump 2 (Pin D7)
+    'pwm_d4': 255,            # Target PWM ceiling (0..255) for Stirrer (Pin D4)
+    'out_d3': 0,              # Instantaneous output PWM (0..255) on Pin D3
+    'out_d7': 0,              # Instantaneous output PWM (0..255) on Pin D7
+    'out_d4': 0,              # Instantaneous output PWM (0..255) on Pin D4
     'stir_mode': 'OFF',
     'stir_int_min': 10,
     'stir_pulse_sec': 30,
@@ -22,8 +32,11 @@ current_data = {
     'target_temp': 39.0,
     'hysteresis': 0.3,
     'water_low': False,
-    'water_adc': -1,          # 16-sample averaged water sensor ADC (0..1023)
-    'water_thr': 200,         # dry-run ADC threshold reported by master
+    'water_adc': -1,          # 16-sample averaged bath water sensor ADC on A7 (0..1023)
+    'water_thr': 200,         # dry-run ADC threshold on A7 (< 200 trips fault)
+    'pump_leak': False,       # pump leak fault flag on A8
+    'leak_adc': -1,           # 16-sample averaged pump leak sensor ADC on A8 (0..1023)
+    'leak_thr': 200,          # wet-leak ADC threshold on A8 (>= 200 trips fault)
     'system_mode': 'AUTO',    # 'AUTO' | 'OFF'
     'bottles': []             # up to 4 bottle dicts
 }
@@ -44,12 +57,6 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
 | `raw_line_seq` | Counter, incremented once per stored line |
 | `raw_lines_lock` | `threading.Lock` around both |
 
-Non-JSON lines are kept; the debug output of a board that is still booting is
-what the buffer is for. The buffer is in memory, so a restart clears it and
-resets `seq` to `0`. At the live rate of about 2.1 lines/s (one `master_status`
-per second plus one slave packet per 3.5 s) 500 lines cover roughly four
-minutes.
-
 ## Background workers
 
 ### `serial_worker` (daemon thread)
@@ -61,24 +68,18 @@ minutes.
      `current_data['bottles']` by id.
   2. Single bottle (`id` + `temp`) → merge by id.
   3. `type == 'master_status'` → update bath temp, bottle average,
-     heater/pump/stirrer states and modes, `water_low`, `water_adc`, `water_thr`,
+     heater / Pump 1 (`D3`) / Pump 2 (`D7`) / Stirrer (`D4`) states, modes,
+     target PWM ceilings (`pwm_d3`, `pwm_d7`, `pwm_d4`), live PWM outputs
+     (`out_d3`, `out_d7`, `out_d4`), bath water level (`water_low`, `water_adc`,
+     `water_thr`), pump leak sensor (`pump_leak`, `leak_adc`, `leak_thr`),
      and `system_mode`.
   4. Anything else → `current_data.update(payload)`.
-- `rx_slave` and `rx_master` are incremented per accepted message, then
-  `update_packet_metrics()` recomputes totals and loss.
-- On exception it closes the port, sets `serial_conn = None` and retries after
-  2 s.
 
 ### `polling_worker` (daemon thread)
 
 - On the first loop where `serial_conn` is open, writes the boot-default
-  commands `HEATER_OFF`, `PUMP_OFF` and `STIR:0:10:30` in that order, then sets
-  `boot_defaults_applied = True`. The heater, pump and stirrer are therefore
-  off after every Pi service start, even on master firmware that still boots
-  into `AUTO`. If any write fails, the flag stays `False` and all three
-  commands are retried on the next loop.
-- The commands are sent once per process, not once per reconnect, so a cable
-  glitch does not override a mode an operator selected.
+  commands `HEATER_OFF`, `PUMP1_OFF`, `PUMP2_OFF`, and `STIR:0:10:30` in that
+  order, then sets `boot_defaults_applied = True`.
 - Every 1.0 s, while connected, writes `b"STATUS\n"` under `serial_write_lock`
   and increments `outgoing`.
 - While `logging_active`, calls `log_data_to_csv()` once per loop.
@@ -89,30 +90,19 @@ minutes.
   usage into `cached_sys_stats`. It also reads
   `/sys/class/hwmon/hwmon1/in0_lcrit_alarm` for `power_ok`.
 
-## CSV logging
-
-- `LOG_DIR = 'logs'`, one file per day, `YYYY-MM-DD.csv`.
-- Header columns: `Timestamp, Bath_C, BAvg_C, Targ_C, Heater, Pump, Stir, Water,
-  Pkt_Tot, Pkt_TX, Pkt_RX, Pkt_Lost, Loss_%`, then per bottle `B{i}_Temp,
-  B{i}_pH, B{i}_CH4, B{i}_CH4mL, B{i}_CO2, B{i}_CO2mL, B{i}_Pa`.
-- `fmt_val()` writes `null` for `None`, `-1`, `-999` and anything below `-50`.
-- Rows are aligned with spaces and joined by `" , "`.
-- Slave values are written only while the slave is fresh; master values only
-  while the master is fresh. `SLAVE_STALE_SECONDS = 12.0` controls both.
-
 ## REST routes
 
 | Route | Method | Purpose |
 |---|---|---|
 | `/` | GET | Render `index.html` |
 | `/status` | GET | `current_data` + `logging`, `packets`, `sys` |
-| `/raw` | GET | Buffered received lines, see below |
-| `/control` | POST | Heater, pump, stirrer, and hysteresis target updates |
+| `/raw` | GET | Buffered received lines |
+| `/control` | POST | Heater, Pump 1 (`D3`), Pump 2 (`D7`), Stirrer (`D4`), per-pin `0–255` PWM (`mosfet_pwm`), and hysteresis target updates |
 | `/sys_stats` | GET | `cached_sys_stats` + `packets` |
 | `/reset_packets` | POST | Zero the packet counters |
 | `/toggle_logging` | POST | Flip `logging_active` |
 | `/set_mode` | POST | Send `MODE_AUTO` / `MODE_OFF`, update the cache |
-| `/command` | POST | `SHUTDOWN` → `sudo shutdown -h now` (no auth) |
+| `/command` | POST | `SHUTDOWN` → `sudo shutdown -h now` |
 | `/files` | GET | List `*.csv` in `logs/`, newest first |
 | `/read_log` | GET | First line plus the last `lines` (max 200) of a log |
 | `/get_drives` | GET | Mount the first `sd*` at `/media/usb`, return free space |
@@ -124,67 +114,15 @@ minutes.
 | `/set_timezone` | POST | `sudo timedatectl set-timezone` |
 | `/set_time` | POST | `sudo date -s` |
 
-Full request/response reference for every route:
-[13-rest-api-reference.md](13-rest-api-reference.md).
+### `POST /control` Actions
 
-### `GET /raw`
-
-Reads only the in-memory buffer. It never opens the serial port, so it is safe
-to poll while the dashboard runs.
-
-```bash
-# newest 100 lines (default limit)
-curl -s http://127.0.0.1:5000/raw
-
-# newest 20 lines
-curl -s 'http://127.0.0.1:5000/raw?limit=20'
-
-# only lines newer than sequence 1234
-curl -s 'http://127.0.0.1:5000/raw?after=1234'
-```
-
-Response:
-
-```json
-{
-  "seq": 1234,
-  "count": 1,
-  "buffered": 500,
-  "connected": true,
-  "lines": [
-    {"seq": 1234, "ts": 1792642177.702, "line": "{\"type\":\"master_status\", ...}"}
-  ]
-}
-```
-
-| Field | Meaning |
-|---|---|
-| `seq` | Sequence number of the newest stored line |
-| `count` | Lines in this response |
-| `buffered` | Lines currently in the ring buffer |
-| `connected` | Whether `serial_conn` is open |
-| `lines` | Oldest first, `ts` in epoch seconds |
-
-## pH values (PH-4502C / PH-402C)
-
-The slave firmware converts the PH-402C voltage to pH units itself, so `ph` in the telemetry JSON arrives in pH units; `-1` means invalid. The 3-point table (buffer solutions at pH `4.01`, `6.86`, `9.18`) lives in `legacy/slave/new-slave.cpp` as `PH_V_401` / `PH_V_686` / `PH_V_918`:
-
-- **Bottle 1**: `v_401 = 4.120 V`, `v_686 = 3.833 V`, `v_918 = 3.620 V`
-- **Bottles 2–4**: `v_401 = 4.160 V`, `v_686 = 3.833 V`, `v_918 = 3.630 V`
-- **Acidic range (`v > v_686`)**: `pH = 4.01 + ((6.86 - 4.01) / (v_686 - v_401)) * (v - v_401)`
-- **Alkaline range (`v <= v_686`)**: `pH = 6.86 + ((9.18 - 6.86) / (v_918 - v_686)) * (v - v_686)`
-
-`web_control.py` passes the field through unchanged into `current_data['bottles']` and logs it to `logs/YYYY-MM-DD.csv` in columns `B1_pH` through `B4_pH`.
-
-## Concurrency model
-
-- `serial_write_lock` guards writes to `serial_conn` from `polling_worker`,
-  `/control`, and `/set_mode`.
-- Reading has a single consumer, `serial_worker`.
-- `raw_lines_lock` guards `raw_lines` and `raw_line_seq`; the `/raw` handler
-  copies the deque under the lock and serialises after releasing it.
-- No database. All state is in-process; a restart loses telemetry, the raw
-  buffer and the packet counters. CSV files persist.
+- `{"action": "heater", "mode": "AUTO"|"ON"|"OFF"}` → sends `HEATER_<mode>`.
+- `{"action": "pump1", "mode": "AUTO"|"ON"|"OFF"}` → sends `PUMP1_<mode>` (controls Pump 1 MOSFET on `Pin D3`).
+- `{"action": "pump2", "mode": "AUTO"|"ON"|"OFF"}` → sends `PUMP2_<mode>` (controls Pump 2 MOSFET on `Pin D7`).
+- `{"action": "pump", "mode": "AUTO"|"ON"|"OFF"}` → sends `PUMP_<mode>` (controls both Pump 1 and Pump 2).
+- `{"action": "mosfet_pwm", "pin": "D3"|"D7"|"D4", "pwm": 0..255}` → sends `PWM:<pin>:<pwm>` to adjust the target PWM ceiling (`0`–`255`) for water debit testing on `Pin D3` (Pump 1), `Pin D7` (Pump 2), or `Pin D4` (Stirrer).
+- `{"action": "stirrer", "mode": "OFF"|"ON"|"PULSE"|"TIMED", "minutes": int, "seconds": int}` → sends `STIR:<m>:<mins>:<secs>`.
+- `{"action": "temp_target", "target": float, "hysteresis": float}` → sends `TEMP:<target>:<hyst>`.
 
 ---
 Content generated by `google/gemini-4-argon` in `antigravity`.

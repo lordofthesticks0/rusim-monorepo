@@ -58,7 +58,7 @@ last_master_rx_time = 0.0
 
 # Actuators start OFF. These are sent once on the first serial connection so
 # the master is off even when it was flashed with AUTO boot defaults.
-BOOT_DEFAULT_COMMANDS = ("HEATER_OFF", "PUMP_OFF", "STIR:0:10:30")
+BOOT_DEFAULT_COMMANDS = ("HEATER_OFF", "PUMP1_OFF", "PUMP2_OFF", "STIR:0:10:30")
 boot_defaults_applied = False
 
 packet_stats = {
@@ -76,9 +76,19 @@ current_data = {
     'bottle_avg_temp': -999.0,
     'heater': False,
     'pump': False,
+    'pump1': False,
+    'pump2': False,
     'stirrer': False,
     'heater_mode': 'OFF',
     'pump_mode': 'OFF',
+    'pump1_mode': 'OFF',
+    'pump2_mode': 'OFF',
+    'pwm_d3': 255,
+    'pwm_d7': 255,
+    'pwm_d4': 255,
+    'out_d3': 0,
+    'out_d7': 0,
+    'out_d4': 0,
     'stir_mode': 'OFF',
     'stir_int_min': 10,
     'stir_pulse_sec': 30,
@@ -89,6 +99,9 @@ current_data = {
     'water_low': False,
     'water_adc': -1,
     'water_thr': 200,
+    'pump_leak': False,
+    'leak_adc': -1,
+    'leak_thr': 200,
     'system_mode': 'AUTO',
     'bottles': []
 }
@@ -402,9 +415,25 @@ def serial_worker():
                         current_data['bottle_avg_temp'] = float(payload.get('bottle_temp_avg', current_data['bottle_avg_temp']))
                         current_data['heater'] = bool(payload.get('heater', 0))
                         current_data['pump'] = bool(payload.get('pump', 0))
+                        current_data['pump1'] = bool(payload.get('pump1', payload.get('pump', 0)))
+                        current_data['pump2'] = bool(payload.get('pump2', 0))
                         current_data['stirrer'] = bool(payload.get('stirrer', 0))
                         current_data['heater_mode'] = payload.get('heater_mode', current_data['heater_mode'])
                         current_data['pump_mode'] = payload.get('pump_mode', current_data['pump_mode'])
+                        current_data['pump1_mode'] = payload.get('pump1_mode', current_data['pump_mode'])
+                        current_data['pump2_mode'] = payload.get('pump2_mode', current_data['pump2_mode'])
+                        if 'pwm_d3' in payload:
+                            current_data['pwm_d3'] = int(payload.get('pwm_d3', 255))
+                        if 'pwm_d7' in payload:
+                            current_data['pwm_d7'] = int(payload.get('pwm_d7', 255))
+                        if 'pwm_d4' in payload:
+                            current_data['pwm_d4'] = int(payload.get('pwm_d4', 255))
+                        if 'out_d3' in payload:
+                            current_data['out_d3'] = int(payload.get('out_d3', 0))
+                        if 'out_d7' in payload:
+                            current_data['out_d7'] = int(payload.get('out_d7', 0))
+                        if 'out_d4' in payload:
+                            current_data['out_d4'] = int(payload.get('out_d4', 0))
                         current_data['stir_mode'] = payload.get('stir_mode', current_data['stir_mode'])
                         current_data['stir_int_min'] = int(payload.get('stir_int_min', current_data['stir_int_min']))
                         current_data['stir_pulse_sec'] = int(payload.get('stir_pulse_sec', current_data['stir_pulse_sec']))
@@ -417,6 +446,12 @@ def serial_worker():
                             current_data['water_adc'] = int(payload.get('water_adc', -1))
                         if 'water_thr' in payload:
                             current_data['water_thr'] = int(payload.get('water_thr', 200))
+                        if 'pump_leak' in payload:
+                            current_data['pump_leak'] = bool(payload.get('pump_leak', 0))
+                        if 'leak_adc' in payload:
+                            current_data['leak_adc'] = int(payload.get('leak_adc', -1))
+                        if 'leak_thr' in payload:
+                            current_data['leak_thr'] = int(payload.get('leak_thr', 200))
                         current_data['system_mode'] = payload.get('system_mode', current_data['system_mode'])
 
                     else:
@@ -449,9 +484,13 @@ def polling_worker():
                     boot_defaults_applied = True
                     current_data['heater_mode'] = 'OFF'
                     current_data['pump_mode'] = 'OFF'
+                    current_data['pump1_mode'] = 'OFF'
+                    current_data['pump2_mode'] = 'OFF'
                     current_data['stir_mode'] = 'OFF'
                     current_data['heater'] = False
                     current_data['pump'] = False
+                    current_data['pump1'] = False
+                    current_data['pump2'] = False
                     current_data['stirrer'] = False
                     print("Boot defaults applied: heater OFF, pump OFF, stirrer OFF")
             send_serial_cmd("STATUS")
@@ -670,27 +709,51 @@ def control_api():
     body = request.json or {}
     action = body.get('action')
 
+    safety_trip = bool(current_data.get('water_low') or current_data.get('pump_leak'))
+
     if action == 'heater':
         mode = body.get('mode', 'AUTO')
         if mode in ('AUTO', 'ON', 'OFF'):
             send_serial_cmd(f"HEATER_{mode}")
             current_data['heater_mode'] = mode
-            if mode == 'ON' and not current_data.get('water_low'):
+            if mode == 'ON' and not safety_trip:
                 current_data['heater'] = True
-            elif mode == 'OFF' or current_data.get('water_low'):
+            elif mode == 'OFF' or safety_trip:
                 current_data['heater'] = False
             return jsonify({'status': 'success'})
 
-    elif action == 'pump':
+    elif action in ('pump', 'pump1', 'pump2'):
         mode = body.get('mode', 'AUTO')
         if mode in ('AUTO', 'ON', 'OFF'):
-            send_serial_cmd(f"PUMP_{mode}")
-            current_data['pump_mode'] = mode
-            if mode == 'ON' and not current_data.get('water_low'):
-                current_data['pump'] = True
-            elif mode == 'OFF' or current_data.get('water_low'):
-                current_data['pump'] = False
+            if action == 'pump1':
+                send_serial_cmd(f"PUMP1_{mode}")
+                current_data['pump1_mode'] = mode
+                current_data['pump_mode'] = mode
+                current_data['pump1'] = (mode == 'ON') and not safety_trip and current_data.get('pwm_d3', 255) > 0
+            elif action == 'pump2':
+                send_serial_cmd(f"PUMP2_{mode}")
+                current_data['pump2_mode'] = mode
+                current_data['pump2'] = (mode == 'ON') and not safety_trip and current_data.get('pwm_d7', 255) > 0
+            else:
+                send_serial_cmd(f"PUMP_{mode}")
+                current_data['pump_mode'] = mode
+                current_data['pump1_mode'] = mode
+                current_data['pump2_mode'] = mode
+                current_data['pump1'] = (mode == 'ON') and not safety_trip and current_data.get('pwm_d3', 255) > 0
+                current_data['pump2'] = (mode == 'ON') and not safety_trip and current_data.get('pwm_d7', 255) > 0
+            current_data['pump'] = bool(current_data.get('pump1') or current_data.get('pump2'))
             return jsonify({'status': 'success'})
+
+    elif action == 'mosfet_pwm':
+        pin = str(body.get('pin', '')).strip().upper()
+        if pin in ('D3', 'D7', 'D4'):
+            try:
+                pwm_val = max(0, min(255, int(body.get('pwm', 255))))
+            except (TypeError, ValueError):
+                return jsonify({'status': 'error', 'message': 'Invalid PWM value'}), 400
+            send_serial_cmd(f"PWM:{pin}:{pwm_val}")
+            current_data[f"pwm_{pin.lower()}"] = pwm_val
+            return jsonify({'status': 'success', 'pin': pin, 'pwm': pwm_val})
 
     elif action == 'stirrer':
         mode_str = body.get('mode', 'OFF')

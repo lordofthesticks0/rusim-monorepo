@@ -480,6 +480,87 @@
             /* ==========================================
                NEW CONTROLS PAGE
                ========================================== */
+            #pageControls.active {
+                overflow-y: auto;
+                justify-content: flex-start;
+                padding-bottom: 6px;
+            }
+            .pwm-block {
+                background: var(--surface-secondary);
+                border-radius: 11px;
+                padding: 6px 10px;
+                display: flex;
+                flex-direction: column;
+                gap: 5px;
+            }
+            .pwm-top {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 6px;
+            }
+            .pwm-pin-label {
+                font-size: 11.5px;
+                font-weight: 700;
+                color: var(--text-primary);
+            }
+            .pwm-pin-tag {
+                background: #d6e8ff;
+                color: #004099;
+                border: 1px solid #8ec0ff;
+                border-radius: 6px;
+                padding: 1px 6px;
+                font-size: 10.5px;
+                font-weight: 700;
+                margin-right: 4px;
+            }
+            .pwm-meta {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+            .pwm-target-val {
+                font-size: 13px;
+                font-weight: 700;
+                color: var(--ios-blue);
+            }
+            .pwm-live-pill {
+                font-size: 10.5px;
+                font-weight: 700;
+                background: var(--card-bg);
+                border: 1px solid var(--divider);
+                color: var(--text-secondary);
+                padding: 2px 6px;
+                border-radius: 7px;
+            }
+            .pwm-controls-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .pwm-slider {
+                flex: 1;
+                accent-color: var(--ios-blue);
+                height: 22px;
+                margin: 0;
+                cursor: pointer;
+            }
+            .step-btn-sm {
+                background: var(--card-bg);
+                color: var(--text-primary);
+                border: 1px solid var(--divider);
+                border-radius: 8px;
+                min-width: 36px;
+                height: 30px;
+                font-size: 12px;
+                font-weight: 700;
+                cursor: pointer;
+                padding: 0 5px;
+                transition: transform 0.1s ease-out;
+            }
+            .step-btn-sm:active {
+                transform: scale(0.92);
+            }
             .controls-grid {
                 display: grid;
                 grid-template-columns: 1fr 1.15fr;
@@ -1098,17 +1179,22 @@
 
                     <div id="waterStatusCard" class="status-container clickable" onclick="toggleWaterDetails()">
                         <div class="indicator">
-                            <span class="water-label-wrap">WATER LEVEL <svg class="chevron-icon" viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" /></svg></span>
+                            <span class="water-label-wrap">WATER LEVEL (A7) <svg class="chevron-icon" viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" /></svg></span>
                             <span id="water">--</span>
                         </div>
                         <div class="water-adc-drawer">
-                            <div class="mini-bottle-pill"><span class="mini-bottle-name">RAW ADC</span><span class="mini-bottle-val" id="waterAdcVal">--</span></div>
-                            <div class="mini-bottle-pill"><span class="mini-bottle-name">VOLTAGE</span><span class="mini-bottle-val" id="waterVoltVal">-- V</span></div>
-                            <div class="mini-bottle-pill"><span class="mini-bottle-name">MIN THR</span><span class="mini-bottle-val" id="waterThrVal">≥ 200</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH A7 ADC</span><span class="mini-bottle-val" id="waterAdcVal">--</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH VOLT</span><span class="mini-bottle-val" id="waterVoltVal">-- V</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH THR</span><span class="mini-bottle-val" id="waterThrVal">≥ 200</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">LEAK A8 ADC</span><span class="mini-bottle-val" id="leakAdcVal">--</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">LEAK VOLT</span><span class="mini-bottle-val" id="leakVoltVal">-- V</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">LEAK THR</span><span class="mini-bottle-val" id="leakThrVal">&lt; 200</span></div>
                         </div>
+                        <div class="indicator"><span>PUMP LEAK (A8)</span> <span id="pumpLeak">--</span></div>
                         <div class="indicator"><span id="homeHeaterLabel">HEATER (39.0°C)</span> <span id="heater">--</span></div>
-                        <div class="indicator"><span id="homePumpLabel">PUMP (OFF)</span> <span id="pump">--</span></div>
-                        <div class="indicator"><span id="homeStirLabel">STIRRER (OFF)</span> <span id="stirrer">--</span></div>
+                        <div class="indicator"><span id="homePump1Label">PUMP 1 (D3 · OFF)</span> <span id="pump1">--</span></div>
+                        <div class="indicator"><span id="homePump2Label">PUMP 2 (D7 · OFF)</span> <span id="pump2">--</span></div>
+                        <div class="indicator"><span id="homeStirLabel">STIRRER (D4 · OFF)</span> <span id="stirrer">--</span></div>
                         <div class="indicator"><span>EXHAUST FAN</span> <span class="on">ALWAYS ON</span></div>
                     </div>
                 </div>
@@ -1117,15 +1203,15 @@
             <!-- PAGE 2: NEW CONTROLS TAB -->
             <div id="pageControls" class="page">
                 <div class="controls-grid">
-                    <!-- LEFT COLUMN: ACTUATOR OVERRIDES + HYSTERESIS TARGET -->
+                    <!-- LEFT COLUMN: ACTUATOR OVERRIDES + TEMPORARY MOSFET 0-255 SPEED CONTROL -->
                     <div class="controls-col">
-                        <!-- Heater & Pump Overrides -->
+                        <!-- Heater & Dual Pump Overrides -->
                         <div class="ctrl-card">
                             <div class="ctrl-card-header">
-                                <span class="ctrl-card-title">Heater & Pump Control</span>
+                                <span class="ctrl-card-title">Heater &amp; Dual Pump Mode</span>
                             </div>
                             <div class="seg-row">
-                                <span class="seg-label">HEATER</span>
+                                <span class="seg-label">HEATER (D5)</span>
                                 <div class="seg-group">
                                     <button id="btnHeatAuto" class="seg-btn" onclick="setActuator('heater', 'AUTO')">AUTO</button>
                                     <button id="btnHeatOn" class="seg-btn" onclick="setActuator('heater', 'ON')">FORCE ON</button>
@@ -1133,12 +1219,150 @@
                                 </div>
                             </div>
                             <div class="seg-row">
-                                <span class="seg-label">PUMP</span>
+                                <span class="seg-label">PUMP 1 (D3)</span>
                                 <div class="seg-group">
-                                    <button id="btnPumpAuto" class="seg-btn" onclick="setActuator('pump', 'AUTO')">AUTO</button>
-                                    <button id="btnPumpOn" class="seg-btn" onclick="setActuator('pump', 'ON')">FORCE ON</button>
-                                    <button id="btnPumpOff" class="seg-btn active-red" onclick="setActuator('pump', 'OFF')">OFF</button>
+                                    <button id="btnPump1Auto" class="seg-btn" onclick="setActuator('pump1', 'AUTO')">AUTO</button>
+                                    <button id="btnPump1On" class="seg-btn" onclick="setActuator('pump1', 'ON')">FORCE ON</button>
+                                    <button id="btnPump1Off" class="seg-btn active-red" onclick="setActuator('pump1', 'OFF')">OFF</button>
                                 </div>
+                            </div>
+                            <div class="seg-row">
+                                <span class="seg-label">PUMP 2 (D7)</span>
+                                <div class="seg-group">
+                                    <button id="btnPump2Auto" class="seg-btn" onclick="setActuator('pump2', 'AUTO')">AUTO</button>
+                                    <button id="btnPump2On" class="seg-btn" onclick="setActuator('pump2', 'ON')">FORCE ON</button>
+                                    <button id="btnPump2Off" class="seg-btn active-red" onclick="setActuator('pump2', 'OFF')">OFF</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Temporary Expanded MOSFET Speed Control (0-255 Water Debit Testing) -->
+                        <div class="ctrl-card">
+                            <div class="ctrl-card-header">
+                                <span class="ctrl-card-title">MOSFET Speed Control (0–255 Debit Test)</span>
+                            </div>
+
+                            <!-- Pump 1 MOSFET (Pin D3) -->
+                            <div class="pwm-block">
+                                <div class="pwm-top">
+                                    <span class="pwm-pin-label"><span class="pwm-pin-tag">Pin D3</span>Pump 1 MOSFET</span>
+                                    <div class="pwm-meta">
+                                        <span class="pwm-target-val" id="uiPwmD3">255 / 255 (100%)</span>
+                                        <span class="pwm-live-pill" id="livePwmD3">Out: 0</span>
+                                    </div>
+                                </div>
+                                <div class="pwm-controls-row">
+                                    <input type="range" min="0" max="255" value="255" class="pwm-slider" id="sliderPwmD3" onchange="setMosfetPwm('D3', this.value)" oninput="previewMosfetPwm('D3', this.value)" />
+                                    <div class="stepper-btns">
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D3', -25)">-25</button>
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D3', -5)">-5</button>
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D3', 5)">+5</button>
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D3', 25)">+25</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Pump 2 MOSFET (Pin D7) -->
+                            <div class="pwm-block">
+                                <div class="pwm-top">
+                                    <span class="pwm-pin-label"><span class="pwm-pin-tag">Pin D7</span>Pump 2 MOSFET</span>
+                                    <div class="pwm-meta">
+                                        <span class="pwm-target-val" id="uiPwmD7">255 / 255 (100%)</span>
+                                        <span class="pwm-live-pill" id="livePwmD7">Out: 0</span>
+                                    </div>
+                                </div>
+                                <div class="pwm-controls-row">
+                                    <input type="range" min="0" max="255" value="255" class="pwm-slider" id="sliderPwmD7" onchange="setMosfetPwm('D7', this.value)" oninput="previewMosfetPwm('D7', this.value)" />
+                                    <div class="stepper-btns">
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D7', -25)">-25</button>
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D7', -5)">-5</button>
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D7', 5)">+5</button>
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D7', 25)">+25</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Stirrer MOSFET (Pin D4) -->
+                            <div class="pwm-block">
+                                <div class="pwm-top">
+                                    <span class="pwm-pin-label"><span class="pwm-pin-tag">Pin D4</span>Stirrer MOSFET</span>
+                                    <div class="pwm-meta">
+                                        <span class="pwm-target-val" id="uiPwmD4">255 / 255 (100%)</span>
+                                        <span class="pwm-live-pill" id="livePwmD4">Out: 0</span>
+                                    </div>
+                                </div>
+                                <div class="pwm-controls-row">
+                                    <input type="range" min="0" max="255" value="255" class="pwm-slider" id="sliderPwmD4" onchange="setMosfetPwm('D4', this.value)" oninput="previewMosfetPwm('D4', this.value)" />
+                                    <div class="stepper-btns">
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D4', -25)">-25</button>
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D4', -5)">-5</button>
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D4', 5)">+5</button>
+                                        <button class="step-btn-sm" onclick="adjustMosfetPwm('D4', 25)">+25</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT COLUMN: STIRRER MOSFET CONTROLLER + HYSTERESIS TARGET -->
+                    <div class="controls-col">
+                        <div class="ctrl-card">
+                            <div>
+                                <div class="ctrl-card-header">
+                                    <span class="ctrl-card-title">Stirrer Schedule (MOSFET Pin D4)</span>
+                                    <span id="stirLiveBadge" class="perf-badge">IDLE</span>
+                                </div>
+
+                                <div class="section-title" style="margin-top: 6px;">1. Stirrer Operating Mode</div>
+                                <div class="seg-group-4">
+                                    <button id="btnStirOff" class="seg-btn active-red" onclick="selectStirMode('OFF')">OFF</button>
+                                    <button id="btnStirOn" class="seg-btn" onclick="selectStirMode('ON')">CONSTANT</button>
+                                    <button id="btnStirPulse" class="seg-btn" onclick="selectStirMode('PULSE')">PULSE</button>
+                                    <button id="btnStirTimed" class="seg-btn" onclick="selectStirMode('TIMED')">TIMED RUN</button>
+                                </div>
+
+                                <!-- Quick Presets -->
+                                <div class="section-title" style="margin-top: 8px;">2. Quick Schedule Presets</div>
+                                <div class="preset-Strip">
+                                    <button class="preset-pill" onclick="applyStirPreset('PULSE', 10, 30)">Pulse / 10m</button>
+                                    <button class="preset-pill" onclick="applyStirPreset('PULSE', 30, 30)">Pulse / 30m</button>
+                                    <button class="preset-pill" onclick="applyStirPreset('PULSE', 60, 45)">Pulse / 1 Hr</button>
+                                    <button class="preset-pill" onclick="applyStirPreset('TIMED', 15, 30)">Run 15m</button>
+                                    <button class="preset-pill" onclick="applyStirPreset('TIMED', 60, 30)">Run 1 Hr</button>
+                                </div>
+
+                                <!-- Interval / Run Duration Stepper -->
+                                <div class="stepper-row" style="margin-top: 6px;">
+                                    <div class="stepper-info">
+                                        <span class="stepper-title" id="stirMinTitle">Pulse Interval (Every X Min)</span>
+                                        <span class="stepper-val" id="uiStirMin">10 min</span>
+                                    </div>
+                                    <div class="stepper-btns">
+                                        <button class="step-btn" onclick="adjustStirMin(-10)">-10</button>
+                                        <button class="step-btn" onclick="adjustStirMin(-1)">-1</button>
+                                        <button class="step-btn" onclick="adjustStirMin(1)">+1</button>
+                                        <button class="step-btn" onclick="adjustStirMin(10)">+10</button>
+                                    </div>
+                                </div>
+
+                                <!-- Pulse ON Duration Stepper -->
+                                <div class="stepper-row" style="margin-top: 6px;" id="stirPulseDurRow">
+                                    <div class="stepper-info">
+                                        <span class="stepper-title">Pulse Active Time (Seconds ON)</span>
+                                        <span class="stepper-val" id="uiStirSec">30 sec</span>
+                                    </div>
+                                    <div class="stepper-btns">
+                                        <button class="step-btn" onclick="adjustStirSec(-15)">-15s</button>
+                                        <button class="step-btn" onclick="adjustStirSec(-5)">-5s</button>
+                                        <button class="step-btn" onclick="adjustStirSec(5)">+5s</button>
+                                        <button class="step-btn" onclick="adjustStirSec(15)">+15s</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <div id="ctrlFeedbackMsg" class="msg-box"></div>
+                                <button class="btn-blue" onclick="sendStirrerConfig()">APPLY STIRRER SETTINGS</button>
                             </div>
                         </div>
 
@@ -1173,69 +1397,6 @@
                             </div>
 
                             <button class="btn-green" onclick="applyTempTarget()">APPLY TEMPERATURE TARGET</button>
-                        </div>
-                    </div>
-
-                    <!-- RIGHT COLUMN: STIRRER MOSFET CONTROLLER -->
-                    <div class="controls-col">
-                        <div class="ctrl-card" style="flex: 1; justify-content: space-between;">
-                            <div>
-                                <div class="ctrl-card-header">
-                                    <span class="ctrl-card-title">Stirrer Controller (MOSFET D4)</span>
-                                    <span id="stirLiveBadge" class="perf-badge">IDLE</span>
-                                </div>
-
-                                <div class="section-title" style="margin-top: 8px;">1. Stirrer Operating Mode</div>
-                                <div class="seg-group-4">
-                                    <button id="btnStirOff" class="seg-btn active-red" onclick="selectStirMode('OFF')">OFF</button>
-                                    <button id="btnStirOn" class="seg-btn" onclick="selectStirMode('ON')">CONSTANT</button>
-                                    <button id="btnStirPulse" class="seg-btn" onclick="selectStirMode('PULSE')">PULSE</button>
-                                    <button id="btnStirTimed" class="seg-btn" onclick="selectStirMode('TIMED')">TIMED RUN</button>
-                                </div>
-
-                                <!-- Quick Presets -->
-                                <div class="section-title" style="margin-top: 10px;">2. Quick Schedule Presets</div>
-                                <div class="preset-Strip">
-                                    <button class="preset-pill" onclick="applyStirPreset('PULSE', 10, 30)">Pulse / 10m</button>
-                                    <button class="preset-pill" onclick="applyStirPreset('PULSE', 30, 30)">Pulse / 30m</button>
-                                    <button class="preset-pill" onclick="applyStirPreset('PULSE', 60, 45)">Pulse / 1 Hr</button>
-                                    <button class="preset-pill" onclick="applyStirPreset('TIMED', 15, 30)">Run 15m</button>
-                                    <button class="preset-pill" onclick="applyStirPreset('TIMED', 60, 30)">Run 1 Hr</button>
-                                </div>
-
-                                <!-- Interval / Run Duration Stepper -->
-                                <div class="stepper-row" style="margin-top: 8px;">
-                                    <div class="stepper-info">
-                                        <span class="stepper-title" id="stirMinTitle">Pulse Interval (Every X Min)</span>
-                                        <span class="stepper-val" id="uiStirMin">10 min</span>
-                                    </div>
-                                    <div class="stepper-btns">
-                                        <button class="step-btn" onclick="adjustStirMin(-10)">-10</button>
-                                        <button class="step-btn" onclick="adjustStirMin(-1)">-1</button>
-                                        <button class="step-btn" onclick="adjustStirMin(1)">+1</button>
-                                        <button class="step-btn" onclick="adjustStirMin(10)">+10</button>
-                                    </div>
-                                </div>
-
-                                <!-- Pulse ON Duration Stepper -->
-                                <div class="stepper-row" style="margin-top: 6px;" id="stirPulseDurRow">
-                                    <div class="stepper-info">
-                                        <span class="stepper-title">Pulse Active Time (Seconds ON)</span>
-                                        <span class="stepper-val" id="uiStirSec">30 sec</span>
-                                    </div>
-                                    <div class="stepper-btns">
-                                        <button class="step-btn" onclick="adjustStirSec(-15)">-15s</button>
-                                        <button class="step-btn" onclick="adjustStirSec(-5)">-5s</button>
-                                        <button class="step-btn" onclick="adjustStirSec(5)">+5s</button>
-                                        <button class="step-btn" onclick="adjustStirSec(15)">+15s</button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <div id="ctrlFeedbackMsg" class="msg-box"></div>
-                                <button class="btn-blue" onclick="sendStirrerConfig()">APPLY STIRRER SETTINGS</button>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -1349,13 +1510,16 @@
             let lastLogText = "";
             let settingsLoaded = false;
 
-            // Local Control State for Steppers
+            // Local Control State for Steppers & MOSFET PWM (0-255)
             let ctrlState = {
                 targetTemp: 39.0,
                 hysteresis: 0.3,
                 stirMode: "OFF",
                 stirMin: 10,
                 stirSec: 30,
+                pwmD3: 255,
+                pwmD7: 255,
+                pwmD4: 255,
                 syncedOnce: false
             };
 
@@ -1363,8 +1527,11 @@
 
             const DOM = {};
             [
-                "clockTime", "clockDate", "mainViewport", "temp", "water", "waterStatusCard", "waterAdcVal", "waterVoltVal", "waterThrVal", "heater", "pump", "stirrer",
-                "homeHeaterLabel", "homePumpLabel", "homeStirLabel",
+                "clockTime", "clockDate", "mainViewport", "temp", "water", "waterStatusCard",
+                "waterAdcVal", "waterVoltVal", "waterThrVal",
+                "leakAdcVal", "leakVoltVal", "leakThrVal", "pumpLeak",
+                "heater", "pump1", "pump2", "stirrer",
+                "homeHeaterLabel", "homePump1Label", "homePump2Label", "homeStirLabel",
                 "btnRec", "avgBottleCard", "avgBottleTemp", "bottleTapHint", "homeBTemp1", "homeBTemp2",
                 "homeBTemp3", "homeBTemp4", "bottleGrid", "piCpuVal", "piCpuBar", "piRamVal", "piRamBar",
                 "piTempVal", "piTempBar", "piDiskVal", "piDiskBar", "piPwrBadge", "pktTotalVal", "pktTxVal",
@@ -1373,7 +1540,12 @@
                 "logPreContent", "btnLiveTail", "btnExpandLog", "logsSplitLayout", "wifiName", "ipAddress",
                 "tzSelect", "timeInput", "timeMsg", "hotspotModal", "hsModalTitle", "hsModalStatus",
                 "hsUrlQrBox", "hsUrlText", "hwInfoBar",
-                "btnHeatAuto", "btnHeatOn", "btnHeatOff", "btnPumpAuto", "btnPumpOn", "btnPumpOff",
+                "btnHeatAuto", "btnHeatOn", "btnHeatOff",
+                "btnPump1Auto", "btnPump1On", "btnPump1Off",
+                "btnPump2Auto", "btnPump2On", "btnPump2Off",
+                "uiPwmD3", "uiPwmD7", "uiPwmD4",
+                "livePwmD3", "livePwmD7", "livePwmD4",
+                "sliderPwmD3", "sliderPwmD7", "sliderPwmD4",
                 "uiTargetTemp", "uiHystVal", "hystBandSummary", "stirLiveBadge",
                 "btnStirOff", "btnStirOn", "btnStirPulse", "btnStirTimed",
                 "stirMinTitle", "uiStirMin", "uiStirSec", "stirPulseDurRow", "ctrlFeedbackMsg"
@@ -1452,10 +1624,38 @@
             }
 
             function updateActuatorButtons(device, mode) {
-                const prefix = device === "heater" ? "btnHeat" : "btnPump";
+                const prefixMap = { heater: "btnHeat", pump1: "btnPump1", pump2: "btnPump2" };
+                const prefix = prefixMap[device];
+                if (!prefix) return;
                 setClass(DOM[prefix + "Auto"], "seg-btn" + (mode === "AUTO" ? " active" : ""));
                 setClass(DOM[prefix + "On"], "seg-btn" + (mode === "ON" ? " active-green" : ""));
                 setClass(DOM[prefix + "Off"], "seg-btn" + (mode === "OFF" ? " active-red" : ""));
+            }
+
+            function previewMosfetPwm(pin, val) {
+                const clamped = Math.min(255, Math.max(0, Math.round(Number(val) || 0)));
+                ctrlState["pwm" + pin] = clamped;
+                const pct = Math.round((clamped / 255) * 100);
+                setText(DOM["uiPwm" + pin], `${clamped} / 255 (${pct}%)`);
+                const slider = DOM["sliderPwm" + pin];
+                if (slider && Number(slider.value) !== clamped) slider.value = clamped;
+            }
+
+            function setMosfetPwm(pin, val) {
+                const clamped = Math.min(255, Math.max(0, Math.round(Number(val) || 0)));
+                previewMosfetPwm(pin, clamped);
+                fetch("/control", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "mosfet_pwm", pin: pin, pwm: clamped })
+                })
+                .then((r) => r.json())
+                .then(() => flashControlMsg(`Pin ${pin} target PWM set to ${clamped}/255`));
+            }
+
+            function adjustMosfetPwm(pin, delta) {
+                const cur = Number(ctrlState["pwm" + pin] ?? 255);
+                setMosfetPwm(pin, cur + delta);
             }
 
             function renderHystSummary() {
@@ -1826,25 +2026,58 @@
                 }
                 setText(DOM.waterThrVal, `≥ ${Math.round(wThr)}`);
 
+                const lAdc = Number(data.leak_adc);
+                const lThr = Number.isFinite(Number(data.leak_thr)) && Number(data.leak_thr) > 0 ? Number(data.leak_thr) : 200;
+                if (Number.isFinite(lAdc) && lAdc >= 0) {
+                    setText(DOM.leakAdcVal, `${Math.round(lAdc)} / 1023`);
+                    setText(DOM.leakVoltVal, `${((lAdc * 5.0) / 1023.0).toFixed(2)} V`);
+                } else {
+                    setText(DOM.leakAdcVal, "--");
+                    setText(DOM.leakVoltVal, "-- V");
+                }
+                setText(DOM.leakThrVal, `< ${Math.round(lThr)}`);
+
+                const leakFault = Boolean(data.pump_leak);
+                setText(DOM.pumpLeak, leakFault ? "LEAK FAULT" : "DRY (OK)");
+                setClass(DOM.pumpLeak, leakFault ? "warning" : "on");
+
+                const safetyStop = Boolean(data.water_low || leakFault);
+                const stopLabel = leakFault ? "STOPPED (LEAK)" : "STOPPED";
+
                 const targ = Number(data.target_temp || 39.0).toFixed(1);
                 const hMode = data.heater_mode || "OFF";
-                const pMode = data.pump_mode || "OFF";
+                const p1Mode = data.pump1_mode || data.pump_mode || "OFF";
+                const p2Mode = data.pump2_mode || "OFF";
                 const sMode = data.stir_mode || "OFF";
 
-                setText(DOM.homeHeaterLabel, `HEATER (${hMode === "AUTO" ? targ + "°C" : hMode})`);
-                setText(DOM.heater, data.water_low ? "STOPPED" : data.heater ? "HEATING" : "IDLE");
-                setClass(DOM.heater, data.heater ? "on" : "");
+                const outD3 = Number(data.out_d3 ?? 0);
+                const outD7 = Number(data.out_d7 ?? 0);
+                const outD4 = Number(data.out_d4 ?? 0);
 
-                setText(DOM.homePumpLabel, `PUMP (${pMode})`);
-                setText(DOM.pump, data.water_low ? "STOPPED" : data.pump ? "RUNNING" : "IDLE");
-                setClass(DOM.pump, data.pump ? "on" : "");
+                setText(DOM.homeHeaterLabel, `HEATER (D5 · ${hMode === "AUTO" ? targ + "°C" : hMode})`);
+                setText(DOM.heater, safetyStop ? stopLabel : data.heater ? "HEATING" : "IDLE");
+                setClass(DOM.heater, data.heater && !safetyStop ? "on" : (safetyStop ? "warning" : ""));
 
-                setText(DOM.homeStirLabel, `STIRRER (${sMode})`);
-                setText(DOM.stirrer, data.water_low ? "STOPPED" : data.stirrer ? "RUNNING" : "IDLE");
-                setClass(DOM.stirrer, data.stirrer ? "on" : "");
+                const p1Running = Boolean(data.pump1 ?? data.pump);
+                setText(DOM.homePump1Label, `PUMP 1 (D3 · ${p1Mode})`);
+                setText(DOM.pump1, safetyStop ? stopLabel : p1Running ? `RUNNING (${outD3})` : "IDLE");
+                setClass(DOM.pump1, p1Running && !safetyStop ? "on" : (safetyStop ? "warning" : ""));
+
+                const p2Running = Boolean(data.pump2);
+                setText(DOM.homePump2Label, `PUMP 2 (D7 · ${p2Mode})`);
+                setText(DOM.pump2, safetyStop ? stopLabel : p2Running ? `RUNNING (${outD7})` : "IDLE");
+                setClass(DOM.pump2, p2Running && !safetyStop ? "on" : (safetyStop ? "warning" : ""));
+
+                setText(DOM.homeStirLabel, `STIRRER (D4 · ${sMode})`);
+                setText(DOM.stirrer, safetyStop ? stopLabel : data.stirrer ? `RUNNING (${outD4})` : "IDLE");
+                setClass(DOM.stirrer, data.stirrer && !safetyStop ? "on" : (safetyStop ? "warning" : ""));
+
+                setText(DOM.livePwmD3, `Out: ${outD3}`);
+                setText(DOM.livePwmD7, `Out: ${outD7}`);
+                setText(DOM.livePwmD4, `Out: ${outD4}`);
 
                 // Update Controls Tab Live Status Badge
-                let stirStatusText = data.stirrer ? `ACTIVE (${sMode})` : `IDLE (${sMode})`;
+                let stirStatusText = data.stirrer ? `ACTIVE (${sMode} · ${outD4})` : `IDLE (${sMode})`;
                 if (sMode === "TIMED" && data.stir_rem_sec > 0) {
                     const rm = Math.floor(data.stir_rem_sec / 60);
                     const rs = data.stir_rem_sec % 60;
@@ -1858,7 +2091,11 @@
                     ctrlState.hysteresis = Number(data.hysteresis || 0.3);
                     renderHystSummary();
                     updateActuatorButtons("heater", hMode);
-                    updateActuatorButtons("pump", pMode);
+                    updateActuatorButtons("pump1", p1Mode);
+                    updateActuatorButtons("pump2", p2Mode);
+                    if (data.pwm_d3 !== undefined) previewMosfetPwm("D3", data.pwm_d3);
+                    if (data.pwm_d7 !== undefined) previewMosfetPwm("D7", data.pwm_d7);
+                    if (data.pwm_d4 !== undefined) previewMosfetPwm("D4", data.pwm_d4);
                     selectStirMode(sMode);
                     ctrlState.syncedOnce = true;
                 }

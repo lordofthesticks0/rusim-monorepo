@@ -7,11 +7,14 @@
 // PIN DEFINITIONS
 // ==========================================
 #define TEMP_SENSOR_PIN   2     // DS18B20 Water bath sensor
-#define PUMP_PIN          3     // Circulation pump MOSFET (Active-HIGH, R385 12VDC diaphragm pump)
-#define STIRRER_PIN       4     // Stirrer MOSFET (Formerly FAN_PIN, Active-HIGH, PWM OC0B)
+#define PUMP1_PIN         3     // Circulation Pump 1 MOSFET (Active-HIGH, PWM Timer 3 OC3C)
+#define PUMP_PIN          3     // Alias for Pump 1 pin
+#define STIRRER_PIN       4     // Stirrer MOSFET (Active-HIGH, PWM Timer 0 OC0B)
 #define HEATER_PIN        5     // 300W Heater SSR (Active-HIGH trigger, 0V = OFF)
 #define SYSTEM_SWITCH_PIN 6     // Physical AUTO / OFF toggle
-#define WATER_SENSOR_PIN  A7    // Analog water level probe
+#define PUMP2_PIN         7     // Circulation Pump 2 MOSFET (Active-HIGH, PWM Timer 4 OC4B)
+#define WATER_SENSOR_PIN  A7    // Analog water bath level probe (Dry fault when < 200)
+#define LEAK_SENSOR_PIN   A8    // Analog pump leak detection probe (Wet fault when >= 200)
 
 // ==========================================
 // CONTROL PARAMETERS & DYNAMIC TARGETS
@@ -19,24 +22,25 @@
 float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
 float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define MAX_WATER_BATH_TEMP  41.0   // Hard safety bath ceiling clamp (°C)
-#define WATER_THRESHOLD      200    // Minimum dry-run ADC threshold (~0.98V on 5V ADC)
+#define WATER_THRESHOLD      200    // Minimum bath water ADC threshold (~0.98V on 5V ADC)
+#define LEAK_THRESHOLD       200    // Pump leak wet-detection ADC threshold (~0.98V on 5V ADC)
 #define WATER_FAULT_LIMIT    5      // 5 consecutive 500ms checks (2.5s) to trip/clear
-#define WATER_CHECK_MS       500UL  // Time-gated water level sampling interval (ms)
+#define WATER_CHECK_MS       500UL  // Time-gated water & leak sampling interval (ms)
 #define WATER_ADC_SAMPLES    16     // Number of ADC samples averaged per check
 #define SLAVE_TIMEOUT_MS     12000  // Failsafe timeout if Slave stops responding
 #define TEMP_INTERVAL_MS     750    // Non-blocking DS18B20 cadence
 #define SLAVE_POLL_INTERVAL  3500   // Acquisition cadence matching Slave cycle time
 #define STIR_RAMP_MS         3000UL // 3-second soft-start / soft-stop PWM ramp
-#define STIR_MAX_PWM         255U   // Full speed PWM duty cycle (0-255)
+#define DEFAULT_MAX_PWM      255U   // Default full-scale PWM ceiling (0-255)
 
 enum SystemMode { MODE_OFF, MODE_AUTO };
 SystemMode currentMode = MODE_AUTO;
 
 // Per-Actuator Override Modes: 0 = AUTO, 1 = FORCE ON, 2 = FORCE OFF
-// Boot default: heater and pump start FORCE OFF. The Pi or web UI must
-// explicitly select AUTO / FORCE ON after power-up.
+// Boot default: heater and both pumps start FORCE OFF.
 uint8_t heaterOverride = 2;
-uint8_t pumpOverride   = 2;
+uint8_t pump1Override  = 2;
+uint8_t pump2Override  = 2;
 
 // Stirrer Modes: 0 = OFF, 1 = CONSTANT ON, 2 = PULSE INTERVAL, 3 = TIMED RUN
 uint8_t stirMode = 0;
@@ -45,15 +49,20 @@ unsigned long stirPulseSec    = 30;   // Default: 30-second pulse duration
 unsigned long stirTimedMin    = 15;   // Default: 15-minute timed continuous run
 unsigned long stirCycleStart  = 0;    // Timestamp tracker for Pulse / Timed modes
 
-// Stirrer non-blocking slew-rate ramp state
-bool stirTargetOn = false;
-uint8_t stirRampOriginPwm = 0;
-unsigned long stirRampOriginMs = 0;
+// Unified non-blocking PWM slew-rate state for all 3 MOSFET channels
+struct MosfetChannel {
+  uint8_t pin;
+  uint8_t maxPwm;         // Configurable 0-255 target ceiling for debit testing
+  uint8_t currentPwm;     // Instantaneous output PWM (0-255)
+  uint8_t targetPwm;      // Active slewing target PWM (0 or maxPwm)
+  uint8_t rampOriginPwm;  // PWM value when current ramp transition started
+  unsigned long rampOriginMs;
+  bool state;             // true when currentPwm > 0
+};
 
-// Pump non-blocking slew-rate ramp state
-bool pumpTargetOn = false;
-uint8_t pumpRampOriginPwm = 0;
-unsigned long pumpRampOriginMs = 0;
+MosfetChannel pump1Mosfet = { PUMP1_PIN,   DEFAULT_MAX_PWM, 0, 0, 0, 0, false };
+MosfetChannel pump2Mosfet = { PUMP2_PIN,   DEFAULT_MAX_PWM, 0, 0, 0, 0, false };
+MosfetChannel stirMosfet  = { STIRRER_PIN, DEFAULT_MAX_PWM, 0, 0, 0, 0, false };
 
 OneWire oneWire(TEMP_SENSOR_PIN);
 DallasTemperature bathSensor(&oneWire);
@@ -62,14 +71,15 @@ DallasTemperature bathSensor(&oneWire);
 float waterTemp = -999.0;
 float currentBottleTemp = -999.0;
 bool heaterState = false;
-bool pumpState = false;
-uint8_t pumpPwm = 0;
-bool stirrerState = false;
-uint8_t stirrerPwm = 0;
 bool bottleTelemetryValid = false;
+
 int waterRaw = 0;
 int waterFaultCounter = 0;
 bool waterDepleted = false;
+
+int leakRaw = 0;
+int leakFaultCounter = 0;
+bool pumpLeakDetected = false;
 
 unsigned long lastTempRequest = 0;
 unsigned long lastWaterCheck = 0;
@@ -78,16 +88,60 @@ unsigned long lastSlavePacketTime = 0;
 String slaveRxBuffer = "";
 
 // Forward declaration
-void sendTelemetryStatus(int waterRaw, unsigned long now);
+void sendTelemetryStatus(unsigned long now);
 
 // ==========================================
 // ACTUATOR DRIVERS
 // ==========================================
-void drivePumpPwm(uint8_t pwm) {
-  pinMode(PUMP_PIN, OUTPUT);
-  analogWrite(PUMP_PIN, pwm);
-  pumpPwm = pwm;
-  pumpState = (pwm > 0);
+void driveMosfetPwm(MosfetChannel &ch, uint8_t pwm) {
+  pinMode(ch.pin, OUTPUT);
+  analogWrite(ch.pin, pwm);
+  ch.currentPwm = pwm;
+  ch.state = (pwm > 0);
+}
+
+void resetMosfetOff(MosfetChannel &ch) {
+  ch.targetPwm = 0;
+  ch.rampOriginPwm = 0;
+  driveMosfetPwm(ch, 0);
+}
+
+void slewMosfet(MosfetChannel &ch, bool wantOn, unsigned long now) {
+  uint8_t desiredTarget = wantOn ? ch.maxPwm : 0;
+  if (desiredTarget != ch.targetPwm) {
+    ch.targetPwm = desiredTarget;
+    ch.rampOriginPwm = ch.currentPwm;
+    ch.rampOriginMs = now;
+  }
+
+  uint8_t refSpan = ch.maxPwm;
+  if (ch.rampOriginPwm > refSpan) {
+    refSpan = ch.rampOriginPwm;
+  }
+  if (refSpan == 0) {
+    driveMosfetPwm(ch, 0);
+    return;
+  }
+
+  unsigned long elapsed = now - ch.rampOriginMs;
+  unsigned long delta = (elapsed * (unsigned long)refSpan) / STIR_RAMP_MS;
+
+  uint8_t nextPwm = 0;
+  if (ch.targetPwm >= ch.rampOriginPwm) {
+    unsigned long stepped = (unsigned long)ch.rampOriginPwm + delta;
+    if (stepped > ch.targetPwm) stepped = ch.targetPwm;
+    if (stepped == 0 && ch.targetPwm > 0) stepped = 1;
+    nextPwm = (uint8_t)stepped;
+  } else {
+    uint8_t diff = ch.rampOriginPwm - ch.targetPwm;
+    if (delta >= diff) {
+      nextPwm = ch.targetPwm;
+    } else {
+      nextPwm = (uint8_t)(ch.rampOriginPwm - delta);
+    }
+  }
+
+  driveMosfetPwm(ch, nextPwm);
 }
 
 void driveHeater(bool state) {
@@ -96,86 +150,18 @@ void driveHeater(bool state) {
   heaterState = state;
 }
 
-void driveStirrerPwm(uint8_t pwm) {
-  pinMode(STIRRER_PIN, OUTPUT);
-  analogWrite(STIRRER_PIN, pwm);
-  stirrerPwm = pwm;
-  stirrerState = (pwm > 0);
-}
-
-void driveStirrer(bool state) {
-  driveStirrerPwm(state ? STIR_MAX_PWM : 0);
-}
-
-void slewStirrer(bool wantOn, unsigned long now) {
-  if (wantOn != stirTargetOn) {
-    stirTargetOn = wantOn;
-    stirRampOriginPwm = stirrerPwm;
-    stirRampOriginMs = now;
-  }
-
-  unsigned long elapsed = now - stirRampOriginMs;
-  unsigned long delta = (elapsed * STIR_MAX_PWM) / STIR_RAMP_MS;
-
-  uint8_t nextPwm = 0;
-  if (stirTargetOn) {
-    unsigned long target = (unsigned long)stirRampOriginPwm + delta;
-    if (target > STIR_MAX_PWM) target = STIR_MAX_PWM;
-    if (target == 0 && STIR_MAX_PWM > 0) target = 1;
-    nextPwm = (uint8_t)target;
-  } else {
-    if (delta >= stirRampOriginPwm) {
-      nextPwm = 0;
-    } else {
-      nextPwm = (uint8_t)(stirRampOriginPwm - delta);
-    }
-  }
-
-  driveStirrerPwm(nextPwm);
-}
-
-void slewPump(bool wantOn, unsigned long now) {
-  if (wantOn != pumpTargetOn) {
-    pumpTargetOn = wantOn;
-    pumpRampOriginPwm = pumpPwm;
-    pumpRampOriginMs = now;
-  }
-
-  unsigned long elapsed = now - pumpRampOriginMs;
-  unsigned long delta = (elapsed * STIR_MAX_PWM) / STIR_RAMP_MS;
-
-  uint8_t nextPwm = 0;
-  if (pumpTargetOn) {
-    unsigned long target = (unsigned long)pumpRampOriginPwm + delta;
-    if (target > STIR_MAX_PWM) target = STIR_MAX_PWM;
-    if (target == 0 && STIR_MAX_PWM > 0) target = 1;
-    nextPwm = (uint8_t)target;
-  } else {
-    if (delta >= pumpRampOriginPwm) {
-      nextPwm = 0;
-    } else {
-      nextPwm = (uint8_t)(pumpRampOriginPwm - delta);
-    }
-  }
-
-  drivePumpPwm(nextPwm);
-}
-
 void forceAllOff() {
   driveHeater(false);
-  pumpTargetOn = false;
-  pumpRampOriginPwm = 0;
-  drivePumpPwm(0);
-  stirTargetOn = false;
-  stirRampOriginPwm = 0;
-  driveStirrerPwm(0);
+  resetMosfetOff(pump1Mosfet);
+  resetMosfetOff(pump2Mosfet);
+  resetMosfetOff(stirMosfet);
 }
 
-int readWaterSensorAdc() {
-  analogRead(WATER_SENSOR_PIN); // Discard first mux switch reading to settle S/H capacitor
+int readAdcAveraged(uint8_t pin) {
+  analogRead(pin); // Discard first mux switch reading to settle S/H capacitor
   long sum = 0;
   for (int i = 0; i < WATER_ADC_SAMPLES; i++) {
-    sum += analogRead(WATER_SENSOR_PIN);
+    sum += analogRead(pin);
   }
   return (int)(sum / WATER_ADC_SAMPLES);
 }
@@ -195,19 +181,17 @@ void sendSlavePing(byte id) {
 // ==========================================
 void updateStirrer(unsigned long now) {
   if (currentMode == MODE_OFF) {
-    stirTargetOn = false;
-    stirRampOriginPwm = 0;
-    driveStirrerPwm(0);
+    resetMosfetOff(stirMosfet);
     return;
   }
 
   if (stirMode == 0) {
     // Manual OFF (3s soft-stop ramp down to 0)
-    slewStirrer(false, now);
+    slewMosfet(stirMosfet, false, now);
   } 
   else if (stirMode == 1) {
-    // CONSTANT ON (3s soft-start ramp up to 255)
-    slewStirrer(true, now);
+    // CONSTANT ON (3s soft-start ramp up to stirMosfet.maxPwm)
+    slewMosfet(stirMosfet, true, now);
   } 
   else if (stirMode == 2) {
     // PULSE INTERVAL (run for stirPulseSec every stirIntervalMin with 3s soft-start + 3s soft-stop)
@@ -220,7 +204,7 @@ void updateStirrer(unsigned long now) {
     unsigned long activeDriveMs = (onWindowMs > STIR_RAMP_MS)
                                     ? (onWindowMs - STIR_RAMP_MS)
                                     : (onWindowMs / 2);
-    slewStirrer(elapsed < activeDriveMs, now);
+    slewMosfet(stirMosfet, elapsed < activeDriveMs, now);
   } 
   else if (stirMode == 3) {
     // TIMED RUN (run continuously for stirTimedMin with 3s soft-start + 3s soft-stop, then switch to OFF)
@@ -230,10 +214,10 @@ void updateStirrer(unsigned long now) {
       unsigned long activeDriveMs = (durationMs > STIR_RAMP_MS)
                                       ? (durationMs - STIR_RAMP_MS)
                                       : (durationMs / 2);
-      slewStirrer(elapsed < activeDriveMs, now);
+      slewMosfet(stirMosfet, elapsed < activeDriveMs, now);
     } else {
       stirMode = 0;
-      slewStirrer(false, now);
+      slewMosfet(stirMosfet, false, now);
     }
   }
 }
@@ -246,9 +230,12 @@ void setup() {
   Serial1.begin(9600);   // Direct UART to Slave Mega Pro
 
   pinMode(WATER_SENSOR_PIN, INPUT);
+  pinMode(LEAK_SENSOR_PIN, INPUT);
   pinMode(SYSTEM_SWITCH_PIN, INPUT_PULLUP);
-  pinMode(PUMP_PIN, OUTPUT);
-  digitalWrite(PUMP_PIN, LOW);
+  pinMode(PUMP1_PIN, OUTPUT);
+  digitalWrite(PUMP1_PIN, LOW);
+  pinMode(PUMP2_PIN, OUTPUT);
+  digitalWrite(PUMP2_PIN, LOW);
   pinMode(STIRRER_PIN, OUTPUT);
   digitalWrite(STIRRER_PIN, LOW);
   pinMode(HEATER_PIN, OUTPUT);
@@ -263,9 +250,14 @@ void setup() {
   lastTempRequest = bootNow;
   stirCycleStart = bootNow;
 
-  waterRaw = readWaterSensorAdc();
+  waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
   waterDepleted = (waterRaw < WATER_THRESHOLD);
   waterFaultCounter = waterDepleted ? WATER_FAULT_LIMIT : 0;
+
+  leakRaw = readAdcAveraged(LEAK_SENSOR_PIN);
+  pumpLeakDetected = (leakRaw >= LEAK_THRESHOLD);
+  leakFaultCounter = pumpLeakDetected ? WATER_FAULT_LIMIT : 0;
+
   lastWaterCheck = bootNow;
 }
 
@@ -353,9 +345,10 @@ void loop() {
     currentMode = MODE_OFF;
   }
 
-  // 5. Time-Gated Debounced Water Level Verification (500ms cadence, 16x ADC avg)
+  // 5. Time-Gated Debounced Water Level (A7) & Pump Leak (A8) Verification (500ms cadence, 16x ADC avg)
   if (now - lastWaterCheck >= WATER_CHECK_MS) {
-    waterRaw = readWaterSensorAdc();
+    // 5a. Bath Water Level Probe (A7: dry fault when ADC < WATER_THRESHOLD)
+    waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
     if (!waterDepleted) {
       if (waterRaw < WATER_THRESHOLD) {
         waterFaultCounter++;
@@ -376,27 +369,59 @@ void loop() {
         waterFaultCounter = WATER_FAULT_LIMIT;
       }
     }
+
+    // 5b. Pump Leak Detection Sensor (A8: wet fault when ADC >= LEAK_THRESHOLD)
+    leakRaw = readAdcAveraged(LEAK_SENSOR_PIN);
+    if (!pumpLeakDetected) {
+      if (leakRaw >= LEAK_THRESHOLD) {
+        leakFaultCounter++;
+        if (leakFaultCounter >= WATER_FAULT_LIMIT) {
+          leakFaultCounter = WATER_FAULT_LIMIT;
+          pumpLeakDetected = true;
+        }
+      } else {
+        leakFaultCounter = 0;
+      }
+    } else {
+      if (leakRaw < LEAK_THRESHOLD) {
+        if (leakFaultCounter > 0) leakFaultCounter--;
+        if (leakFaultCounter == 0) {
+          pumpLeakDetected = false;
+        }
+      } else {
+        leakFaultCounter = WATER_FAULT_LIMIT;
+      }
+    }
+
     lastWaterCheck = now;
   }
 
   bool bathSensorOk = (waterTemp > 0.0 && waterTemp < 85.0);
   bool slaveActive = ((now - lastSlavePacketTime) < SLAVE_TIMEOUT_MS);
 
-  // 6. Master Mode, Overrides & Hysteresis Control
-  if (currentMode == MODE_OFF || waterDepleted) {
+  // 6. Master Mode, Safety Cutoffs (Bath Low or Pump Leak), Overrides & Hysteresis Control
+  if (currentMode == MODE_OFF || waterDepleted || pumpLeakDetected) {
     forceAllOff();
   } else {
-    // --- PUMP LOGIC ---
-    if (pumpOverride == 1) {
-      slewPump(true, now);
-    } else if (pumpOverride == 2) {
-      slewPump(false, now);
+    // --- PUMP 1 LOGIC (Pin D3) ---
+    if (pump1Override == 1) {
+      slewMosfet(pump1Mosfet, true, now);
+    } else if (pump1Override == 2) {
+      slewMosfet(pump1Mosfet, false, now);
     } else {
-      // AUTO Pump: runs when bath & slave sensors are healthy
-      slewPump(bathSensorOk && slaveActive, now);
+      slewMosfet(pump1Mosfet, bathSensorOk && slaveActive, now);
     }
 
-    // --- HEATER LOGIC ---
+    // --- PUMP 2 LOGIC (Pin D7) ---
+    if (pump2Override == 1) {
+      slewMosfet(pump2Mosfet, true, now);
+    } else if (pump2Override == 2) {
+      slewMosfet(pump2Mosfet, false, now);
+    } else {
+      slewMosfet(pump2Mosfet, bathSensorOk && slaveActive, now);
+    }
+
+    // --- HEATER LOGIC (Pin D5) ---
     bool overTempCeiling = (bathSensorOk && waterTemp >= MAX_WATER_BATH_TEMP);
     if (overTempCeiling || heaterOverride == 2) {
       driveHeater(false);
@@ -413,7 +438,7 @@ void loop() {
       }
     }
 
-    // --- STIRRER LOGIC ---
+    // --- STIRRER LOGIC (Pin D4) ---
     updateStirrer(now);
   }
 
@@ -423,7 +448,7 @@ void loop() {
     cmd.trim();
 
     if (cmd == "STATUS") {
-      sendTelemetryStatus(waterRaw, now);
+      sendTelemetryStatus(now);
     } 
     else if (cmd == "MODE_AUTO") {
       if (currentMode == MODE_OFF) {
@@ -438,9 +463,32 @@ void loop() {
     else if (cmd == "HEATER_AUTO") { heaterOverride = 0; }
     else if (cmd == "HEATER_ON")   { heaterOverride = 1; }
     else if (cmd == "HEATER_OFF")  { heaterOverride = 2; driveHeater(false); }
-    else if (cmd == "PUMP_AUTO")   { pumpOverride = 0; }
-    else if (cmd == "PUMP_ON")     { pumpOverride = 1; }
-    else if (cmd == "PUMP_OFF")    { pumpOverride = 2; }
+    else if (cmd == "PUMP_AUTO")   { pump1Override = 0; pump2Override = 0; }
+    else if (cmd == "PUMP_ON")     { pump1Override = 1; pump2Override = 1; }
+    else if (cmd == "PUMP_OFF")    { pump1Override = 2; pump2Override = 2; }
+    else if (cmd == "PUMP1_AUTO")  { pump1Override = 0; }
+    else if (cmd == "PUMP1_ON")    { pump1Override = 1; }
+    else if (cmd == "PUMP1_OFF")   { pump1Override = 2; }
+    else if (cmd == "PUMP2_AUTO")  { pump2Override = 0; }
+    else if (cmd == "PUMP2_ON")    { pump2Override = 1; }
+    else if (cmd == "PUMP2_OFF")   { pump2Override = 2; }
+    else if (cmd.startsWith("PWM:")) {
+      // Format: PWM:<D3|D7|D4|PUMP1|PUMP2|STIR>:<0-255>
+      int p1 = cmd.indexOf(':');
+      int p2 = cmd.indexOf(':', p1 + 1);
+      if (p1 > 0 && p2 > p1) {
+        String chName = cmd.substring(p1 + 1, p2);
+        chName.toUpperCase();
+        int val = constrain(cmd.substring(p2 + 1).toInt(), 0, 255);
+        if (chName == "D3" || chName == "3" || chName == "PUMP1") {
+          pump1Mosfet.maxPwm = (uint8_t)val;
+        } else if (chName == "D7" || chName == "7" || chName == "PUMP2") {
+          pump2Mosfet.maxPwm = (uint8_t)val;
+        } else if (chName == "D4" || chName == "4" || chName == "STIR" || chName == "STIRRER") {
+          stirMosfet.maxPwm = (uint8_t)val;
+        }
+      }
+    }
     else if (cmd.startsWith("STIR:")) {
       // Format: STIR:<mode_int>:<interval_or_timed_min>:<pulse_sec>
       int p1 = cmd.indexOf(':');
@@ -474,16 +522,27 @@ void loop() {
   }
 }
 
-void sendTelemetryStatus(int waterRaw, unsigned long now) {
-  StaticJsonDocument<448> doc;
+void sendTelemetryStatus(unsigned long now) {
+  StaticJsonDocument<640> doc;
   doc["type"] = "master_status";
   doc["water_temp"] = (waterTemp > -50.0) ? serialized(String(waterTemp, 2)) : serialized(String(-999.0));
   doc["bottle_temp_avg"] = bottleTelemetryValid ? serialized(String(currentBottleTemp, 2)) : serialized(String(-999.0));
   doc["heater"] = heaterState ? 1 : 0;
-  doc["pump"] = pumpState ? 1 : 0;
-  doc["stirrer"] = stirrerState ? 1 : 0;
+  doc["pump"] = (pump1Mosfet.state || pump2Mosfet.state) ? 1 : 0;
+  doc["pump1"] = pump1Mosfet.state ? 1 : 0;
+  doc["pump2"] = pump2Mosfet.state ? 1 : 0;
+  doc["stirrer"] = stirMosfet.state ? 1 : 0;
   doc["heater_mode"] = (heaterOverride == 1) ? "ON" : ((heaterOverride == 2) ? "OFF" : "AUTO");
-  doc["pump_mode"] = (pumpOverride == 1) ? "ON" : ((pumpOverride == 2) ? "OFF" : "AUTO");
+  doc["pump_mode"] = (pump1Override == 1) ? "ON" : ((pump1Override == 2) ? "OFF" : "AUTO");
+  doc["pump1_mode"] = (pump1Override == 1) ? "ON" : ((pump1Override == 2) ? "OFF" : "AUTO");
+  doc["pump2_mode"] = (pump2Override == 1) ? "ON" : ((pump2Override == 2) ? "OFF" : "AUTO");
+
+  doc["pwm_d3"] = pump1Mosfet.maxPwm;
+  doc["pwm_d7"] = pump2Mosfet.maxPwm;
+  doc["pwm_d4"] = stirMosfet.maxPwm;
+  doc["out_d3"] = pump1Mosfet.currentPwm;
+  doc["out_d7"] = pump2Mosfet.currentPwm;
+  doc["out_d4"] = stirMosfet.currentPwm;
 
   const char* sModes[] = {"OFF", "ON", "PULSE", "TIMED"};
   doc["stir_mode"] = sModes[stirMode];
@@ -505,6 +564,9 @@ void sendTelemetryStatus(int waterRaw, unsigned long now) {
   doc["water_low"] = waterDepleted ? 1 : 0;
   doc["water_adc"] = waterRaw;
   doc["water_thr"] = WATER_THRESHOLD;
+  doc["pump_leak"] = pumpLeakDetected ? 1 : 0;
+  doc["leak_adc"] = leakRaw;
+  doc["leak_thr"] = LEAK_THRESHOLD;
   doc["system_mode"] = (currentMode == MODE_AUTO) ? "AUTO" : "OFF";
 
   serializeJson(doc, Serial);
