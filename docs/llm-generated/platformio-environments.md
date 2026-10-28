@@ -49,29 +49,24 @@ flashing script relies on (see `flash-factory-tool.md`).
 
 | Environment | Board | Platform | `monitor_speed` | Source dir | Libraries |
 |---|---|---|---|---|---|
-| `blink-test` | `megaatmega2560` | atmelavr | 9600 | `blink-test/` | none |
-| `loadcell-test` | `megaatmega2560` | atmelavr | 115200 | `loadcell-test/` | `robtillaart/HX711@^0.6.5` |
 | `co2-calibrate` | `megaatmega2560` | atmelavr | 9600 | `co2-calibrate/` | none |
 | `methane-calibrate` | `megaatmega2560` | atmelavr | 115200 | `methane-calibrate/` | none |
 | `pressure-calibrate` | `uno` | atmelavr | 115200 | `pressure-calibrate/` | `robtillaart/HX711@^0.6.5` |
 | `temp-probe` | `megaatmega2560` | atmelavr | 115200 | `temp-probe/` | `paulstoffregen/OneWire@^2.3.8`, `milesburton/DallasTemperature@^4.0.6` |
-| `max485-test1` | `megaatmega2560` | atmelavr | 9600 | `max485-test/` | none |
-| `max485-test2` | `nanoatmega328` | atmelavr | 9600 | `max485-test/` | none |
 | `display-v9` | `esp32-s3-devkitc-1` | espressif32 | 115200 | `display-v9/` | LVGL 9.6.0, GFX 1.2.8, TAMC_GT911 1.0.2 |
 | `display-sim` | native | (none) | (n/a) | `display-v9/` minus `main.cpp`, `link_serial.cpp`, `provision_ap.cpp` | LVGL 9.6.0, SDL2 |
-| `wt32-eth01_ping-test` | `wt32-eth01` | espressif32 | 115200 | `wt32-eth01_ping-test/` | `dvarrel/ESPping@^1.0.5` |
 | `wt32-eth01_captive-recon` | `wt32-eth01` | espressif32 | 115200 | `wt32-eth01_captive-recon/` | (core only) |
 | `motor-driver` | `nanoatmega328new` | atmelavr | 115200 | `motor-driver/` | none |
+| `pwm-50-hold` | `megaatmega2560` | atmelavr | 115200 | `tests/pwm-50-hold/` | none |
 | `network-master` | `wt32-eth01` | espressif32 | 115200 | `network-master/` | `dvarrel/ESPping@^1.0.5` |
 | `legacy-slave` | `megaatmega2560` | atmelavr | 9600 | `../legacy/slave/` | `paulstoffregen/OneWire@^2.3.8`, `milesburton/DallasTemperature@^4.0.6`, `robtillaart/HX711@^0.6.5`, `bblanchon/ArduinoJson@^6.21.0` |
 | `legacy-master` | `megaatmega2560` | atmelavr | 115200 | `../legacy/master/` | `paulstoffregen/OneWire@^2.3.8`, `milesburton/DallasTemperature@^4.0.6`, `bblanchon/ArduinoJson@^6.21.0` |
 
 `build_src_filter = +<name>/` is what selects one directory. The `+` prefix adds
 that subtree to the (empty) default filter, so only the named directory compiles
-and its siblings are ignored. Two environments share one source directory on
-purpose: `max485-test1` and `max485-test2` build the same code for two boards, and
-the source guards on `ARDUINO_AVR_MEGA2560` so the Nano build still compiles
-(see `rs485-loopback-test.md`).
+and its siblings are ignored. `firmware/tests/` holds throwaway test sketches,
+one subdirectory per environment; `pwm-50-hold` is the first one and its filter
+is `+<tests/pwm-50-hold/>`.
 
 `legacy-slave` is the one exception to the `firmware/` layout: its source sits in
 `legacy/slave/`, outside `src_dir`, and the filter reaches it with `+<../legacy/slave/>`.
@@ -119,7 +114,7 @@ Run from the repo root.
 
 ```bash
 pio pkg install                       # fetch libraries for all environments
-pio run -e blink-test                 # build one environment
+pio run -e network-master             # build one environment
 pio run                               # build every environment
 pio run -e display-v9 -t upload       # build and flash
 pio run -e display-v9 -t upload --target uploadfs   # flash a LittleFS image
@@ -133,7 +128,7 @@ the wrong port, pass `--upload-port`.
 
 ## 6. History of this configuration
 
-Four problems were found in this file and fixed. They are recorded here because
+Two problems were found in this file and fixed. They are recorded here because
 each one produced a build failure rather than a warning.
 
 1. **`extra_scripts` pointed at a missing file.** `[env]` declared
@@ -149,34 +144,18 @@ each one produced a build failure rather than a warning.
    `-I firmware/display`, but `firmware/display/` was never committed. The build
    failed with "Nothing to build". The environment has been removed;
    `[env:display-v9]` supersedes it.
-3. **`firmware/loadcell-test/` had no environment.** An `[env:loadcell-test]` has
-   been added, targeting `megaatmega2560` at 115200 baud with
-   `robtillaart/HX711@^0.6.5`, matching the D12 / D13 pins and the 115200 baud
-   rate the source uses.
-4. **The `max485-test` environments declared a library the source must not use.**
-   Both declared `circuitstate/CSE_ArduinoRS485@^1.0.14`, while
-   `firmware/max485-test/main.cpp` includes only `<Arduino.h>` and drives the
-   direction pins by hand. That library asserts DE and RE oppositely, which
-   shorts the tied pins on this hardware (`../hardware.md` §5). Both declarations
-   have been removed.
+The configuration has 12 `[env:*]` sections after the standalone test
+environments were removed.
 
-All environments now build from a clean checkout with `pio run` (16 `[env:*]`
-sections at the 2026-10-27 re-verification; `motor-driver` is included in that
-count).
-
-`network-master` is the production WT32 env: same board and libraries as
-`wt32-eth01_ping-test`, but credentials, network status, DB state and
-experiment state travel over `rusim-line` v1 on UART0 (Debug-header
-`IO1`/`IO3`, 115200 8N1) instead of the serial console. See
-`network-master.md` and `link-serial-protocol.md`. The two prototype envs
-(`wt32-eth01_ping-test`, `wt32-eth01_captive-recon`) stay for bench testing.
+`network-master` is the production WT32 environment. Credentials, network
+status, DB state and experiment state travel over `rusim-line` v1 on UART0
+(Debug-header `IO1`/`IO3`, 115200 8N1). See `network-master.md` and
+`link-serial-protocol.md`. `wt32-eth01_captive-recon` remains available for
+portal reconnaissance.
 
 ## 7. Related documents
 
-- `rs485-loopback-test.md` — the shared `max485-test` source.
-- `sensor-calibration-firmware.md` — `blink-test`, `co2-calibrate`,
-  `methane-calibrate`, `pressure-calibrate`, `loadcell-test`.
-- `wt32-eth01-ping-test.md` — the `wt32-eth01_ping-test` environment.
+- `sensor-calibration-firmware.md` — sensor calibration programs.
 - `wt32-eth01-captive-recon.md` — the `wt32-eth01_captive-recon` environment.
 - `network-master.md` — the production `network-master` environment.
 - `legacy-slave.md` — the `legacy-slave` environment and its source.
@@ -187,7 +166,7 @@ experiment state travel over `rusim-line` v1 on UART0 (Debug-header
 - `../calibration.md` — human-recorded calibration results.
 
 ---
-Content generated by `codebuff/deepseek-v4.1-flash` in `freebuff`.
+Content generated by `openai/gpt-6-codex` in `harness`.
 
 Update by `opencode/glm-5.3-flash-free` in `opencode`: display-v9 environment table
 says LVGL 9.6.0; `-DIS_DEBUG=1` in `[env:display-v9]` is now commented out as this
@@ -195,4 +174,9 @@ document already recommended, so `IS_DEBUG` is off in production builds again.
 
 Update by `opencode/deepseek-v4.1-flash-free` in `opencode`: `network-master` now uses `rusim-line` v1 on UART0 `IO1`/`IO3` instead of Modbus RTU on `Serial1`.
 
-Update by `xiaomi/mimo-v2.6-flash-slow` in `freebuff` (2026-10-27): re-counted `[env:*]` sections (16) at the 2026-10-27 verification.
+Update by `openai/gpt-6-codex` in `harness`: re-counted 11 `[env:*]` sections
+after removing the standalone test environments.
+
+Update by `opencode/deepseek-v4.1-flash-free` in `opencode`: added `pwm-50-hold`
+(`megaatmega2560`, source `tests/pwm-50-hold/`), the first sketch in
+`firmware/tests/`. The environment count in §6 is now 12.

@@ -1,20 +1,15 @@
-# Sensor test and calibration firmware
+# Sensor calibration firmware
 
-Scope: the six small programs in `firmware/` whose only job is to prove a sensor
-is wired up and to produce the numbers that go into a calibration. Each is a
-standalone PlatformIO environment with no shared code between them.
+Scope: four small programs in `firmware/` that read sensors and produce values
+for calibration. Each is a standalone PlatformIO environment with no shared
+code between them.
 
 | Directory | Environment | Board | Purpose |
 |---|---|---|---|
-| `blink-test/` | `blink-test` | ATmega2560 Mega Mini | Prove the board flashes and runs |
-| `loadcell-test/` | `loadcell-test` | ATmega2560 Mega Mini | Read a load cell / HX711 raw counts |
 | `co2-calibrate/` | `co2-calibrate` | ATmega2560 Mega Mini | Read the MH-Z19C PWM output |
 | `pressure-calibrate/` | `pressure-calibrate` | ATmega328 Uno | Read the HX710B pressure sensor in Pa |
 | `methane-calibrate/` | `methane-calibrate` | ATmega2560 Mega Mini | Read four TGS2611 sensors in ppm |
 | `temp-probe/` | `temp-probe` | ATmega2560 Mega Mini | Read one DS18B20 on D22, with bus diagnostics |
-
-`firmware/loadcell-test/` had no PlatformIO environment until one was added; it
-builds now. See `platformio-environments.md`.
 
 None of these programs write to the database, accept commands, or talk to the
 display. They print to serial and nothing else. Recorded results belong in
@@ -22,69 +17,13 @@ display. They print to serial and nothing else. Recorded results belong in
 
 ## 1. Common structure
 
-All six follow the same shape:
+All four follow the same shape:
 
 1. `setup()` starts `Serial` at the environment's `monitor_speed`, optionally
    prints a banner, and initialises the sensor.
 2. `loop()` measures once, prints one line, and blocks briefly.
 
-Two of them share an initialisation pattern worth knowing before changing them:
-`pressure-calibrate` and `loadcell-test` both call
-
-```cpp
-scale.begin(HX711_DOUT, HX711_SCK, false, false);
-```
-
-with the library's default `reset` and `gain` arguments overridden to `false`.
-The comment in both files explains why: the library's default reset path performs
-a blocking read, so a missing or unpowered HX711 would hang before the program's
-own readiness timeout could run. Passing `false` skips that path, and the program
-polls `is_ready()` against its own timeout instead.
-
-Both programs also re-run initialisation from `loop()` when the first attempt
-failed, so an HX711 that is powered up after the microcontroller still comes
-online without a reset.
-
-## 2. `blink-test`
-
-`firmware/blink-test/main.cpp`, 12 lines. Toggles `LED_BUILTIN` once per second.
-There is no configuration. Its only diagnostic value is: if the LED blinks, the
-board, the USB-serial link, and the upload path all work, and any later failure
-belongs to the sensor code rather than to flashing.
-
-Serial is not opened at all, so `pio device monitor` shows nothing. This is
-expected.
-
-## 3. `loadcell-test`
-
-`firmware/loadcell-test/main.cpp`. Verifies that an HX711 is wired up and
-responding, before any calibration factor is applied.
-
-| Constant | Value | Note |
-|---|---|---|
-| `HX711_DOUT` | 13 | Data line from the HX711 |
-| `HX711_SCK` | 12 | Clock line |
-| `CALIBRATION_FACTOR` | `1.0f` | Keeps `get_units()` at raw, tare-corrected counts |
-| `SERIAL_BAUD` | 115200 | |
-| `HX711_READY_TIMEOUT_MS` | 5000 | Per readiness attempt |
-| `HX711_READY_POLL_MS` | 10 | Poll interval |
-
-Output is one line per reading:
-
-```
-Loadcell initialized.
-Raw reading: 4821337
-```
-
-With `CALIBRATION_FACTOR = 1.0`, the value is the HX711's 24-bit raw count minus
-the tare taken at initialisation, averaged over 10 reads. The raw range is
-roughly ±8,388,607. Treat any reading close to zero as a disconnected or
-short-circuited bridge, and a stuck reading near a rail as a wiring fault.
-
-Note that this program uses pins D12/D13 while `pressure-calibrate` uses D4/D7.
-They target different wiring, not the same HX711 breakout.
-
-## 4. `co2-calibrate`
+## 2. `co2-calibrate`
 
 `firmware/co2-calibrate/main.cpp`. Reads the MH-Z19C's PWM output pin and
 converts the pulse timing to ppm. `[env:co2-calibrate]` targets the Mega Mini
@@ -142,7 +81,7 @@ measure the chamber. See `../hardware.md` §5.3.
 The sensor also needs about a minute of preheat after power-up before its output
 is meaningful.
 
-## 5. `pressure-calibrate`
+## 3. `pressure-calibrate`
 
 `firmware/pressure-calibrate/main.cpp`. Reads an HX710B through the HX711 library
 and prints pascals. `[env:pressure-calibrate]` targets the Uno (`uno`), not the
@@ -184,9 +123,9 @@ Pressure: 981 Pa
 `HX711 not ready; retrying...` means the bridge is powered but is not producing
 conversions. Check the clock line, the supply, and the sensor's own excitation.
 
-## 6. `methane-calibrate`
+## 4. `methane-calibrate`
 
-`firmware/methane-calibrate/main.cpp`. The most involved of the six. It reads
+`firmware/methane-calibrate/main.cpp`. The most involved of the four. It reads
 four TGS2611 sensors on the Mega Mini's analog inputs and converts each sensor's
 resistance to ppm methane using a two-point power law.
 
@@ -274,7 +213,7 @@ calibration, but it is not a correction for the ADC's real range.
 Current layer-1 and layer-2 values in the source were fitted by hand; see
 `../calibration.md` §5 for the recorded procedure.
 
-## 7. `temp-probe`
+## 5. `temp-probe`
 
 `firmware/temp-probe/main.cpp`. Reads one DS18B20 on D22 and prints the
 temperature as plain text. It exists to test a single 1-Wire bus without the
@@ -326,13 +265,12 @@ during every read slot, so it cannot replace the external 4.7 kΩ resistor.
 
 - `platformio-environments.md` — build environments for these programs and their
   known gaps.
-- `rs485-loopback-test.md` — the other standalone test program.
 - `../calibration.md` — human-recorded calibration values and dates.
 - `../hardware.md` §5 — sensor pinouts and specifications.
 - `../index.md` — the repository index and the rest of the docs.
-- `../../firmware/max485-test/main.cpp` — the RS-485 loopback test.
 
 ---
 Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.
 
-Update by `xiaomi/mimo-v2.6-flash-slow` in `freebuff` (2026-10-27): re-read `platformio.ini` and the sources: co2-calibrate is a Mega Mini on D7, pressure-calibrate is an Uno on D4/D7 with SENSORID 0.
+---
+Content generated by `openai/gpt-6-codex` in `harness`.

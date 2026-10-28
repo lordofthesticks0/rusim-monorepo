@@ -12,6 +12,7 @@ document is the source of truth for anything measured on real hardware.
 | Path | Contents |
 |---|---|
 | [`firmware/`](../firmware/) | One directory per PlatformIO program. All microcontroller code. |
+| [`firmware/tests/`](../firmware/tests/) | One-off firmware test sketches, one subdirectory per PlatformIO environment. |
 | [`dashboard/`](../dashboard/) | React + TypeScript + Vite dashboard, its Supabase project, and the dev database script. |
 | [`scripts-hardware/`](../scripts-hardware/) | Bun hardware tools and the PlatformIO WT32 passthrough upload hook. |
 | [`platformio.ini`](../platformio.ini) | Every firmware build environment. |
@@ -27,17 +28,13 @@ document is the source of truth for anything measured on real hardware.
 | Directory | Board | Document |
 |---|---|---|
 | [`firmware/display-v9/`](../firmware/display-v9/) | ESP32-S3 DevKitC-1 | [display-docs.md](llm-generated/display-docs.md), [migration-notes.md](llm-generated/migration-notes.md), [link-serial-protocol.md](llm-generated/link-serial-protocol.md), [display-provisioning-ap.md](llm-generated/display-provisioning-ap.md), [display-sim.md](llm-generated/display-sim.md), [display-debug-flag.md](llm-generated/display-debug-flag.md), [lvgl-redesign.md](llm-generated/lvgl-redesign.md), [display-info-reboot.md](llm-generated/display-info-reboot.md) |
-| [`firmware/wt32-eth01_ping-test/`](../firmware/wt32-eth01_ping-test/) | WT32-ETH01 | [wt32-eth01-ping-test.md](llm-generated/wt32-eth01-ping-test.md), [wt32-eth01.md](llm-generated/wt32-eth01.md) |
 | [`firmware/wt32-eth01_captive-recon/`](../firmware/wt32-eth01_captive-recon/) | WT32-ETH01 | [wt32-eth01-captive-recon.md](llm-generated/wt32-eth01-captive-recon.md) |
 | [`firmware/network-master/`](../firmware/network-master/) | WT32-ETH01 | [network-master.md](llm-generated/network-master.md) (production), [link-serial-protocol.md](llm-generated/link-serial-protocol.md) |
 | [`firmware/motor-driver/`](../firmware/motor-driver/) | ATmega328 Nano | [platformio-environments.md](llm-generated/platformio-environments.md) §3 (L298N PWM ramp demo) |
-| [`firmware/methane-calibrate/`](../firmware/methane-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §6 |
-| [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate/) | ATmega328 Uno | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §5 |
-| [`firmware/temp-probe/`](../firmware/temp-probe/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §7 |
-| [`firmware/co2-calibrate/`](../firmware/co2-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §4 |
-| [`firmware/loadcell-test/`](../firmware/loadcell-test/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §3 |
-| [`firmware/blink-test/`](../firmware/blink-test/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §2 |
-| [`firmware/max485-test/`](../firmware/max485-test/) | ATmega2560 Mega Mini | [rs485-loopback-test.md](llm-generated/rs485-loopback-test.md) |
+| [`firmware/methane-calibrate/`](../firmware/methane-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §4 |
+| [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate/) | ATmega328 Uno | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §3 |
+| [`firmware/temp-probe/`](../firmware/temp-probe/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §5 |
+| [`firmware/co2-calibrate/`](../firmware/co2-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §2 |
 
 ### Firmware documents
 
@@ -48,9 +45,7 @@ document is the source of truth for anything measured on real hardware.
 | [display-docs.md](llm-generated/display-docs.md) | The `display-v9` UI: screen tree, file map, fake-data serial protocol, hold-to-confirm |
 | [lvgl-redesign.md](llm-generated/lvgl-redesign.md) | `display-v9` UI redesign working document: as-built layout and behaviour per state and tab, empty redesign tables |
 | [migration-notes.md](llm-generated/migration-notes.md) | LVGL v8 to v9 changes and the required code edits |
-| [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) | The six sensor test and calibration programs |
-| [rs485-loopback-test.md](llm-generated/rs485-loopback-test.md) | The dual-MAX485 loopback test and its direction control |
-| [wt32-eth01-ping-test.md](llm-generated/wt32-eth01-ping-test.md) | The Ethernet and ping demo |
+| [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) | The four sensor calibration programs |
 | [wt32-eth01-captive-recon.md](llm-generated/wt32-eth01-captive-recon.md) | Captive portal recon firmware |
 | [network-master.md](llm-generated/network-master.md) | Production WT32 firmware: portal login via display `rusim-line` link |
 | [link-serial-protocol.md](llm-generated/link-serial-protocol.md) | `rusim-line` v1 wire spec: wiring, line rules, command set, log forwarding, `PASSTH`, RS485 follow-on |

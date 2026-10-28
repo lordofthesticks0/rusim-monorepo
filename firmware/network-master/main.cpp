@@ -512,7 +512,7 @@ static void link_heartbeat_tick() {
   link_emit_truth();
 }
 
-// --- Ethernet + portal login (ported from wt32-eth01_ping-test) ---
+// --- Ethernet connectivity and portal login ---
 
 void onEthEvent(WiFiEvent_t event) {
   switch (event) {

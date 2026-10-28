@@ -16,7 +16,7 @@
 #
 # Usage:
 #   ./gen-compile-db.sh                    # every [env:*] in platformio.ini
-#   ./gen-compile-db.sh legacy-slave blink-test
+#   ./gen-compile-db.sh legacy-slave network-master
 #
 # It never compiles firmware: the compilation database target rebuilds its
 # entries regardless of whether the objects are up to date, so a fully cached
