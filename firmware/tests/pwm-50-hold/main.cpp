@@ -12,9 +12,9 @@ constexpr uint16_t START_DELAY_MS = 3000;
 // 50% of the 8-bit duty range. 255 * 50 / 100 = 127.5, rounded up to 128.
 constexpr uint8_t TARGET_DUTY = 128;
 
-// 64 steps of 2 reach 128. 64 * 47 ms = 3008 ms, about 3 s.
-constexpr uint8_t PWM_STEP = 2;
-constexpr uint16_t RAMP_STEP_MS = 47;
+// 128 steps of 1 reach 128. 128 * 25 ms = ms, about 3 s.
+constexpr uint8_t PWM_STEP = 1;
+constexpr uint16_t RAMP_STEP_MS = 25;
 
 void setup() {
   pinMode(PWM_PIN, OUTPUT);
