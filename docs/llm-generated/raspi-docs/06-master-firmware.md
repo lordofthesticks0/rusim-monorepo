@@ -11,11 +11,13 @@ a copy of this file.
 | Pin | Function |
 |---|---|
 | D2 | DS18B20 bath temperature (OneWire) |
-| D3 | Circulation pump MOSFET gate (active-HIGH PWM: `0`–`255`; drives R385 12 V DC diaphragm pump) |
-| D4 | Stirrer MOSFET gate (active-HIGH PWM, Timer 0 `OC0B`) |
+| D3 | Circulation Pump 1 MOSFET gate (active-HIGH PWM: `0`–`255`, Timer 3 `OC3C`) |
+| D4 | Stirrer MOSFET gate (active-HIGH PWM: `0`–`255`, Timer 0 `OC0B`) |
 | D5 | Heater SSR (active HIGH trigger; `HIGH` = ON) |
 | D6 | System switch (input pull-up; `LOW` = OFF) |
+| D7 | Circulation Pump 2 MOSFET gate (active-HIGH PWM: `0`–`255`, Timer 4 `OC4B`) |
 | A7 | 3-pin resistive water-level analog sensor (`WATER_THRESHOLD = 200`, 16-sample average, 500 ms check interval) |
+| A8 | Optional pump leak analog sensor (`LEAK_THRESHOLD = 200`, disabled by default via `ENABLE_LEAK_SENSOR = 0`) |
 | Serial (USB) | 115200 to Raspberry Pi |
 | Serial1 | 9600 to slave "Mega Pro" |
 

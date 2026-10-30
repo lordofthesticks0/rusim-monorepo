@@ -99,6 +99,7 @@ current_data = {
     'water_low': False,
     'water_adc': -1,
     'water_thr': 200,
+    'leak_enabled': False,
     'pump_leak': False,
     'leak_adc': -1,
     'leak_thr': 200,
@@ -446,10 +447,15 @@ def serial_worker():
                             current_data['water_adc'] = int(payload.get('water_adc', -1))
                         if 'water_thr' in payload:
                             current_data['water_thr'] = int(payload.get('water_thr', 200))
-                        if 'pump_leak' in payload:
+                        leak_enabled = bool(payload.get('leak_enabled', 0))
+                        current_data['leak_enabled'] = leak_enabled
+                        if leak_enabled:
                             current_data['pump_leak'] = bool(payload.get('pump_leak', 0))
-                        if 'leak_adc' in payload:
-                            current_data['leak_adc'] = int(payload.get('leak_adc', -1))
+                            if 'leak_adc' in payload:
+                                current_data['leak_adc'] = int(payload.get('leak_adc', -1))
+                        else:
+                            current_data['pump_leak'] = False
+                            current_data['leak_adc'] = -1
                         if 'leak_thr' in payload:
                             current_data['leak_thr'] = int(payload.get('leak_thr', 200))
                         current_data['system_mode'] = payload.get('system_mode', current_data['system_mode'])
@@ -709,7 +715,10 @@ def control_api():
     body = request.json or {}
     action = body.get('action')
 
-    safety_trip = bool(current_data.get('water_low') or current_data.get('pump_leak'))
+    safety_trip = bool(
+        current_data.get('water_low')
+        or (current_data.get('leak_enabled') and current_data.get('pump_leak'))
+    )
 
     if action == 'heater':
         mode = body.get('mode', 'AUTO')
@@ -769,7 +778,7 @@ def control_api():
         elif mode_str == 'TIMED':
             current_data['stir_timed_min'] = mins
             current_data['stir_rem_sec'] = mins * 60
-        current_data['stirrer'] = (mode_str != 'OFF') and not current_data.get('water_low')
+        current_data['stirrer'] = (mode_str != 'OFF') and not safety_trip
         return jsonify({'status': 'success'})
 
     elif action == 'temp_target':

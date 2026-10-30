@@ -23,6 +23,7 @@ float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
 float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define MAX_WATER_BATH_TEMP  41.0   // Hard safety bath ceiling clamp (°C)
 #define WATER_THRESHOLD      200    // Minimum bath water ADC threshold (~0.98V on 5V ADC)
+#define ENABLE_LEAK_SENSOR   0      // 0 = disabled (only A7 water presence sensor installed); 1 = enable A8 leak probe
 #define LEAK_THRESHOLD       200    // Pump leak wet-detection ADC threshold (~0.98V on 5V ADC)
 #define WATER_FAULT_LIMIT    5      // 5 consecutive 500ms checks (2.5s) to trip/clear
 #define WATER_CHECK_MS       500UL  // Time-gated water & leak sampling interval (ms)
@@ -77,7 +78,7 @@ int waterRaw = 0;
 int waterFaultCounter = 0;
 bool waterDepleted = false;
 
-int leakRaw = 0;
+int leakRaw = -1;
 int leakFaultCounter = 0;
 bool pumpLeakDetected = false;
 
@@ -230,7 +231,9 @@ void setup() {
   Serial1.begin(9600);   // Direct UART to Slave Mega Pro
 
   pinMode(WATER_SENSOR_PIN, INPUT);
+#if ENABLE_LEAK_SENSOR
   pinMode(LEAK_SENSOR_PIN, INPUT);
+#endif
   pinMode(SYSTEM_SWITCH_PIN, INPUT_PULLUP);
   pinMode(PUMP1_PIN, OUTPUT);
   digitalWrite(PUMP1_PIN, LOW);
@@ -254,9 +257,15 @@ void setup() {
   waterDepleted = (waterRaw < WATER_THRESHOLD);
   waterFaultCounter = waterDepleted ? WATER_FAULT_LIMIT : 0;
 
+#if ENABLE_LEAK_SENSOR
   leakRaw = readAdcAveraged(LEAK_SENSOR_PIN);
   pumpLeakDetected = (leakRaw >= LEAK_THRESHOLD);
   leakFaultCounter = pumpLeakDetected ? WATER_FAULT_LIMIT : 0;
+#else
+  leakRaw = -1;
+  pumpLeakDetected = false;
+  leakFaultCounter = 0;
+#endif
 
   lastWaterCheck = bootNow;
 }
@@ -370,7 +379,8 @@ void loop() {
       }
     }
 
-    // 5b. Pump Leak Detection Sensor (A8: wet fault when ADC >= LEAK_THRESHOLD)
+    // 5b. Pump Leak Detection Sensor (A8: wet fault when ADC >= LEAK_THRESHOLD, disabled when ENABLE_LEAK_SENSOR == 0)
+#if ENABLE_LEAK_SENSOR
     leakRaw = readAdcAveraged(LEAK_SENSOR_PIN);
     if (!pumpLeakDetected) {
       if (leakRaw >= LEAK_THRESHOLD) {
@@ -392,6 +402,11 @@ void loop() {
         leakFaultCounter = WATER_FAULT_LIMIT;
       }
     }
+#else
+    leakRaw = -1;
+    pumpLeakDetected = false;
+    leakFaultCounter = 0;
+#endif
 
     lastWaterCheck = now;
   }
@@ -564,6 +579,7 @@ void sendTelemetryStatus(unsigned long now) {
   doc["water_low"] = waterDepleted ? 1 : 0;
   doc["water_adc"] = waterRaw;
   doc["water_thr"] = WATER_THRESHOLD;
+  doc["leak_enabled"] = ENABLE_LEAK_SENSOR;
   doc["pump_leak"] = pumpLeakDetected ? 1 : 0;
   doc["leak_adc"] = leakRaw;
   doc["leak_thr"] = LEAK_THRESHOLD;

@@ -1186,11 +1186,11 @@
                             <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH A7 ADC</span><span class="mini-bottle-val" id="waterAdcVal">--</span></div>
                             <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH VOLT</span><span class="mini-bottle-val" id="waterVoltVal">-- V</span></div>
                             <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH THR</span><span class="mini-bottle-val" id="waterThrVal">≥ 200</span></div>
-                            <div class="mini-bottle-pill"><span class="mini-bottle-name">LEAK A8 ADC</span><span class="mini-bottle-val" id="leakAdcVal">--</span></div>
-                            <div class="mini-bottle-pill"><span class="mini-bottle-name">LEAK VOLT</span><span class="mini-bottle-val" id="leakVoltVal">-- V</span></div>
-                            <div class="mini-bottle-pill"><span class="mini-bottle-name">LEAK THR</span><span class="mini-bottle-val" id="leakThrVal">&lt; 200</span></div>
+                            <div class="mini-bottle-pill" id="leakAdcPill" style="display: none;"><span class="mini-bottle-name">LEAK A8 ADC</span><span class="mini-bottle-val" id="leakAdcVal">--</span></div>
+                            <div class="mini-bottle-pill" id="leakVoltPill" style="display: none;"><span class="mini-bottle-name">LEAK VOLT</span><span class="mini-bottle-val" id="leakVoltVal">-- V</span></div>
+                            <div class="mini-bottle-pill" id="leakThrPill" style="display: none;"><span class="mini-bottle-name">LEAK THR</span><span class="mini-bottle-val" id="leakThrVal">&lt; 200</span></div>
                         </div>
-                        <div class="indicator"><span>PUMP LEAK (A8)</span> <span id="pumpLeak">--</span></div>
+                        <div class="indicator" id="pumpLeakRow" style="display: none;"><span>PUMP LEAK (A8)</span> <span id="pumpLeak">--</span></div>
                         <div class="indicator"><span id="homeHeaterLabel">HEATER (39.0°C)</span> <span id="heater">--</span></div>
                         <div class="indicator"><span id="homePump1Label">PUMP 1 (D3 · OFF)</span> <span id="pump1">--</span></div>
                         <div class="indicator"><span id="homePump2Label">PUMP 2 (D7 · OFF)</span> <span id="pump2">--</span></div>
@@ -1529,6 +1529,7 @@
             [
                 "clockTime", "clockDate", "mainViewport", "temp", "water", "waterStatusCard",
                 "waterAdcVal", "waterVoltVal", "waterThrVal",
+                "leakAdcPill", "leakVoltPill", "leakThrPill", "pumpLeakRow",
                 "leakAdcVal", "leakVoltVal", "leakThrVal", "pumpLeak",
                 "heater", "pump1", "pump2", "stirrer",
                 "homeHeaterLabel", "homePump1Label", "homePump2Label", "homeStirLabel",
@@ -2026,18 +2027,27 @@
                 }
                 setText(DOM.waterThrVal, `≥ ${Math.round(wThr)}`);
 
-                const lAdc = Number(data.leak_adc);
-                const lThr = Number.isFinite(Number(data.leak_thr)) && Number(data.leak_thr) > 0 ? Number(data.leak_thr) : 200;
-                if (Number.isFinite(lAdc) && lAdc >= 0) {
-                    setText(DOM.leakAdcVal, `${Math.round(lAdc)} / 1023`);
-                    setText(DOM.leakVoltVal, `${((lAdc * 5.0) / 1023.0).toFixed(2)} V`);
-                } else {
-                    setText(DOM.leakAdcVal, "--");
-                    setText(DOM.leakVoltVal, "-- V");
-                }
-                setText(DOM.leakThrVal, `< ${Math.round(lThr)}`);
+                const leakEnabled = Boolean(data.leak_enabled);
+                const leakDisplay = leakEnabled ? "" : "none";
+                if (DOM.pumpLeakRow && DOM.pumpLeakRow.style.display !== leakDisplay) DOM.pumpLeakRow.style.display = leakDisplay;
+                if (DOM.leakAdcPill && DOM.leakAdcPill.style.display !== leakDisplay) DOM.leakAdcPill.style.display = leakDisplay;
+                if (DOM.leakVoltPill && DOM.leakVoltPill.style.display !== leakDisplay) DOM.leakVoltPill.style.display = leakDisplay;
+                if (DOM.leakThrPill && DOM.leakThrPill.style.display !== leakDisplay) DOM.leakThrPill.style.display = leakDisplay;
 
-                const leakFault = Boolean(data.pump_leak);
+                if (leakEnabled) {
+                    const lAdc = Number(data.leak_adc);
+                    const lThr = Number.isFinite(Number(data.leak_thr)) && Number(data.leak_thr) > 0 ? Number(data.leak_thr) : 200;
+                    if (Number.isFinite(lAdc) && lAdc >= 0) {
+                        setText(DOM.leakAdcVal, `${Math.round(lAdc)} / 1023`);
+                        setText(DOM.leakVoltVal, `${((lAdc * 5.0) / 1023.0).toFixed(2)} V`);
+                    } else {
+                        setText(DOM.leakAdcVal, "--");
+                        setText(DOM.leakVoltVal, "-- V");
+                    }
+                    setText(DOM.leakThrVal, `< ${Math.round(lThr)}`);
+                }
+
+                const leakFault = leakEnabled && Boolean(data.pump_leak);
                 setText(DOM.pumpLeak, leakFault ? "LEAK FAULT" : "DRY (OK)");
                 setClass(DOM.pumpLeak, leakFault ? "warning" : "on");
 

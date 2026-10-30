@@ -6,7 +6,7 @@
 
 - Non-blocking water-bath temperature acquisition via a DS18B20 sensor (`D2`).
 - Polling the 4-bottle sensor slave (`#1:PING*` over `Serial1` at 9600 baud) and parsing the returned JSON telemetry to compute average bottle temperature.
-- Time-gated, multi-sample analog water-level sensing on `A7` (dry-run protection when `ADC < 200`) and pump leak detection sensing on `A8` (flood/leak protection when `ADC >= 200`), both triggering immediate cutoff across all actuators.
+- Time-gated, multi-sample analog water-level sensing on `A7` (dry-run protection when `ADC < 200`, triggering immediate cutoff across all actuators). Optional pump leak detection sensing on `A8` (`ADC >= 200`) is guarded by `#define ENABLE_LEAK_SENSOR 0` (disabled by default while only the `A7` water presence probe is installed, preventing floating-pin charge carryover on `A8` from triggering false leak cutoffs).
 - Hysteresis control of the 300 W heater SSR (`D5`) and two circulation pump MOSFET channels (`D3` for Pump 1 and `D7` for Pump 2), with per-actuator manual overrides (`AUTO`, `FORCE ON`, `OFF`).
 - Unified non-blocking 3-second MOSFET PWM ramping (`slewMosfet`) across all 3 MOSFET channels (`Pin D3` Pump 1, `Pin D7` Pump 2, and `Pin D4` Stirrer), with individually adjustable target PWM ceilings (`0`–`255`) for water debit (flow rate) testing.
 - Bidirectional USB serial (`Serial` at 115200 baud) command and status telemetry with the Raspberry Pi Flask backend ([`web_control.py`](../../legacy/pi/water-control-system/web_control.py)).
@@ -22,7 +22,7 @@
 | `SYSTEM_SWITCH_PIN` | `D6` | `PH3` | `INPUT_PULLUP` | Physical `AUTO` / `OFF` safety switch (`LOW` forces `MODE_OFF`) |
 | `PUMP2_PIN` | `D7` | `PH4` (`OC4B`) | 16-bit PWM Output | Circulation Pump 2 MOSFET gate driver (Active-HIGH PWM, `0`–`255`, Timer 4 `OC4B`) |
 | `WATER_SENSOR_PIN` | `A7` | `PF7` (`ADC7`) | Analog Input | Water bath level sensor probe (`ADC < 200` indicates dry bath) |
-| `LEAK_SENSOR_PIN` | `A8` | `PK0` (`ADC8`) | Analog Input | Pump leak detection sensor probe (`ADC >= 200` indicates water leak) |
+| `LEAK_SENSOR_PIN` | `A8` | `PK0` (`ADC8`) | Analog Input (Disabled by default) | Optional pump leak detection probe (`ADC >= 200` indicates leak; guarded by `ENABLE_LEAK_SENSOR = 0`) |
 | `Serial` | `D0`/`D1` | `PE0`/`PE1` | UART0 (115200) | USB serial link to Raspberry Pi |
 | `Serial1` | `D19`/`D18` | `PD2`/`PD3` | UART1 (9600) | Direct UART link to Slave Mega (`#1`) |
 
@@ -43,18 +43,18 @@ The firmware boots with all actuators OFF and all MOSFET target PWM ceilings set
 
 `setup()` calls `forceAllOff()` and drives `D3`, `D7`, `D4`, and `D5` `LOW` before the first loop iteration. `web_control.py` also sends `HEATER_OFF`, `PUMP1_OFF`, `PUMP2_OFF`, and `STIR:0:10:30` on its first serial connection.
 
-## 4. Water-Level (`A7`) and Pump Leak (`A8`) Sensing
+## 4. Water-Level (`A7`) and Optional Pump Leak (`A8`) Sensing
 
-Both analog water sensors are sampled every `WATER_CHECK_MS = 500UL` using `readAdcAveraged(uint8_t pin)`, which discards one initial `analogRead(pin)` to settle the AVR ADC multiplexer sample-and-hold capacitor and averages `WATER_ADC_SAMPLES = 16` consecutive readings.
+Analog water sensing runs every `WATER_CHECK_MS = 500UL` using `readAdcAveraged(uint8_t pin)`, which discards one initial `analogRead(pin)` to settle the AVR ADC multiplexer sample-and-hold capacitor and averages `WATER_ADC_SAMPLES = 16` consecutive readings.
 
 1. **Water Bath Level Probe (`WATER_SENSOR_PIN = A7`)**:
    - Normally submerged (`ADC >= WATER_THRESHOLD`, `200`).
    - **Dry-run fault**: 5 consecutive `500 ms` checks below `200` (`2.5 s` total) set `waterDepleted = true`.
    - **Recovery**: 5 consecutive `500 ms` checks at or above `200` clear `waterDepleted = false`.
-2. **Pump Leak Detection Probe (`LEAK_SENSOR_PIN = A8`)**:
-   - Normally dry (`ADC < LEAK_THRESHOLD`, `200`).
-   - **Leak fault**: 5 consecutive `500 ms` checks at or above `200` (`2.5 s` total) set `pumpLeakDetected = true`.
-   - **Recovery**: 5 consecutive `500 ms` checks below `200` clear `pumpLeakDetected = false`.
+2. **Optional Pump Leak Detection Probe (`LEAK_SENSOR_PIN = A8`, `ENABLE_LEAK_SENSOR = 0`)**:
+   - Controlled at compile time by `#define ENABLE_LEAK_SENSOR 0`.
+   - When `ENABLE_LEAK_SENSOR == 0` (default when only the single `A7` water presence sensor is connected), `A8` is not sampled (`leakRaw = -1`, `pumpLeakDetected = false`, `leakFaultCounter = 0`). Sampling an unconnected `A8` pin immediately after `A7` would otherwise retain sample-and-hold charge from `A7` (`>= 200`) and report a false leak.
+   - When `ENABLE_LEAK_SENSOR == 1`, 5 consecutive `500 ms` checks at or above `LEAK_THRESHOLD` (`200`) set `pumpLeakDetected = true`, and 5 consecutive checks below `200` clear `pumpLeakDetected = false`.
 3. **Automatic Cutoff**:
    - Whenever `currentMode == MODE_OFF`, `waterDepleted == true`, or `pumpLeakDetected == true`, `forceAllOff()` is called every loop pass, immediately cutting the heater (`D5`), Pump 1 (`D3`), Pump 2 (`D7`), and Stirrer (`D4`) to `0`.
 
@@ -82,7 +82,7 @@ Commands are newline-terminated ASCII strings received on `Serial` (115200 baud)
   - `pwm_d3`, `pwm_d7`, `pwm_d4` (configured `0`–`255` target PWM ceilings for `D3`, `D7`, `D4`)
   - `out_d3`, `out_d7`, `out_d4` (instantaneous `0`–`255` PWM output values for `D3`, `D7`, `D4`)
   - `water_low`, `water_adc`, `water_thr` (Bath water level sensor on `A7`)
-  - `pump_leak`, `leak_adc`, `leak_thr` (Pump leak sensor on `A8`)
+  - `leak_enabled`, `pump_leak`, `leak_adc`, `leak_thr` (Optional pump leak sensor on `A8`; `leak_enabled = 0`, `pump_leak = 0`, `leak_adc = -1` when disabled)
 - `MODE_AUTO` / `MODE_OFF`: Switches master system mode.
 - `HEATER_AUTO` / `HEATER_ON` / `HEATER_OFF`: Sets heater override mode (`0`, `1`, `2`).
 - `PUMP1_AUTO` / `PUMP1_ON` / `PUMP1_OFF`: Sets Pump 1 (`Pin D3`) override mode (`0`, `1`, `2`).

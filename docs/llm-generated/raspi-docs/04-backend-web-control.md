@@ -34,8 +34,9 @@ current_data = {
     'water_low': False,
     'water_adc': -1,          # 16-sample averaged bath water sensor ADC on A7 (0..1023)
     'water_thr': 200,         # dry-run ADC threshold on A7 (< 200 trips fault)
-    'pump_leak': False,       # pump leak fault flag on A8
-    'leak_adc': -1,           # 16-sample averaged pump leak sensor ADC on A8 (0..1023)
+    'leak_enabled': False,    # True only when ENABLE_LEAK_SENSOR == 1 on the master
+    'pump_leak': False,       # pump leak fault flag on A8 (forced False when leak_enabled is False)
+    'leak_adc': -1,           # 16-sample averaged pump leak sensor ADC on A8 (-1 when disabled)
     'leak_thr': 200,          # wet-leak ADC threshold on A8 (>= 200 trips fault)
     'system_mode': 'AUTO',    # 'AUTO' | 'OFF'
     'bottles': []             # up to 4 bottle dicts
@@ -71,8 +72,9 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
      heater / Pump 1 (`D3`) / Pump 2 (`D7`) / Stirrer (`D4`) states, modes,
      target PWM ceilings (`pwm_d3`, `pwm_d7`, `pwm_d4`), live PWM outputs
      (`out_d3`, `out_d7`, `out_d4`), bath water level (`water_low`, `water_adc`,
-     `water_thr`), pump leak sensor (`pump_leak`, `leak_adc`, `leak_thr`),
-     and `system_mode`.
+     `water_thr`), optional pump leak sensor (`leak_enabled`, `pump_leak`,
+     `leak_adc`, `leak_thr`; `pump_leak` is forced `False` and `leak_adc` `-1`
+     when `leak_enabled` is false/absent), and `system_mode`.
   4. Anything else → `current_data.update(payload)`.
 
 ### `polling_worker` (daemon thread)

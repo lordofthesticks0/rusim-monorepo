@@ -6,21 +6,20 @@ Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-st
 
 | Tab | Content |
 |---|---|
-| **Home (Water)** | Bath water temp card; avg bottle temp card (expandable per-bottle breakdown); system status card (`WATER LEVEL (A7)` and `PUMP LEAK (A8)` with tap-to-expand ADC drawer, `HEATER (D5)`, `PUMP 1 (D3)`, `PUMP 2 (D7)`, `STIRRER (D4)`, and `EXHAUST FAN`). |
+| **Home (Water)** | Bath water temp card; avg bottle temp card (expandable per-bottle breakdown); system status card (`WATER LEVEL (A7)` with tap-to-expand ADC drawer, `HEATER (D5)`, `PUMP 1 (D3)`, `PUMP 2 (D7)`, `STIRRER (D4)`, and `EXHAUST FAN`; optional `PUMP LEAK (A8)` row and pills are hidden unless `leak_enabled` is true). |
 | **Controls** | Per-actuator mode overrides (`AUTO` / `FORCE ON` / `OFF`) for `HEATER (D5)`, `PUMP 1 (D3)`, and `PUMP 2 (D7)`; temporary `0–255` MOSFET PWM speed controls labeled by pin (`Pin D3`, `Pin D7`, `Pin D4`) for water debit testing; stirrer schedule controller (`Pin D4`); bottle hysteresis target controls. |
 | **Bottle** | 4-bottle grid: temp, pH, methane ppm + mL, CO2 ppm + mL, pressure. |
 | **Logs (Data)** | List of CSV log files; live log inspector; LAN QR download and USB drive export. |
 | **Settings** | Pi perf strip (CPU load, RAM, SoC temp, SD storage, 5 V rail); packet statistics strip; device info (SSID/IP); refresh + shutdown; timezone + manual date/time. |
 
-## Expandable Water Level (`A7`) and Pump Leak (`A8`) ADC Drawer
+## Expandable Water Level (`A7`) and Optional Pump Leak (`A8`) ADC Drawer
 
 On the Home (`water`) tab, the right-hand system status card (`#waterStatusCard`) is clickable (`onclick="toggleWaterDetails()"`):
 - `WATER LEVEL (A7)` displays `NORMAL` (green `.on`) or `CRITICAL LOW` (red `.warning`).
-- `PUMP LEAK (A8)` displays `DRY (OK)` (green `.on`) or `LEAK FAULT` (red `.warning`).
-- Tapping `#waterStatusCard` toggles `.expanded`, revealing `.water-adc-drawer` with six pills:
+- Tapping `#waterStatusCard` toggles `.expanded`, revealing `.water-adc-drawer` with the three bath sensor pills:
   - **BATH A7 ADC** (`#waterAdcVal`), **BATH VOLT** (`#waterVoltVal`), **BATH THR** (`#waterThrVal`: `≥ 200`).
-  - **LEAK A8 ADC** (`#leakAdcVal`), **LEAK VOLT** (`#leakVoltVal`), **LEAK THR** (`#leakThrVal`: `< 200`).
-- When either `data.water_low` or `data.pump_leak` is true, `HEATER`, `PUMP 1`, `PUMP 2`, and `STIRRER` badges on the Home card display `STOPPED` or `STOPPED (LEAK)`.
+- Optional `PUMP LEAK (A8)` row (`#pumpLeakRow`) and its three drawer pills (`#leakAdcPill`, `#leakVoltPill`, `#leakThrPill`) are hidden (`display: none`) while `data.leak_enabled` is false (`ENABLE_LEAK_SENSOR == 0` in `master.cpp`). If `data.leak_enabled` is true, they become visible and `PUMP LEAK (A8)` displays `DRY (OK)` or `LEAK FAULT`.
+- When `data.water_low` is true (or `data.leak_enabled && data.pump_leak` is true), `HEATER`, `PUMP 1`, `PUMP 2`, and `STIRRER` badges on the Home card display `STOPPED` (or `STOPPED (LEAK)`).
 
 ## Temporary MOSFET Speed Control (`0–255` Debit Testing)
 
