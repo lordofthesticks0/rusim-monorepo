@@ -7,13 +7,13 @@
 // PIN DEFINITIONS
 // ==========================================
 #define TEMP_SENSOR_PIN   2     // DS18B20 Water bath sensor
-#define PUMP1_PIN         3     // Circulation Pump 1 MOSFET (Active-HIGH, PWM Timer 3 OC3C)
+#define PUMP1_PIN         3     // Circulation Pump 1 MOSFET (Active-HIGH, PWM Timer 3 OC3C, Pumps IN to reservoir)
 #define PUMP_PIN          3     // Alias for Pump 1 pin
 #define STIRRER_PIN       4     // Stirrer MOSFET (Active-HIGH, PWM Timer 0 OC0B)
 #define HEATER_PIN        5     // 300W Heater SSR (Active-HIGH trigger, 0V = OFF)
 #define SYSTEM_SWITCH_PIN 6     // Physical AUTO / OFF toggle
-#define PUMP2_PIN         7     // Circulation Pump 2 MOSFET (Active-HIGH, PWM Timer 4 OC4B)
-#define WATER_SENSOR_PIN  A7    // Analog water bath level probe (Dry fault when < 200)
+#define PUMP2_PIN         7     // Circulation Pump 2 MOSFET (Active-HIGH, PWM Timer 4 OC4B, Pumps OUT of reservoir)
+#define WATER_SENSOR_PIN  A7    // Analog water bath level probe (dry above WATER_DRY_TRIP_ADC)
 #define LEAK_SENSOR_PIN   A8    // Analog pump leak detection probe (Wet fault when >= 200)
 
 // ==========================================
@@ -21,8 +21,9 @@
 // ==========================================
 float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
 float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
-#define MAX_WATER_BATH_TEMP  41.0   // Hard safety bath ceiling clamp (°C)
-#define WATER_THRESHOLD      200    // Minimum bath water ADC threshold (~0.98V on 5V ADC)
+#define MAX_WATER_BATH_TEMP  50.0   // Hard safety bath ceiling clamp (°C)
+#define WATER_DRY_TRIP_ADC   900    // Enter dry mode when bath water ADC rises above this threshold
+#define WATER_DRY_CLEAR_ADC  800    // Leave dry mode when bath water ADC falls below this threshold
 #define ENABLE_LEAK_SENSOR   0      // 0 = disabled (only A7 water presence sensor installed); 1 = enable A8 leak probe
 #define LEAK_THRESHOLD       200    // Pump leak wet-detection ADC threshold (~0.98V on 5V ADC)
 #define WATER_FAULT_LIMIT    5      // 5 consecutive 500ms checks (2.5s) to trip/clear
@@ -33,6 +34,8 @@ float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define SLAVE_POLL_INTERVAL  3500   // Acquisition cadence matching Slave cycle time
 #define STIR_RAMP_MS         3000UL // 3-second soft-start / soft-stop PWM ramp
 #define DEFAULT_MAX_PWM      255U   // Default full-scale PWM ceiling (0-255)
+#define AUTO_PUMP_PWM_LIMIT  200U   // Automatic pump PWM cap (manual overrides bypass this)
+#define DRY_OUT_PUMP_PWM     100U   // Out-of-reservoir pump PWM while dry mode is active
 
 enum SystemMode { MODE_OFF, MODE_AUTO };
 SystemMode currentMode = MODE_AUTO;
@@ -107,8 +110,12 @@ void resetMosfetOff(MosfetChannel &ch) {
   driveMosfetPwm(ch, 0);
 }
 
-void slewMosfet(MosfetChannel &ch, bool wantOn, unsigned long now) {
-  uint8_t desiredTarget = wantOn ? ch.maxPwm : 0;
+void slewMosfet(MosfetChannel &ch, bool wantOn, unsigned long now,
+                uint8_t pwmLimit = 255U, uint8_t onPwm = 255U) {
+  uint8_t desiredPwm = ch.maxPwm;
+  if (desiredPwm > pwmLimit) desiredPwm = pwmLimit;
+  if (desiredPwm > onPwm) desiredPwm = onPwm;
+  uint8_t desiredTarget = wantOn ? desiredPwm : 0;
   if (desiredTarget != ch.targetPwm) {
     ch.targetPwm = desiredTarget;
     ch.rampOriginPwm = ch.currentPwm;
@@ -254,7 +261,7 @@ void setup() {
   stirCycleStart = bootNow;
 
   waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
-  waterDepleted = (waterRaw < WATER_THRESHOLD);
+  waterDepleted = (waterRaw > WATER_DRY_TRIP_ADC);
   waterFaultCounter = waterDepleted ? WATER_FAULT_LIMIT : 0;
 
 #if ENABLE_LEAK_SENSOR
@@ -356,10 +363,10 @@ void loop() {
 
   // 5. Time-Gated Debounced Water Level (A7) & Pump Leak (A8) Verification (500ms cadence, 16x ADC avg)
   if (now - lastWaterCheck >= WATER_CHECK_MS) {
-    // 5a. Bath Water Level Probe (A7: dry fault when ADC < WATER_THRESHOLD)
+    // 5a. Bath Water Level Probe (A7: dry mode when ADC > WATER_DRY_TRIP_ADC, clear below WATER_DRY_CLEAR_ADC)
     waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
     if (!waterDepleted) {
-      if (waterRaw < WATER_THRESHOLD) {
+      if (waterRaw > WATER_DRY_TRIP_ADC) {
         waterFaultCounter++;
         if (waterFaultCounter >= WATER_FAULT_LIMIT) {
           waterFaultCounter = WATER_FAULT_LIMIT;
@@ -369,7 +376,7 @@ void loop() {
         waterFaultCounter = 0;
       }
     } else {
-      if (waterRaw >= WATER_THRESHOLD) {
+      if (waterRaw < WATER_DRY_CLEAR_ADC) {
         if (waterFaultCounter > 0) waterFaultCounter--;
         if (waterFaultCounter == 0) {
           waterDepleted = false;
@@ -415,7 +422,7 @@ void loop() {
   bool slaveActive = ((now - lastSlavePacketTime) < SLAVE_TIMEOUT_MS);
 
   // 6. Master Mode, Safety Cutoffs (Bath Low or Pump Leak), Overrides & Hysteresis Control
-  if (currentMode == MODE_OFF || waterDepleted || pumpLeakDetected) {
+  if (currentMode == MODE_OFF || pumpLeakDetected) {
     forceAllOff();
   } else {
     // --- PUMP 1 LOGIC (Pin D3) ---
@@ -424,7 +431,8 @@ void loop() {
     } else if (pump1Override == 2) {
       slewMosfet(pump1Mosfet, false, now);
     } else {
-      slewMosfet(pump1Mosfet, bathSensorOk && slaveActive, now);
+      // Reservoir inlet pump remains on through water-level faults.
+      slewMosfet(pump1Mosfet, true, now, AUTO_PUMP_PWM_LIMIT);
     }
 
     // --- PUMP 2 LOGIC (Pin D7) ---
@@ -433,12 +441,13 @@ void loop() {
     } else if (pump2Override == 2) {
       slewMosfet(pump2Mosfet, false, now);
     } else {
-      slewMosfet(pump2Mosfet, bathSensorOk && slaveActive, now);
+      slewMosfet(pump2Mosfet, bathSensorOk && slaveActive, now,
+                 AUTO_PUMP_PWM_LIMIT, waterDepleted ? DRY_OUT_PUMP_PWM : 255U);
     }
 
     // --- HEATER LOGIC (Pin D5) ---
     bool overTempCeiling = (bathSensorOk && waterTemp >= MAX_WATER_BATH_TEMP);
-    if (overTempCeiling || heaterOverride == 2) {
+    if (overTempCeiling || waterDepleted || heaterOverride == 2) {
       driveHeater(false);
     } else if (heaterOverride == 1) {
       driveHeater(true);
@@ -578,7 +587,8 @@ void sendTelemetryStatus(unsigned long now) {
   doc["hysteresis"] = serialized(String(bottleHysteresis, 1));
   doc["water_low"] = waterDepleted ? 1 : 0;
   doc["water_adc"] = waterRaw;
-  doc["water_thr"] = WATER_THRESHOLD;
+  doc["water_thr"] = WATER_DRY_TRIP_ADC;
+  doc["water_clear_thr"] = WATER_DRY_CLEAR_ADC;
   doc["leak_enabled"] = ENABLE_LEAK_SENSOR;
   doc["pump_leak"] = pumpLeakDetected ? 1 : 0;
   doc["leak_adc"] = leakRaw;
