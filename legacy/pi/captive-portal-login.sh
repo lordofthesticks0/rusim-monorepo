@@ -18,6 +18,15 @@
 #                        resolved form action, with Content-Type and Referer.
 #   4. fetchData()       GET the probe URL again. 204 means the port is open.
 #                        That verdict is final; the POST response is only logged.
+#   5. re-ask            When step 4 still reports a wall, the portal rejected
+#                        the credentials. Steps 2-4 run again with a fresh login
+#                        page (new magic token, new session cookie) and a new
+#                        username and password.
+#
+# Re-asking needs a terminal on stdin. Without one (cron, systemd, ssh without
+# -t, a pipeline) the script makes a single attempt and exits 1, so unattended
+# runs behave as before. --max-attempts caps the loop; the default is unlimited,
+# because someone is there to press Ctrl-C.
 #
 # Differences from the firmware, all deliberate:
 #   - The firmware caps body reads at 4096 bytes and scans the login page
@@ -31,15 +40,18 @@
 #   - Credentials are asked for on a hidden prompt unless --user/--pass are
 #     given. They live in shell variables for the length of the run and are
 #     unset on exit. Nothing is written to disk.
+#   - A rejected login re-prompts instead of exiting. The firmware has no
+#     console to prompt on and gives up after one POST.
 #
 # Exit codes: 0 authenticated, 1 still walled, 2 usage or missing dependency,
 # 3 the probe could not be fetched at all.
 #
 # Usage:
-#   scripts-hardware/captive-portal-login.sh --user alice
-#   scripts-hardware/captive-portal-login.sh --user alice --pass s3cret
-#   scripts-hardware/captive-portal-login.sh            # prompts for both
-#   scripts-hardware/captive-portal-login.sh --ping --verbose
+#   legacy/pi/captive-portal-login.sh --user alice
+#   legacy/pi/captive-portal-login.sh --user alice --pass s3cret
+#   legacy/pi/captive-portal-login.sh            # prompts for both
+#   legacy/pi/captive-portal-login.sh --ping --verbose
+#   legacy/pi/captive-portal-login.sh --max-attempts 2
 #
 set -euo pipefail
 
@@ -52,6 +64,7 @@ VERBOSE=0
 VERIFY_ATTEMPTS=3
 VERIFY_DELAY=2
 BODY_HEAD=800
+MAX_ATTEMPTS=0
 
 usage() {
   cat <<EOF
@@ -67,6 +80,10 @@ Options:
                     Passing it on the command line leaves it in shell history
                     and in \`ps\`; prefer the prompt.
   --probe-url <url> Connectivity probe (default: $PROBE_URL_DEFAULT).
+  --max-attempts <n>
+                    Stop after n rejected logins instead of asking again.
+                    Default 0, which keeps asking. Only matters when stdin
+                    is a terminal; otherwise the script makes one attempt.
   --ping            Ping 1.1.1.1 three times after success. Informational;
                     a failure does not change the exit code.
   --verbose         Print the POST response head and every curl status.
@@ -78,7 +95,7 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --user|--pass|--probe-url)
+    --user|--pass|--probe-url|--max-attempts)
       if [ $# -lt 2 ]; then
         printf '%s needs a value\n' "$1" >&2
         exit 2
@@ -87,6 +104,7 @@ while [ $# -gt 0 ]; do
         --user) USER_NAME="$2" ;;
         --pass) PASSWORD="$2" ;;
         --probe-url) PROBE_URL="$2" ;;
+        --max-attempts) MAX_ATTEMPTS="$2" ;;
       esac
       shift 2
       ;;
@@ -98,6 +116,10 @@ while [ $# -gt 0 ]; do
 done
 
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 2; }
+
+case "$MAX_ATTEMPTS" in
+  ''|*[!0-9]*) printf 'max-attempts must be a non-negative integer\n' >&2; exit 2 ;;
+esac
 
 log() { printf '[LOGIN] %s\n' "$*"; }
 
@@ -293,123 +315,231 @@ case "$probe_rc" in
     ;;
 esac
 
-if [ -z "$USER_NAME" ]; then
-  printf 'Portal username: '
-  if ! read -r USER_NAME; then
-    printf '\nno username on stdin; pass --user instead\n' >&2
-    exit 2
+# Re-asking needs somewhere to read the answer from. A terminal on stdin is
+# the only case where that is true.
+CAN_REASK=0
+if [ -t 0 ]; then CAN_REASK=1; fi
+
+# prompt_credentials <force>
+#
+# Fills USER_NAME and PASSWORD. Values from --user/--pass are kept on the first
+# attempt and asked for when missing. force=1 clears both first: a rejected
+# login has to be answered with different values, because the same ones would
+# just be rejected again.
+prompt_credentials() {
+  local force="${1:-0}"
+
+  if [ "$force" = 1 ]; then
+    USER_NAME=""
+    PASSWORD=""
   fi
-fi
-if [ -z "$PASSWORD" ]; then
-  if ! read -r -s -p "Portal password: " PASSWORD; then
-    printf '\nno password on stdin; pass --pass instead\n' >&2
-    exit 2
+
+  # An empty answer on the first attempt is fatal, as it always was. After a
+  # rejection it is a slip, so ask again instead.
+  if [ -z "${USER_NAME:-}" ]; then
+    while :; do
+      printf 'Portal username: '
+      if ! read -r USER_NAME; then
+        printf '\nno username on stdin; pass --user instead\n' >&2
+        exit 2
+      fi
+      if [ -n "$USER_NAME" ]; then
+        break
+      fi
+      if [ "$force" != 1 ]; then
+        echo "username and password are required" >&2
+        exit 2
+      fi
+      printf 'username cannot be empty\n' >&2
+    done
   fi
-  printf '\n'
-fi
-if [ -z "$USER_NAME" ] || [ -z "$PASSWORD" ]; then
-  echo "username and password are required" >&2
-  exit 2
-fi
 
-log "user='$USER_NAME' (password held in memory only)"
-
-# --- step 2: login page --------------------------------------------------
-log "GET login page $PORTAL_URL"
-: >"$TMP_HDR"
-: >"$TMP_BODY"
-page_code="$(curl -sS -k --connect-timeout 5 --max-time 15 \
-  -c "$TMP_JAR" -b "$TMP_JAR" -o "$TMP_BODY" -D "$TMP_HDR" \
-  -w '%{http_code}' "$PORTAL_URL" 2>"$TMP/err" || true)"
-page_code="$(printf '%s' "$page_code" | tr -cd '0-9')"
-[ -n "$page_code" ] || page_code=0
-log "login page status: $page_code"
-if [ "$page_code" != "200" ]; then
-  log "Could not read the login page ($(tr -d '\n' <"$TMP/err"))."
-  exit 1
-fi
-
-ACTION="$(form_action "$TMP_BODY")"
-REDIR="$(value_after 'name="4Tredir"' "$TMP_BODY")"
-MAGIC="$(value_after 'name="magic"' "$TMP_BODY")"
-HAS_USER_FIELD=no
-if grep -q 'name="username"' "$TMP_BODY"; then HAS_USER_FIELD=yes; fi
-
-log "form action: ${ACTION:-(no form found)}"
-log "4Tredir: ${REDIR:-(not found)}"
-log "magic: ${MAGIC:-(not found)}"
-log "username field: $HAS_USER_FIELD"
-
-if [ -z "$ACTION" ] || [ -z "$MAGIC" ]; then
-  log "FAILED: login page has no form action or no magic token (portal changed?)."
-  exit 1
-fi
-
-# --- step 3: POST --------------------------------------------------------
-POST_URL="$(resolve_action "$PORTAL_URL" "$ACTION")"
-log "POST $POST_URL"
-: >"$TMP_HDR"
-: >"$TMP_BODY"
-post_code="$(curl -sS -k --connect-timeout 5 --max-time 20 \
-  -c "$TMP_JAR" -b "$TMP_JAR" \
-  -D "$TMP_HDR" -o "$TMP_BODY" -w '%{http_code}' \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  -H "Referer: $PORTAL_URL" \
-  --data-urlencode "4Tredir=$REDIR" \
-  --data-urlencode "magic=$MAGIC" \
-  --data-urlencode "username=$USER_NAME" \
-  --data-urlencode "password=$PASSWORD" \
-  "$POST_URL" 2>"$TMP/err" || true)"
-post_code="$(printf '%s' "$post_code" | tr -cd '0-9')"
-[ -n "$post_code" ] || post_code=0
-log "POST status: $post_code"
-PASSWORD=''
-unset PASSWORD || true
-
-post_failed=0
-if [ "$post_code" -lt 200 ] 2>/dev/null; then post_failed=1; fi
-if [ "$VERBOSE" = 1 ] || [ "$post_failed" = 1 ]; then
-  sed 's/\r$//' "$TMP_HDR" | sed 's/^/[LOGIN] hdr: /' || true
-  head -c "$BODY_HEAD" "$TMP_BODY" | sed 's/^/[LOGIN] body: /' || true
-fi
-if [ "$post_failed" = 1 ]; then
-  log "POST error: $(tr -d '\n' <"$TMP/err")"
-fi
-
-# The firmware logs acceptance here but lets the verifier decide. Keep the log
-# line, not the verdict: the Unpad portal answers a good login with a 200 HTML
-# status page and no Location header.
-accepted=no
-case "$post_code" in
-  301|302|303|307|308) accepted=yes ;;
-esac
-if grep -qi 'success' "$TMP_BODY"; then accepted=yes; fi
-if [ -n "$REDIR" ] && grep -qF "$REDIR" "$TMP_BODY"; then accepted=yes; fi
-log "POST looked accepted: $accepted (verdict still comes from the probe)"
-
-# --- step 4: verify ------------------------------------------------------
-log "Verifying with a real fetch..."
-rc=1
-for attempt in $(seq 1 "$VERIFY_ATTEMPTS"); do
-  if [ "$attempt" -gt 1 ]; then
-    log "probe attempt $attempt of $VERIFY_ATTEMPTS"
-    sleep "$VERIFY_DELAY"
+  if [ -z "${PASSWORD:-}" ]; then
+    while :; do
+      if ! read -r -s -p "Portal password: " PASSWORD; then
+        printf '\nno password on stdin; pass --pass instead\n' >&2
+        exit 2
+      fi
+      printf '\n'
+      if [ -n "$PASSWORD" ]; then
+        break
+      fi
+      if [ "$force" != 1 ]; then
+        echo "username and password are required" >&2
+        exit 2
+      fi
+      printf 'password cannot be empty\n' >&2
+    done
   fi
-  probe_rc=0
-  probe_once "verify" || probe_rc=$?
-  case "$probe_rc" in
-    0)
+}
+
+# attempt_login: one pass of steps 2-4.
+#
+#   0  the probe reports the port open
+#   1  the POST went through and the port is still walled, so the portal
+#      rejected the credentials
+#   2  the login page could not be used (not 200, no form action, no magic
+#      token), so other credentials would not change the outcome
+#   3  the probe stopped answering during verification: the network dropped,
+#      and a new password would not be tried against anything
+#
+# The login page is fetched on every call. The magic token and the portal's
+# session cookie belong to one page load; reusing them would make a good
+# password look rejected.
+attempt_login() {
+  # --- step 2: login page ------------------------------------------------
+  log "GET login page $PORTAL_URL"
+  : >"$TMP_JAR"
+  : >"$TMP_HDR"
+  : >"$TMP_BODY"
+  local page_code
+  page_code="$(curl -sS -k --connect-timeout 5 --max-time 15 \
+    -c "$TMP_JAR" -b "$TMP_JAR" -o "$TMP_BODY" -D "$TMP_HDR" \
+    -w '%{http_code}' "$PORTAL_URL" 2>"$TMP/err" || true)"
+  page_code="$(printf '%s' "$page_code" | tr -cd '0-9')"
+  [ -n "$page_code" ] || page_code=0
+  log "login page status: $page_code"
+  if [ "$page_code" != "200" ]; then
+    log "Could not read the login page ($(tr -d '\n' <"$TMP/err"))."
+    return 2
+  fi
+
+  local action redir magic has_user_field
+  action="$(form_action "$TMP_BODY")"
+  redir="$(value_after 'name="4Tredir"' "$TMP_BODY")"
+  magic="$(value_after 'name="magic"' "$TMP_BODY")"
+  has_user_field=no
+  if grep -q 'name="username"' "$TMP_BODY"; then has_user_field=yes; fi
+
+  log "form action: ${action:-(no form found)}"
+  log "4Tredir: ${redir:-(not found)}"
+  log "magic: ${magic:-(not found)}"
+  log "username field: $has_user_field"
+
+  if [ -z "$action" ] || [ -z "$magic" ]; then
+    log "FAILED: login page has no form action or no magic token (portal changed?)."
+    return 2
+  fi
+
+  # --- step 3: POST ------------------------------------------------------
+  local post_url post_code post_failed accepted
+  post_url="$(resolve_action "$PORTAL_URL" "$action")"
+  log "POST $post_url"
+  : >"$TMP_HDR"
+  : >"$TMP_BODY"
+  post_code="$(curl -sS -k --connect-timeout 5 --max-time 20 \
+    -c "$TMP_JAR" -b "$TMP_JAR" \
+    -D "$TMP_HDR" -o "$TMP_BODY" -w '%{http_code}' \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    -H "Referer: $PORTAL_URL" \
+    --data-urlencode "4Tredir=$redir" \
+    --data-urlencode "magic=$magic" \
+    --data-urlencode "username=$USER_NAME" \
+    --data-urlencode "password=$PASSWORD" \
+    "$post_url" 2>"$TMP/err" || true)"
+  post_code="$(printf '%s' "$post_code" | tr -cd '0-9')"
+  [ -n "$post_code" ] || post_code=0
+  log "POST status: $post_code"
+  PASSWORD=''
+  unset PASSWORD || true
+
+  post_failed=0
+  if [ "$post_code" -lt 200 ] 2>/dev/null; then post_failed=1; fi
+  if [ "$VERBOSE" = 1 ] || [ "$post_failed" = 1 ]; then
+    sed 's/\r$//' "$TMP_HDR" | sed 's/^/[LOGIN] hdr: /' || true
+    head -c "$BODY_HEAD" "$TMP_BODY" | sed 's/^/[LOGIN] body: /' || true
+  fi
+  if [ "$post_failed" = 1 ]; then
+    log "POST error: $(tr -d '\n' <"$TMP/err")"
+  fi
+
+  # The firmware logs acceptance here but lets the verifier decide. Keep the
+  # log line, not the verdict: the Unpad portal answers a good login with a
+  # 200 HTML status page and no Location header.
+  accepted=no
+  case "$post_code" in
+    301|302|303|307|308) accepted=yes ;;
+  esac
+  if grep -qi 'success' "$TMP_BODY"; then accepted=yes; fi
+  if [ -n "$redir" ] && grep -qF "$redir" "$TMP_BODY"; then accepted=yes; fi
+  log "POST looked accepted: $accepted (verdict still comes from the probe)"
+
+  # --- step 4: verify ----------------------------------------------------
+  log "Verifying with a real fetch..."
+  local try probe_rc saw_answer
+  saw_answer=0
+  for try in $(seq 1 "$VERIFY_ATTEMPTS"); do
+    if [ "$try" -gt 1 ]; then
+      log "probe attempt $try of $VERIFY_ATTEMPTS"
+      sleep "$VERIFY_DELAY"
+    fi
+    probe_rc=0
+    probe_once "verify" || probe_rc=$?
+    if [ "$probe_rc" = 0 ]; then
       log "SUCCESS: port is authenticated."
+      return 0
+    fi
+    if [ "$probe_rc" = 3 ]; then
+      log "probe attempt $try of $VERIFY_ATTEMPTS: the probe could not be fetched"
+    else
+      saw_answer=1
+      log "still walled after $try attempt(s) (probe classification $probe_rc)"
+    fi
+  done
+  if [ "$saw_answer" = 0 ]; then
+    return 3
+  fi
+  return 1
+}
+
+# --- attempts -------------------------------------------------------------
+#
+# One attempt normally, more when the portal rejects the credentials and there
+# is a terminal to ask on.
+attempt=0
+rc=1
+while :; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -eq 1 ]; then
+    prompt_credentials 0
+  else
+    log "Login attempt $attempt"
+    prompt_credentials 1
+  fi
+
+  log "user='$USER_NAME' (password held in memory only)"
+
+  attempt_rc=0
+  attempt_login || attempt_rc=$?
+  case "$attempt_rc" in
+    0)
       rc=0
       break
       ;;
-    *)
-      log "still walled after $attempt attempt(s) (probe classification $probe_rc)"
+    2)
+      log "FAILED: the portal page could not be used; other credentials would not help."
+      exit 1
+      ;;
+    3)
+      log "FAILED: still walled, and the probe URL stopped answering (network dropped?)."
+      exit 1
       ;;
   esac
+
+  # attempt_rc 1: the POST went through and the probe still reports a wall,
+  # so the portal rejected the credentials.
+  if [ "$CAN_REASK" != 1 ]; then
+    log "FAILED: still walled (wrong credentials or portal changed)."
+    exit 1
+  fi
+  if [ "$MAX_ATTEMPTS" -gt 0 ] && [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+    log "FAILED: still walled after $attempt attempt(s) (--max-attempts $MAX_ATTEMPTS)."
+    exit 1
+  fi
+  log "Portal rejected the credentials. Asking again."
 done
 
-if [ "$rc" = 0 ] && [ "$DO_PING" = 1 ]; then
+if [ "$DO_PING" = 1 ]; then
   if command -v ping >/dev/null 2>&1; then
     ping -c 3 -W 2 1.1.1.1 || log "ping failed (informational only)"
   else
@@ -417,7 +547,4 @@ if [ "$rc" = 0 ] && [ "$DO_PING" = 1 ]; then
   fi
 fi
 
-if [ "$rc" != 0 ]; then
-  log "FAILED: still walled (wrong credentials or portal changed)."
-fi
 exit "$rc"

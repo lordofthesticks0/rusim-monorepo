@@ -153,3 +153,15 @@ Model credit is unnecessary here.
   esptool ran. Lowercase both sides in one shared helper, and print the bytes
   actually received on failure: the log showed the confirmation was there.
   (scripts-hardware `network-master-passthrough.py`)
+
+### 2026-10-31
+- Built a throwaway test harness for the re-ask change in
+  `legacy/pi/captive-portal-login.sh`: a Python `http.server` fake portal with
+  four modes and a pty driver, then ran seven scenarios and kept adding cases
+  (a server that dies after the POST) after the changed path already worked.
+  The user stopped the run and had the harness deleted. The change is one
+  loop; `bash -n` plus one run of the changed path was enough to hand back.
+  Lesson: size the verification to the change. For a one-off shell script, do
+  not grow a harness or keep re-running scenarios unless the user asks, and do
+  not turn the harness into a section of the documentation.
+
