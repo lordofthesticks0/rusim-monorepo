@@ -354,9 +354,9 @@
     "semantic_hash": ""
   },
   "legacy/master/master.cpp": {
-    "mtime": 1793606917.0742946,
-    "seen": 1793607813.8115106,
-    "ast_hash": "33a9a08a9651140192daf07b1247dd6d",
+    "mtime": 1793608379.4303863,
+    "seen": 1793608556.6005838,
+    "ast_hash": "1d6673ddee56c269ff4c5bd8a111b502",
     "semantic_hash": ""
   },
   "legacy/pi/captive-portal-login.sh": {
@@ -595,9 +595,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/legacy-master.md": {
-    "mtime": 1793607572.1448162,
-    "seen": 1793607813.8119993,
-    "ast_hash": "b73c0056218cfcf8707d64faba77e0b5",
+    "mtime": 1793608443.0695136,
+    "seen": 1793608556.60211,
+    "ast_hash": "579de35ae8281ddab2b2ab8afb665827",
     "semantic_hash": ""
   },
   "docs/llm-generated/legacy-pi-remote-monitor.md": {

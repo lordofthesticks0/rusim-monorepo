@@ -1,7 +1,7 @@
 # Graph Report - rusim-monorepo  (2026-11-02)
 
 ## Corpus Check
-- 157 files · ~448,696 words
+- 157 files · ~448,761 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 12 file(s) not represented in the graph (top: (none) 4, .toml 2, .example 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b7012d83`
+- Built from commit: `62406a08`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -611,7 +611,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `String` be split into smaller, more focused modules?**
   _Cohesion score 0.11083743842364532 - nodes in this community are weakly interconnected._
 - **Why does `authenticate()` connect `authenticate` to `auth.ts`, `10. Deployment and the legacy schema`, `getSupabase`, `4. Authentication, end to end`, `5. Credential exposure on the WT32`, `data.ts`, `Dashboard public-deploy security report`, `getParameterValue`, `DB experiment sync + NTP — LLM Documentation`, `syncDbLatest`, `ESP to database sync — plan`?**
-  _High betweenness centrality (0.115) - this node is a cross-community bridge._
+  _High betweenness centrality (0.116) - this node is a cross-community bridge._
 - **Are the 27 inferred relationships involving `delay()` (e.g. with `What is shared vs stubbed` and `link_serial_init()`) actually correct?**
   _`delay()` has 27 INFERRED edges - model-reasoned connections that need verification._
 - **Should `HoldBtnCtx` be split into smaller, more focused modules?**
