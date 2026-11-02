@@ -8,7 +8,7 @@
 - Polling the 4-bottle sensor slave (`#1:PING*` over `Serial1` at 9600 baud) and parsing the returned JSON telemetry to compute average bottle temperature.
 - Time-gated, multi-sample analog water-level sensing on `A9`. The probe reads high when submerged (`~1023`) and low when dry; `waterDepleted` trips at `ADC <= 500` and throttles Pump 2. The heater uses the OUT pump's dry cutoff at `ADC <= 400` instead. Optional pump leak detection sensing on `A8` (`ADC >= 200`) is guarded by `#define ENABLE_LEAK_SENSOR 0` (disabled by default while only the `A9` water presence probe is installed, preventing floating-pin charge carryover on `A8` from triggering false leak cutoffs).
 - Two automatic pump interlocks driven by the same `A9` reading: Pump 1 (`D3`, pumps into the reservoir) stops at overflow (`ADC >= 550`), Pump 2 (`D7`, pumps out of the reservoir) stops when dry (`ADC <= 400`). Both run inside the band between those two values. See section 5.
-- Hysteresis control of the 300 W heater SSR (`D5`), with per-actuator manual overrides (`AUTO`, `FORCE ON`, `OFF`).
+- Bath-temperature ceiling control of the 300 W heater SSR (`D5`), with per-actuator manual overrides (`AUTO`, `FORCE ON`, `OFF`). In AUTO, it heats while the bath sensor is valid and below `50 °C`; bottle telemetry and the bottle target do not control it.
 - Unified non-blocking 3-second MOSFET PWM ramping (`slewMosfet`) across all 3 MOSFET channels (`Pin D3` Pump 1, `Pin D7` Pump 2, and `Pin D4` Stirrer), with individually adjustable target PWM ceilings (`0`–`255`) for water debit (flow rate) testing.
 - Bidirectional USB serial (`Serial` at 115200 baud) command and status telemetry with the Raspberry Pi Flask backend ([`web_control.py`](../../legacy/pi/water-control-system/web_control.py)).
 
@@ -86,7 +86,7 @@ bool inletLevelOk  = (waterRaw < IN_PUMP_STOP_ADC);   // 550
 bool outletLevelOk = (waterRaw > OUT_PUMP_STOP_ADC);  // 400
 ```
 
-Pump 1 (`D3`, into the reservoir) and Pump 2 (`D7`, out of the reservoir) both use the level boolean alone. Temperature is not part of either decision: `bathSensorOk` (valid DS18B20 reading) and `slaveActive` (a slave packet within `SLAVE_TIMEOUT_MS = 12000`) gate the **heater** in section 6 and nothing else. A detached or silent bottle slave therefore stops AUTO heating, but circulation keeps running.
+Pump 1 (`D3`, into the reservoir) and Pump 2 (`D7`, out of the reservoir) both use the level boolean alone. Temperature is not part of either pump decision. The heater's AUTO mode requires a valid DS18B20 reading, but does not depend on the bottle slave; circulation and heating continue independently of bottle telemetry.
 
 AUTO behaviour with `currentMode == MODE_AUTO` and no leak:
 
@@ -123,13 +123,13 @@ if (currentMode == MODE_OFF || pumpLeakDetected) {
 }
 ```
 
-Heater logic inside `MODE_AUTO`:
+Heater logic when the system is not in `MODE_OFF` and no pump leak is detected:
 
 1. `overTempCeiling` (`waterTemp >= MAX_WATER_BATH_TEMP`, `50.0 °C`), the water level being at or below `OUT_PUMP_STOP_ADC` (`400`), or `heaterOverride == 2` → heater off. These three win over every other case, including `HEATER_ON`.
 2. `heaterOverride == 1` → heater on, subject to the block above.
-3. `heaterOverride == 0` (AUTO) → off while `bathSensorOk` or `slaveActive` is false; otherwise hysteresis on the average bottle temperature: on below `targetBottleTemp - bottleHysteresis`, off at or above `targetBottleTemp`.
+3. `heaterOverride == 0` (AUTO) → off if the bath sensor is invalid; otherwise on while the bath is below the `50.0 °C` ceiling. There is no lower bath target: the heater does not read bottle temperature, `targetBottleTemp`, or `bottleHysteresis`.
 
-`targetBottleTemp` (`20.0`–`50.0` °C) and `bottleHysteresis` (`0.1`–`5.0` °C) are set by the `TEMP:` command. The heater is driven from the *bottle* average reported by the slave; the bath sensor supplies only the `50 °C` ceiling and the health gate. The heater is the only actuator that reads `bathSensorOk` or `slaveActive`.
+`targetBottleTemp` (`20.0`–`50.0` °C) and `bottleHysteresis` (`0.1`–`5.0` °C) are still set by `TEMP:` and reported in status, but do not affect heater operation. AUTO fails off on an invalid bath sensor reading. The low-water, system-off, leak, and manual override gates still apply.
 
 ## 7. Unified 3-Channel MOSFET PWM Ramping and `0–255` Debit Control
 
@@ -174,10 +174,10 @@ Commands are newline-terminated ASCII strings received on `Serial` (115200 baud)
 ## 9. Known Gaps
 
 - **No hysteresis on the pump or heater cutoffs.** `waterRaw < 550` and `waterRaw > 400` flip on a single ADC count. Because `slewMosfet` restarts its 3-second ramp on every target change, a reading hovering at a threshold keeps restarting the ramp and the pump never settles at its target PWM. Only `waterDepleted` (the `500` Pump 2 throttle) has debounce. The heater's `<= 400` cutoff is raw like the OUT pump, so it can toggle around that threshold.
-- **A silent bottle slave stops AUTO heating.** `slaveActive` is false when no packet with a bottle temperature between 15 and 60 °C has arrived in the last 12 s, which leaves `bottle_temp_avg` at `-999` and the heater off in AUTO. Circulation is unaffected. Before the 2026-11-02 change this flag also held Pump 2 off, which is what made the OUT pump appear dead at every water level while the slave was detached.
+- **AUTO heating has no lower bath target.** It heats continuously while the bath sensor is valid and below `50 °C`; only the bath ceiling, low-water/system/leak gates, and heater override can stop it. Bottle telemetry may be absent without changing this behavior.
 - **The `D6` switch cannot restore `AUTO`.** See section 3.
 - **The pump interlock thresholds are not telemetered.** `STATUS` reports only `water_thr = 500`; `IN_PUMP_STOP_ADC` and `OUT_PUMP_STOP_ADC` are visible only in the source.
 - **`pump_mode` mirrors Pump 1 only.** Use `pump1_mode` and `pump2_mode`; `pump_mode` duplicates `pump1_mode`.
 
 ---
-Content generated by `opencode/deepseek-v4.1-flash-free` in `OpenCode`.
+Content generated by `gpt-6-luna` in `harness`.

@@ -30,7 +30,6 @@ float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define WATER_FAULT_LIMIT    5      // 5 consecutive 500ms checks (2.5s) to trip/clear
 #define WATER_CHECK_MS       500UL  // Time-gated water & leak sampling interval (ms)
 #define WATER_ADC_SAMPLES    16     // Number of ADC samples averaged per check
-#define SLAVE_TIMEOUT_MS     12000  // Failsafe timeout if Slave stops responding
 #define TEMP_INTERVAL_MS     750    // Non-blocking DS18B20 cadence
 #define SLAVE_POLL_INTERVAL  3500   // Acquisition cadence matching Slave cycle time
 #define STIR_RAMP_MS         3000UL // 3-second soft-start / soft-stop PWM ramp
@@ -89,7 +88,6 @@ bool pumpLeakDetected = false;
 unsigned long lastTempRequest = 0;
 unsigned long lastWaterCheck = 0;
 unsigned long lastSlavePollTime = 0;
-unsigned long lastSlavePacketTime = 0;
 String slaveRxBuffer = "";
 
 // Forward declaration
@@ -342,7 +340,6 @@ void loop() {
             if (validCount > 0) {
               currentBottleTemp = sumTemp / validCount;
               bottleTelemetryValid = true;
-              lastSlavePacketTime = now;
             }
           }
         }
@@ -420,9 +417,7 @@ void loop() {
   }
 
   bool bathSensorOk = (waterTemp > 0.0 && waterTemp < 85.0);
-  bool slaveActive = ((now - lastSlavePacketTime) < SLAVE_TIMEOUT_MS);
-
-  // 6. Master Mode, Safety Cutoffs (Bath Low or Pump Leak), Overrides & Hysteresis Control
+  // 6. Master Mode, Safety Cutoffs (Bath Low or Pump Leak) & Overrides
   if (currentMode == MODE_OFF || pumpLeakDetected) {
     forceAllOff();
   } else {
@@ -460,13 +455,13 @@ void loop() {
     } else if (heaterOverride == 1) {
       driveHeater(true);
     } else {
-      // AUTO Heater: Hysteresis around targetBottleTemp
-      if (!bathSensorOk || !slaveActive) {
+      // AUTO Heater: maintain bath heat independently of bottle telemetry.
+      // Fail off if the bath sensor is invalid; otherwise heat until the
+      // bath reaches the hard ceiling above.
+      if (!bathSensorOk) {
         driveHeater(false);
-      } else if (!heaterState && currentBottleTemp < (targetBottleTemp - bottleHysteresis)) {
+      } else {
         driveHeater(true);
-      } else if (heaterState && currentBottleTemp >= targetBottleTemp) {
-        driveHeater(false);
       }
     }
 
