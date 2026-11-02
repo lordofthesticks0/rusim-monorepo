@@ -2051,8 +2051,15 @@
                 setText(DOM.pumpLeak, leakFault ? "LEAK FAULT" : "DRY (OK)");
                 setClass(DOM.pumpLeak, leakFault ? "warning" : "on");
 
-                const safetyStop = Boolean(data.water_low || leakFault);
-                const stopLabel = leakFault ? "STOPPED (LEAK)" : "STOPPED";
+                // Low water only cuts the heater in firmware; both pumps stay in their
+                // analog interlocks (Pump 1 runs while dry to refill, Pump 2 throttles to
+                // DRY_OUT_PUMP_PWM until it stops at ADC <= 400) and the stirrer is unaffected.
+                // Only a leak trip forces every actuator off.
+                const waterLow = Boolean(data.water_low);
+                const heatStop = waterLow || leakFault;
+                const heatStopLabel = leakFault ? "STOPPED (LEAK)" : "STOPPED (LOW WATER)";
+                const driveStop = leakFault;
+                const driveStopLabel = "STOPPED (LEAK)";
 
                 const targ = Number(data.target_temp || 39.0).toFixed(1);
                 const hMode = data.heater_mode || "OFF";
@@ -2065,22 +2072,22 @@
                 const outD4 = Number(data.out_d4 ?? 0);
 
                 setText(DOM.homeHeaterLabel, `HEATER (D5 · ${hMode === "AUTO" ? targ + "°C" : hMode})`);
-                setText(DOM.heater, safetyStop ? stopLabel : data.heater ? "HEATING" : "IDLE");
-                setClass(DOM.heater, data.heater && !safetyStop ? "on" : (safetyStop ? "warning" : ""));
+                setText(DOM.heater, heatStop ? heatStopLabel : data.heater ? "HEATING" : "IDLE");
+                setClass(DOM.heater, data.heater && !heatStop ? "on" : (heatStop ? "warning" : ""));
 
                 const p1Running = Boolean(data.pump1 ?? data.pump);
                 setText(DOM.homePump1Label, `PUMP 1 (D3 · ${p1Mode})`);
-                setText(DOM.pump1, safetyStop ? stopLabel : p1Running ? `RUNNING (${outD3})` : "IDLE");
-                setClass(DOM.pump1, p1Running && !safetyStop ? "on" : (safetyStop ? "warning" : ""));
+                setText(DOM.pump1, driveStop ? driveStopLabel : p1Running ? `RUNNING (${outD3})` : "IDLE");
+                setClass(DOM.pump1, p1Running && !driveStop ? "on" : (driveStop ? "warning" : ""));
 
                 const p2Running = Boolean(data.pump2);
                 setText(DOM.homePump2Label, `PUMP 2 (D7 · ${p2Mode})`);
-                setText(DOM.pump2, safetyStop ? stopLabel : p2Running ? `RUNNING (${outD7})` : "IDLE");
-                setClass(DOM.pump2, p2Running && !safetyStop ? "on" : (safetyStop ? "warning" : ""));
+                setText(DOM.pump2, driveStop ? driveStopLabel : p2Running ? `RUNNING (${outD7})` : "IDLE");
+                setClass(DOM.pump2, p2Running && !driveStop ? "on" : (driveStop ? "warning" : ""));
 
                 setText(DOM.homeStirLabel, `STIRRER (D4 · ${sMode})`);
-                setText(DOM.stirrer, safetyStop ? stopLabel : data.stirrer ? `RUNNING (${outD4})` : "IDLE");
-                setClass(DOM.stirrer, data.stirrer && !safetyStop ? "on" : (safetyStop ? "warning" : ""));
+                setText(DOM.stirrer, driveStop ? driveStopLabel : data.stirrer ? `RUNNING (${outD4})` : "IDLE");
+                setClass(DOM.stirrer, data.stirrer && !driveStop ? "on" : (driveStop ? "warning" : ""));
 
                 setText(DOM.livePwmD3, `Out: ${outD3}`);
                 setText(DOM.livePwmD7, `Out: ${outD7}`);

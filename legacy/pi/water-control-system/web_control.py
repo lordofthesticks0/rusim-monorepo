@@ -715,10 +715,9 @@ def control_api():
     body = request.json or {}
     action = body.get('action')
 
-    safety_trip = bool(
-        current_data.get('water_low')
-        or (current_data.get('leak_enabled') and current_data.get('pump_leak'))
-    )
+    water_low = bool(current_data.get('water_low'))
+    leak_trip = bool(current_data.get('leak_enabled') and current_data.get('pump_leak'))
+    safety_trip = bool(water_low or leak_trip)
 
     if action == 'heater':
         mode = body.get('mode', 'AUTO')
@@ -738,18 +737,18 @@ def control_api():
                 send_serial_cmd(f"PUMP1_{mode}")
                 current_data['pump1_mode'] = mode
                 current_data['pump_mode'] = mode
-                current_data['pump1'] = (mode == 'ON') and not safety_trip and current_data.get('pwm_d3', 255) > 0
+                current_data['pump1'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d3', 255) > 0
             elif action == 'pump2':
                 send_serial_cmd(f"PUMP2_{mode}")
                 current_data['pump2_mode'] = mode
-                current_data['pump2'] = (mode == 'ON') and not safety_trip and current_data.get('pwm_d7', 255) > 0
+                current_data['pump2'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d7', 255) > 0
             else:
                 send_serial_cmd(f"PUMP_{mode}")
                 current_data['pump_mode'] = mode
                 current_data['pump1_mode'] = mode
                 current_data['pump2_mode'] = mode
-                current_data['pump1'] = (mode == 'ON') and not safety_trip and current_data.get('pwm_d3', 255) > 0
-                current_data['pump2'] = (mode == 'ON') and not safety_trip and current_data.get('pwm_d7', 255) > 0
+                current_data['pump1'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d3', 255) > 0
+                current_data['pump2'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d7', 255) > 0
             current_data['pump'] = bool(current_data.get('pump1') or current_data.get('pump2'))
             return jsonify({'status': 'success'})
 
@@ -778,7 +777,7 @@ def control_api():
         elif mode_str == 'TIMED':
             current_data['stir_timed_min'] = mins
             current_data['stir_rem_sec'] = mins * 60
-        current_data['stirrer'] = (mode_str != 'OFF') and not safety_trip
+        current_data['stirrer'] = (mode_str != 'OFF') and not leak_trip
         return jsonify({'status': 'success'})
 
     elif action == 'temp_target':
