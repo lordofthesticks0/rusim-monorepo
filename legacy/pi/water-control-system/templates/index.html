@@ -1186,6 +1186,7 @@
                             <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH A9 ADC</span><span class="mini-bottle-val" id="waterAdcVal">--</span></div>
                             <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH VOLT</span><span class="mini-bottle-val" id="waterVoltVal">-- V</span></div>
                             <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH THR</span><span class="mini-bottle-val" id="waterThrVal">≤ 500</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">OUT PUMP STOP</span><span class="mini-bottle-val" id="outPumpStopVal">≤ 400</span></div>
                             <div class="mini-bottle-pill" id="leakAdcPill" style="display: none;"><span class="mini-bottle-name">LEAK A8 ADC</span><span class="mini-bottle-val" id="leakAdcVal">--</span></div>
                             <div class="mini-bottle-pill" id="leakVoltPill" style="display: none;"><span class="mini-bottle-name">LEAK VOLT</span><span class="mini-bottle-val" id="leakVoltVal">-- V</span></div>
                             <div class="mini-bottle-pill" id="leakThrPill" style="display: none;"><span class="mini-bottle-name">LEAK THR</span><span class="mini-bottle-val" id="leakThrVal">&lt; 200</span></div>
@@ -1523,16 +1524,17 @@
                 syncedOnce: false
             };
 
-            // Heater dry cutoff. Mirrors OUT_PUMP_STOP_ADC in legacy/master/master.cpp;
-            // the 500-level water_low flag only throttles Pump 2.
-            const HEATER_STOP_ADC = 400;
+            // Level thresholds mirror legacy/master/master.cpp.
+            // The 500-level water flag throttles Pump 2; at 400 Pump 2 stops.
+            const OUT_PUMP_STOP_ADC = 400;
+            const HEATER_STOP_ADC = OUT_PUMP_STOP_ADC;
 
             const dateFmt = new Intl.DateTimeFormat([], { weekday: "short", month: "short", day: "numeric" });
 
             const DOM = {};
             [
                 "clockTime", "clockDate", "mainViewport", "temp", "water", "waterStatusCard",
-                "waterAdcVal", "waterVoltVal", "waterThrVal",
+                "waterAdcVal", "waterVoltVal", "waterThrVal", "outPumpStopVal",
                 "leakAdcPill", "leakVoltPill", "leakThrPill", "pumpLeakRow",
                 "leakAdcVal", "leakVoltVal", "leakThrVal", "pumpLeak",
                 "heater", "pump1", "pump2", "stirrer",
@@ -2017,11 +2019,14 @@
             function updateUI(data) {
                 const temp = Number(data.temp);
                 setText(DOM.temp, Number.isFinite(temp) && temp > -50 ? temp.toFixed(1) + "°C" : "--°C");
-                setText(DOM.water, data.water_low ? "CRITICAL LOW" : "NORMAL");
-                setClass(DOM.water, data.water_low ? "warning" : "on");
 
                 const wAdc = Number(data.water_adc);
                 const wThr = Number.isFinite(Number(data.water_thr)) && Number(data.water_thr) > 0 ? Number(data.water_thr) : 500;
+                const waterAdcValid = Number.isFinite(wAdc) && wAdc >= 0;
+                const criticalLow = waterAdcValid && wAdc <= OUT_PUMP_STOP_ADC;
+                const low = Boolean(data.water_low) || (waterAdcValid && wAdc <= wThr);
+                setText(DOM.water, criticalLow ? "CRITICAL LOW" : low ? "LOW" : "NORMAL");
+                setClass(DOM.water, low ? "warning" : "on");
                 if (Number.isFinite(wAdc) && wAdc >= 0) {
                     setText(DOM.waterAdcVal, `${Math.round(wAdc)} / 1023`);
                     setText(DOM.waterVoltVal, `${((wAdc * 5.0) / 1023.0).toFixed(2)} V`);
@@ -2030,6 +2035,7 @@
                     setText(DOM.waterVoltVal, "-- V");
                 }
                 setText(DOM.waterThrVal, `≤ ${Math.round(wThr)}`);
+                setText(DOM.outPumpStopVal, `≤ ${OUT_PUMP_STOP_ADC}`);
 
                 const leakEnabled = Boolean(data.leak_enabled);
                 const leakDisplay = leakEnabled ? "" : "none";
@@ -2056,7 +2062,7 @@
                 setClass(DOM.pumpLeak, leakFault ? "warning" : "on");
 
                 // The heater stops at the OUT pump's dry cutoff (ADC <= 400), not at the
-                // 500-level water_low flag that only throttles Pump 2. Pump 1 keeps running
+                // 500-level water_low flag only throttles Pump 2. Pump 1 keeps running
                 // while dry to refill, Pump 2 stops at ADC <= 400, and the stirrer is
                 // unaffected. Only a leak trip forces every actuator off.
                 const heaterWaterLow = Number.isFinite(wAdc) && wAdc >= 0 && wAdc <= HEATER_STOP_ADC;
@@ -2064,6 +2070,8 @@
                 const heatStopLabel = leakFault ? "STOPPED (LEAK)" : "STOPPED (LOW WATER)";
                 const driveStop = leakFault;
                 const driveStopLabel = "STOPPED (LEAK)";
+                const pump2LevelStop = criticalLow;
+                const pump2StopLabel = pump2LevelStop ? "STOPPED (CRITICAL LOW)" : driveStopLabel;
 
                 const targ = Number(data.target_temp || 39.0).toFixed(1);
                 const hMode = data.heater_mode || "OFF";
@@ -2084,10 +2092,10 @@
                 setText(DOM.pump1, driveStop ? driveStopLabel : p1Running ? `RUNNING (${outD3})` : "IDLE");
                 setClass(DOM.pump1, p1Running && !driveStop ? "on" : (driveStop ? "warning" : ""));
 
-                const p2Running = Boolean(data.pump2);
+                const p2Running = Boolean(data.pump2) && !pump2LevelStop;
                 setText(DOM.homePump2Label, `PUMP 2 (D7 · ${p2Mode})`);
-                setText(DOM.pump2, driveStop ? driveStopLabel : p2Running ? `RUNNING (${outD7})` : "IDLE");
-                setClass(DOM.pump2, p2Running && !driveStop ? "on" : (driveStop ? "warning" : ""));
+                setText(DOM.pump2, driveStop ? driveStopLabel : pump2LevelStop ? pump2StopLabel : p2Running ? `RUNNING (${outD7})` : "IDLE");
+                setClass(DOM.pump2, p2Running && !driveStop ? "on" : (driveStop || pump2LevelStop ? "warning" : ""));
 
                 setText(DOM.homeStirLabel, `STIRRER (D4 · ${sMode})`);
                 setText(DOM.stirrer, driveStop ? driveStopLabel : data.stirrer ? `RUNNING (${outD4})` : "IDLE");

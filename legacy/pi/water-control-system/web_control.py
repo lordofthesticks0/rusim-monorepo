@@ -31,6 +31,7 @@ app = Flask(__name__)
 LOG_DIR = 'logs'
 MOUNT_POINT = '/media/usb'
 SLAVE_STALE_SECONDS = 12.0
+OUT_PUMP_STOP_ADC = 400
 
 HOTSPOT_CON_NAME = "invitro-hotspot"
 HOTSPOT_SSID = "InVitro-Hotspot"
@@ -720,11 +721,12 @@ def control_api():
         water_adc = int(water_adc)
     except (TypeError, ValueError):
         water_adc = -1
-    # Heater shares the OUT pump's dry cutoff (OUT_PUMP_STOP_ADC = 400).
+    # Heater shares the OUT pump's dry cutoff.
     # water_low (ADC <= 500) only throttles Pump 2.
-    heater_water_low = 0 <= water_adc <= 400
+    heater_water_low = 0 <= water_adc <= OUT_PUMP_STOP_ADC
     leak_trip = bool(current_data.get('leak_enabled') and current_data.get('pump_leak'))
     heater_safety_trip = bool(heater_water_low or leak_trip)
+    outlet_level_ok = water_adc > OUT_PUMP_STOP_ADC
 
     if action == 'heater':
         mode = body.get('mode', 'AUTO')
@@ -748,14 +750,14 @@ def control_api():
             elif action == 'pump2':
                 send_serial_cmd(f"PUMP2_{mode}")
                 current_data['pump2_mode'] = mode
-                current_data['pump2'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d7', 255) > 0
+                current_data['pump2'] = (mode == 'ON') and not leak_trip and outlet_level_ok and current_data.get('pwm_d7', 255) > 0
             else:
                 send_serial_cmd(f"PUMP_{mode}")
                 current_data['pump_mode'] = mode
                 current_data['pump1_mode'] = mode
                 current_data['pump2_mode'] = mode
                 current_data['pump1'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d3', 255) > 0
-                current_data['pump2'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d7', 255) > 0
+                current_data['pump2'] = (mode == 'ON') and not leak_trip and outlet_level_ok and current_data.get('pwm_d7', 255) > 0
             current_data['pump'] = bool(current_data.get('pump1') or current_data.get('pump2'))
             return jsonify({'status': 'success'})
 
