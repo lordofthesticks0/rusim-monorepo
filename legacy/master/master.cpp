@@ -23,6 +23,8 @@ float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
 float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define MAX_WATER_BATH_TEMP  50.0   // Hard safety bath ceiling clamp (°C)
 #define WATER_DRY_THRESHOLD  500    // Dry at or below this ADC reading; submerged is near 1023
+#define IN_PUMP_STOP_ADC     550    // Stop reservoir inlet pump at or above this ADC reading
+#define OUT_PUMP_STOP_ADC    400    // Stop reservoir outlet pump at or below this ADC reading
 #define ENABLE_LEAK_SENSOR   0      // 0 = disabled (only A9 water presence sensor installed); 1 = enable A8 leak probe
 #define LEAK_THRESHOLD       200    // Pump leak wet-detection ADC threshold (~0.98V on 5V ADC)
 #define WATER_FAULT_LIMIT    5      // 5 consecutive 500ms checks (2.5s) to trip/clear
@@ -360,7 +362,7 @@ void loop() {
     currentMode = MODE_OFF;
   }
 
-  // 5. Time-Gated Debounced Water Level (A7) & Pump Leak (A8) Verification (500ms cadence, 16x ADC avg)
+  // 5. Time-Gated Debounced Water Level (A9) & Pump Leak (A8) Verification (500ms cadence, 16x ADC avg)
   if (now - lastWaterCheck >= WATER_CHECK_MS) {
     // 5a. Bath Water Level Probe (A9: dry at/below WATER_DRY_THRESHOLD; submerged above it)
     waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
@@ -424,23 +426,25 @@ void loop() {
   if (currentMode == MODE_OFF || pumpLeakDetected) {
     forceAllOff();
   } else {
+    bool inletLevelOk = (waterRaw < IN_PUMP_STOP_ADC);
+    bool outletLevelOk = (waterRaw > OUT_PUMP_STOP_ADC);
+
     // --- PUMP 1 LOGIC (Pin D3) ---
     if (pump1Override == 1) {
-      slewMosfet(pump1Mosfet, true, now);
+      slewMosfet(pump1Mosfet, inletLevelOk, now);
     } else if (pump1Override == 2) {
       slewMosfet(pump1Mosfet, false, now);
     } else {
-      // Reservoir inlet pump remains on through water-level faults.
-      slewMosfet(pump1Mosfet, true, now, AUTO_PUMP_PWM_LIMIT);
+      slewMosfet(pump1Mosfet, inletLevelOk, now, AUTO_PUMP_PWM_LIMIT);
     }
 
     // --- PUMP 2 LOGIC (Pin D7) ---
     if (pump2Override == 1) {
-      slewMosfet(pump2Mosfet, true, now);
+      slewMosfet(pump2Mosfet, outletLevelOk, now);
     } else if (pump2Override == 2) {
       slewMosfet(pump2Mosfet, false, now);
     } else {
-      slewMosfet(pump2Mosfet, bathSensorOk && slaveActive, now,
+      slewMosfet(pump2Mosfet, outletLevelOk && bathSensorOk && slaveActive, now,
                  AUTO_PUMP_PWM_LIMIT, waterDepleted ? DRY_OUT_PUMP_PWM : 255U);
     }
 
