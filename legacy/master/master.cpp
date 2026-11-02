@@ -428,6 +428,9 @@ void loop() {
   } else {
     bool inletLevelOk = (waterRaw < IN_PUMP_STOP_ADC);
     bool outletLevelOk = (waterRaw > OUT_PUMP_STOP_ADC);
+    // The heater shares the OUT pump's dry cutoff (<= 400). The 500-level
+    // waterDepleted flag only throttles Pump 2; it no longer cuts the heater.
+    bool heaterWaterLow = (waterRaw <= OUT_PUMP_STOP_ADC);
 
     // --- PUMP 1 LOGIC (Pin D3) ---
     if (pump1Override == 1) {
@@ -452,7 +455,7 @@ void loop() {
 
     // --- HEATER LOGIC (Pin D5) ---
     bool overTempCeiling = (bathSensorOk && waterTemp >= MAX_WATER_BATH_TEMP);
-    if (overTempCeiling || waterDepleted || heaterOverride == 2) {
+    if (overTempCeiling || heaterWaterLow || heaterOverride == 2) {
       driveHeater(false);
     } else if (heaterOverride == 1) {
       driveHeater(true);

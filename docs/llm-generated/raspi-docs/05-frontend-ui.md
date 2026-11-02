@@ -20,7 +20,7 @@ On the Home (`water`) tab, the right-hand system status card (`#waterStatusCard`
   - **BATH A9 ADC** (`#waterAdcVal`), **BATH VOLT** (`#waterVoltVal`), **BATH THR** (`#waterThrVal`: `≤ 500`; the displayed value follows `data.water_thr`).
 - Optional `PUMP LEAK (A8)` row (`#pumpLeakRow`) and its three drawer pills (`#leakAdcPill`, `#leakVoltPill`, `#leakThrPill`) are hidden (`display: none`) while `data.leak_enabled` is false (`ENABLE_LEAK_SENSOR == 0` in `master.cpp`). If `data.leak_enabled` is true, they become visible and `PUMP LEAK (A8)` displays `DRY (OK)` or `LEAK FAULT`.
 - Actuator badges follow what the firmware reports, with two independent stop masks:
-  - `HEATER` shows `STOPPED (LEAK)` on a leak trip and `STOPPED (LOW WATER)` while `data.water_low` is true, because low water cuts the heater.
+  - `HEATER` shows `STOPPED (LEAK)` on a leak trip and `STOPPED (LOW WATER)` while `data.water_adc <= 400`, matching the OUT pump's dry cutoff. The `data.water_low` flag (`ADC <= 500`) only throttles Pump 2 and does not stop the heater.
   - `PUMP 1`, `PUMP 2` and `STIRRER` show `STOPPED (LEAK)` on a leak trip only. Low water leaves them under firmware control: Pump 1 keeps running to refill the bath, Pump 2 runs at its normal PWM above ADC `500` and at `DRY_OUT_PUMP_PWM` (`100`) between `500` and `400`, and the stirrer is never cut by water level. Their badges therefore show `RUNNING (<pwm>)` or `IDLE` from `pump1` / `pump2` / `stirrer` and `out_d3` / `out_d7` / `out_d4`. See [legacy-master.md](../legacy-master.md#5-automatic-pump-interlocks).
 
 ## Temporary MOSFET Speed Control (`0–255` Debit Testing)

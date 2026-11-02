@@ -715,18 +715,25 @@ def control_api():
     body = request.json or {}
     action = body.get('action')
 
-    water_low = bool(current_data.get('water_low'))
+    water_adc = current_data.get('water_adc', -1)
+    try:
+        water_adc = int(water_adc)
+    except (TypeError, ValueError):
+        water_adc = -1
+    # Heater shares the OUT pump's dry cutoff (OUT_PUMP_STOP_ADC = 400).
+    # water_low (ADC <= 500) only throttles Pump 2.
+    heater_water_low = 0 <= water_adc <= 400
     leak_trip = bool(current_data.get('leak_enabled') and current_data.get('pump_leak'))
-    safety_trip = bool(water_low or leak_trip)
+    heater_safety_trip = bool(heater_water_low or leak_trip)
 
     if action == 'heater':
         mode = body.get('mode', 'AUTO')
         if mode in ('AUTO', 'ON', 'OFF'):
             send_serial_cmd(f"HEATER_{mode}")
             current_data['heater_mode'] = mode
-            if mode == 'ON' and not safety_trip:
+            if mode == 'ON' and not heater_safety_trip:
                 current_data['heater'] = True
-            elif mode == 'OFF' or safety_trip:
+            elif mode == 'OFF' or heater_safety_trip:
                 current_data['heater'] = False
             return jsonify({'status': 'success'})
 

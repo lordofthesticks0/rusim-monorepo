@@ -1523,6 +1523,10 @@
                 syncedOnce: false
             };
 
+            // Heater dry cutoff. Mirrors OUT_PUMP_STOP_ADC in legacy/master/master.cpp;
+            // the 500-level water_low flag only throttles Pump 2.
+            const HEATER_STOP_ADC = 400;
+
             const dateFmt = new Intl.DateTimeFormat([], { weekday: "short", month: "short", day: "numeric" });
 
             const DOM = {};
@@ -2051,12 +2055,12 @@
                 setText(DOM.pumpLeak, leakFault ? "LEAK FAULT" : "DRY (OK)");
                 setClass(DOM.pumpLeak, leakFault ? "warning" : "on");
 
-                // Low water only cuts the heater in firmware; both pumps stay in their
-                // analog interlocks (Pump 1 runs while dry to refill, Pump 2 throttles to
-                // DRY_OUT_PUMP_PWM until it stops at ADC <= 400) and the stirrer is unaffected.
-                // Only a leak trip forces every actuator off.
-                const waterLow = Boolean(data.water_low);
-                const heatStop = waterLow || leakFault;
+                // The heater stops at the OUT pump's dry cutoff (ADC <= 400), not at the
+                // 500-level water_low flag that only throttles Pump 2. Pump 1 keeps running
+                // while dry to refill, Pump 2 stops at ADC <= 400, and the stirrer is
+                // unaffected. Only a leak trip forces every actuator off.
+                const heaterWaterLow = Number.isFinite(wAdc) && wAdc >= 0 && wAdc <= HEATER_STOP_ADC;
+                const heatStop = heaterWaterLow || leakFault;
                 const heatStopLabel = leakFault ? "STOPPED (LEAK)" : "STOPPED (LOW WATER)";
                 const driveStop = leakFault;
                 const driveStopLabel = "STOPPED (LEAK)";

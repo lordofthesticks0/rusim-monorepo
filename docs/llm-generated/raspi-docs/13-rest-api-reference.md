@@ -179,9 +179,9 @@ with an `action` field; an unknown or missing action returns HTTP 400
 
 | `action` | Extra fields | Behaviour |
 |---|---|---|
-| `heater` | `mode` = `AUTO` / `ON` / `OFF` (default `AUTO`) | Sends `HEATER_<mode>` and updates `current_data['heater_mode']`. `ON` sets the cached `heater` true unless `water_low` is set; `OFF`, or `water_low`, sets it false. |
-| `pump` | `mode` = `AUTO` / `ON` / `OFF` (default `AUTO`) | Sends `PUMP_<mode>` and updates `pump_mode`, with the same `water_low` guard. |
-| `stirrer` | `mode` = `OFF` / `ON` / `PULSE` / `TIMED` (default `OFF`), `minutes` (default 10), `seconds` (default 30) | Sends `STIR:<0-3>:<mins>:<secs>` and updates `stir_mode`, `stir_int_min` and `stir_pulse_sec` (or `stir_timed_min`). The cached `stirrer` is true when the mode is not `OFF` and `water_low` is false. |
+| `heater` | `mode` = `AUTO` / `ON` / `OFF` (default `AUTO`) | Sends `HEATER_<mode>` and updates `current_data['heater_mode']`. `ON` sets the cached `heater` true unless `water_adc <= 400` or a leak trip is active; `OFF`, that dry cutoff, or a leak trip sets it false. The `water_low` flag (`ADC <= 500`) only throttles Pump 2. |
+| `pump` | `mode` = `AUTO` / `ON` / `OFF` (default `AUTO`) | Sends `PUMP_<mode>` and updates `pump_mode`. The cached state respects a leak trip only; low water does not stop the pumps. |
+| `stirrer` | `mode` = `OFF` / `ON` / `PULSE` / `TIMED` (default `OFF`), `minutes` (default 10), `seconds` (default 30) | Sends `STIR:<0-3>:<mins>:<secs>` and updates `stir_mode`, `stir_int_min` and `stir_pulse_sec` (or `stir_timed_min`). The cached `stirrer` is true when the mode is not `OFF` and no leak trip is active. |
 | `temp_target` | `target` (default 39.0), `hysteresis` (default 0.3) | Rounds both to one decimal and sends `TEMP:<target>:<hysteresis>`; updates `target_temp` and `hysteresis`. |
 
 A valid action returns `{"status":"success"}`. As with `/set_mode`, the cache is
