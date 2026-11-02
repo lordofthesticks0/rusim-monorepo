@@ -444,7 +444,9 @@ void loop() {
     } else if (pump2Override == 2) {
       slewMosfet(pump2Mosfet, false, now);
     } else {
-      slewMosfet(pump2Mosfet, outletLevelOk && bathSensorOk && slaveActive, now,
+      // Water movement depends on the level only. Bath and bottle temperature
+      // gate the heater, never the circulation pumps.
+      slewMosfet(pump2Mosfet, outletLevelOk, now,
                  AUTO_PUMP_PWM_LIMIT, waterDepleted ? DRY_OUT_PUMP_PWM : 255U);
     }
 

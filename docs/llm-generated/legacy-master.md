@@ -89,9 +89,9 @@ bool inletLevelOk  = (waterRaw < IN_PUMP_STOP_ADC);   // 550
 bool outletLevelOk = (waterRaw > OUT_PUMP_STOP_ADC);  // 400
 ```
 
-Pump 1 (`D3`, into the reservoir) uses `inletLevelOk` only. Pump 2 (`D7`, out of the reservoir) uses `outletLevelOk && bathSensorOk && slaveActive`, where `bathSensorOk` is a valid DS18B20 reading and `slaveActive` is a packet received within `SLAVE_TIMEOUT_MS = 12000`.
+Pump 1 (`D3`, into the reservoir) and Pump 2 (`D7`, out of the reservoir) both use the level boolean alone. Temperature is not part of either decision: `bathSensorOk` (valid DS18B20 reading) and `slaveActive` (a slave packet within `SLAVE_TIMEOUT_MS = 12000`) gate the **heater** in section 6 and nothing else. A detached or silent bottle slave therefore stops AUTO heating, but circulation keeps running.
 
-AUTO behaviour with `currentMode == MODE_AUTO`, no leak, and healthy DD18B20/slave:
+AUTO behaviour with `currentMode == MODE_AUTO` and no leak:
 
 | `waterRaw` | State | Pump 1 (`D3`, IN) | Pump 2 (`D7`, OUT) |
 |---|---|---|---|
@@ -110,11 +110,11 @@ Override interaction:
 
 | Override | Pump 1 (`D3`) | Pump 2 (`D7`) |
 |---|---|---|
-| `0` AUTO | `inletLevelOk`, PWM `<= 200` | `outletLevelOk && bathSensorOk && slaveActive`, PWM `200` or `100` |
+| `0` AUTO | `inletLevelOk`, PWM `<= 200` | `outletLevelOk`, PWM `200` or `100` |
 | `1` FORCE ON | `inletLevelOk`, PWM `<= 255` (`maxPwm`) | `outletLevelOk`, PWM `<= 255` (`maxPwm`) |
 | `2` FORCE OFF | forced `0` | forced `0` |
 
-`FORCE ON` bypasses the `200` PWM cap and the `100` dry throttle, and bypasses `bathSensorOk`/`slaveActive` for Pump 2. It does **not** bypass the level interlocks: `FORCE ON` still stops Pump 1 at `>= 550` and Pump 2 at `<= 400`.
+`FORCE ON` bypasses the `200` PWM cap and the `100` dry throttle. It does **not** bypass the level interlocks: `FORCE ON` still stops Pump 1 at `>= 550` and Pump 2 at `<= 400`.
 
 ## 6. Mode and Safety Cutoffs
 
@@ -132,7 +132,7 @@ Heater logic inside `MODE_AUTO`:
 2. `heaterOverride == 1` → heater on, subject to the block above.
 3. `heaterOverride == 0` (AUTO) → off while `bathSensorOk` or `slaveActive` is false; otherwise hysteresis on the average bottle temperature: on below `targetBottleTemp - bottleHysteresis`, off at or above `targetBottleTemp`.
 
-`targetBottleTemp` (`20.0`–`50.0` °C) and `bottleHysteresis` (`0.1`–`5.0` °C) are set by the `TEMP:` command. The heater is driven from the *bottle* average reported by the slave; the bath sensor supplies only the `50 °C` ceiling and the health gate.
+`targetBottleTemp` (`20.0`–`50.0` °C) and `bottleHysteresis` (`0.1`–`5.0` °C) are set by the `TEMP:` command. The heater is driven from the *bottle* average reported by the slave; the bath sensor supplies only the `50 °C` ceiling and the health gate. The heater is the only actuator that reads `bathSensorOk` or `slaveActive`.
 
 ## 7. Unified 3-Channel MOSFET PWM Ramping and `0–255` Debit Control
 
@@ -177,7 +177,7 @@ Commands are newline-terminated ASCII strings received on `Serial` (115200 baud)
 ## 9. Known Gaps
 
 - **No hysteresis on the pump interlocks.** `waterRaw < 550` and `waterRaw > 400` flip on a single ADC count. Because `slewMosfet` restarts its 3-second ramp on every target change, a reading hovering at a threshold keeps restarting the ramp and the pump never settles at its target PWM. Only `waterDepleted` has debounce.
-- **Asymmetric gating.** Pump 2 requires `bathSensorOk && slaveActive`; Pump 1 does not. If the slave stops answering, Pump 2 stops and Pump 1 keeps filling until the `550` interlock stops it. No spill, but the bath sits at the top of the band with no circulation.
+- **A silent bottle slave stops AUTO heating.** `slaveActive` is false when no packet with a bottle temperature between 15 and 60 °C has arrived in the last 12 s, which leaves `bottle_temp_avg` at `-999` and the heater off in AUTO. Circulation is unaffected. Before the 2026-11-02 change this flag also held Pump 2 off, which is what made the OUT pump appear dead at every water level while the slave was detached.
 - **The `D6` switch cannot restore `AUTO`.** See section 3.
 - **The pump interlock thresholds are not telemetered.** `STATUS` reports only `water_thr = 500`; `IN_PUMP_STOP_ADC` and `OUT_PUMP_STOP_ADC` are visible only in the source.
 - **`pump_mode` mirrors Pump 1 only.** Use `pump1_mode` and `pump2_mode`; `pump_mode` duplicates `pump1_mode`.
