@@ -1179,13 +1179,13 @@
 
                     <div id="waterStatusCard" class="status-container clickable" onclick="toggleWaterDetails()">
                         <div class="indicator">
-                            <span class="water-label-wrap">WATER LEVEL (A7) <svg class="chevron-icon" viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" /></svg></span>
+                            <span class="water-label-wrap">WATER LEVEL (A9) <svg class="chevron-icon" viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" /></svg></span>
                             <span id="water">--</span>
                         </div>
                         <div class="water-adc-drawer">
-                            <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH A7 ADC</span><span class="mini-bottle-val" id="waterAdcVal">--</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH A9 ADC</span><span class="mini-bottle-val" id="waterAdcVal">--</span></div>
                             <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH VOLT</span><span class="mini-bottle-val" id="waterVoltVal">-- V</span></div>
-                            <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH THR</span><span class="mini-bottle-val" id="waterThrVal">≥ 200</span></div>
+                            <div class="mini-bottle-pill"><span class="mini-bottle-name">BATH THR</span><span class="mini-bottle-val" id="waterThrVal">≤ 500</span></div>
                             <div class="mini-bottle-pill" id="leakAdcPill" style="display: none;"><span class="mini-bottle-name">LEAK A8 ADC</span><span class="mini-bottle-val" id="leakAdcVal">--</span></div>
                             <div class="mini-bottle-pill" id="leakVoltPill" style="display: none;"><span class="mini-bottle-name">LEAK VOLT</span><span class="mini-bottle-val" id="leakVoltVal">-- V</span></div>
                             <div class="mini-bottle-pill" id="leakThrPill" style="display: none;"><span class="mini-bottle-name">LEAK THR</span><span class="mini-bottle-val" id="leakThrVal">&lt; 200</span></div>
@@ -2017,7 +2017,7 @@
                 setClass(DOM.water, data.water_low ? "warning" : "on");
 
                 const wAdc = Number(data.water_adc);
-                const wThr = Number.isFinite(Number(data.water_thr)) && Number(data.water_thr) > 0 ? Number(data.water_thr) : 200;
+                const wThr = Number.isFinite(Number(data.water_thr)) && Number(data.water_thr) > 0 ? Number(data.water_thr) : 500;
                 if (Number.isFinite(wAdc) && wAdc >= 0) {
                     setText(DOM.waterAdcVal, `${Math.round(wAdc)} / 1023`);
                     setText(DOM.waterVoltVal, `${((wAdc * 5.0) / 1023.0).toFixed(2)} V`);
@@ -2025,7 +2025,7 @@
                     setText(DOM.waterAdcVal, "--");
                     setText(DOM.waterVoltVal, "-- V");
                 }
-                setText(DOM.waterThrVal, `≥ ${Math.round(wThr)}`);
+                setText(DOM.waterThrVal, `≤ ${Math.round(wThr)}`);
 
                 const leakEnabled = Boolean(data.leak_enabled);
                 const leakDisplay = leakEnabled ? "" : "none";

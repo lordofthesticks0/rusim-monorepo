@@ -33,6 +33,7 @@ document is the source of truth for anything measured on real hardware.
 | [`firmware/motor-driver/`](../firmware/motor-driver/) | ATmega328 Nano | [platformio-environments.md](llm-generated/platformio-environments.md) §3 (L298N PWM ramp demo) |
 | [`firmware/methane-calibrate/`](../firmware/methane-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §4 |
 | [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate/) | ATmega328 Uno | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §3 |
+| [`firmware/tests/water-level/`](../firmware/tests/water-level/) | Arduino Uno | [water-level-test.md](llm-generated/water-level-test.md) |
 | [`firmware/temp-probe/`](../firmware/temp-probe/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §5 |
 | [`firmware/co2-calibrate/`](../firmware/co2-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §2 |
 
@@ -46,6 +47,7 @@ document is the source of truth for anything measured on real hardware.
 | [lvgl-redesign.md](llm-generated/lvgl-redesign.md) | `display-v9` UI redesign working document: as-built layout and behaviour per state and tab, empty redesign tables |
 | [migration-notes.md](llm-generated/migration-notes.md) | LVGL v8 to v9 changes and the required code edits |
 | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) | The four sensor calibration programs |
+| [water-level-test.md](llm-generated/water-level-test.md) | Standalone Uno sketch for reading a water level sensor on A0 |
 | [wt32-eth01-captive-recon.md](llm-generated/wt32-eth01-captive-recon.md) | Captive portal recon firmware |
 | [network-master.md](llm-generated/network-master.md) | Production WT32 firmware: portal login via display `rusim-line` link |
 | [link-serial-protocol.md](llm-generated/link-serial-protocol.md) | `rusim-line` v1 wire spec: wiring, line rules, command set, log forwarding, `PASSTH`, RS485 follow-on |

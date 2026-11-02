@@ -11,7 +11,7 @@
 #define HEATER_PIN        5     // 300W Heater SSR (Active HIGH trigger, 0V = OFF)
 #define SYSTEM_SWITCH_PIN 6     // Optional physical AUTO / OFF toggle
 #define RS485_CTRL_PIN    8     // MAX485 DE/RE control pin
-#define WATER_SENSOR_PIN  A7    // Analog water level probe
+#define WATER_SENSOR_PIN  A9    // Analog water level probe; near 1023 submerged, 500 dry
 
 // ==========================================
 // CONTROL PARAMETERS
@@ -20,7 +20,7 @@
 #define BOTTLE_HYSTERESIS    0.3    // Heat on < 38.7°C, off >= 39.0°C
 #define MAX_WATER_BATH_TEMP  39.8   // Hard bath ceiling clamp (°C)
 #define FAN_EMERGENCY_TEMP   45.0   // Overheat exhaust threshold (°C)
-#define WATER_THRESHOLD      200    // Minimum dry-run ADC threshold (~0.98V on 5V ADC)
+#define WATER_THRESHOLD      500    // Dry at or below this ADC reading; submerged is near 1023
 #define WATER_FAULT_LIMIT    5      // 5 consecutive 500ms checks (2.5s) to trip/clear
 #define WATER_CHECK_MS       500UL  // Time-gated water level sampling interval (ms)
 #define WATER_ADC_SAMPLES    16     // Number of ADC samples averaged per check
@@ -123,7 +123,7 @@ void setup() {
   lastTempRequest = bootNow;
 
   waterRaw = readWaterSensorAdc();
-  waterDepleted = (waterRaw < WATER_THRESHOLD);
+  waterDepleted = (waterRaw <= WATER_THRESHOLD);
   waterFaultCounter = waterDepleted ? WATER_FAULT_LIMIT : 0;
   lastWaterCheck = bootNow;
 }
@@ -216,7 +216,7 @@ void loop() {
   if (now - lastWaterCheck >= WATER_CHECK_MS) {
     waterRaw = readWaterSensorAdc();
     if (!waterDepleted) {
-      if (waterRaw < WATER_THRESHOLD) {
+      if (waterRaw <= WATER_THRESHOLD) {
         waterFaultCounter++;
         if (waterFaultCounter >= WATER_FAULT_LIMIT) {
           waterFaultCounter = WATER_FAULT_LIMIT;
@@ -226,7 +226,7 @@ void loop() {
         waterFaultCounter = 0;
       }
     } else {
-      if (waterRaw >= WATER_THRESHOLD) {
+      if (waterRaw > WATER_THRESHOLD) {
         if (waterFaultCounter > 0) waterFaultCounter--;
         if (waterFaultCounter == 0) {
           waterDepleted = false;

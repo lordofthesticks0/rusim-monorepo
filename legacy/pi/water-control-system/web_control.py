@@ -98,7 +98,7 @@ current_data = {
     'hysteresis': 0.3,
     'water_low': False,
     'water_adc': -1,
-    'water_thr': 200,
+    'water_thr': 500,
     'leak_enabled': False,
     'pump_leak': False,
     'leak_adc': -1,
@@ -446,7 +446,7 @@ def serial_worker():
                         if 'water_adc' in payload:
                             current_data['water_adc'] = int(payload.get('water_adc', -1))
                         if 'water_thr' in payload:
-                            current_data['water_thr'] = int(payload.get('water_thr', 200))
+                            current_data['water_thr'] = int(payload.get('water_thr', 500))
                         leak_enabled = bool(payload.get('leak_enabled', 0))
                         current_data['leak_enabled'] = leak_enabled
                         if leak_enabled:

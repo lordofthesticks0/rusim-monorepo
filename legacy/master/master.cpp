@@ -13,7 +13,7 @@
 #define HEATER_PIN        5     // 300W Heater SSR (Active-HIGH trigger, 0V = OFF)
 #define SYSTEM_SWITCH_PIN 6     // Physical AUTO / OFF toggle
 #define PUMP2_PIN         7     // Circulation Pump 2 MOSFET (Active-HIGH, PWM Timer 4 OC4B, Pumps OUT of reservoir)
-#define WATER_SENSOR_PIN  A7    // Analog water bath level probe (dry above WATER_DRY_TRIP_ADC)
+#define WATER_SENSOR_PIN  A9    // Analog water bath level probe (dry at or below WATER_DRY_THRESHOLD)
 #define LEAK_SENSOR_PIN   A8    // Analog pump leak detection probe (Wet fault when >= 200)
 
 // ==========================================
@@ -22,9 +22,8 @@
 float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
 float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define MAX_WATER_BATH_TEMP  50.0   // Hard safety bath ceiling clamp (°C)
-#define WATER_DRY_TRIP_ADC   900    // Enter dry mode when bath water ADC rises above this threshold
-#define WATER_DRY_CLEAR_ADC  800    // Leave dry mode when bath water ADC falls below this threshold
-#define ENABLE_LEAK_SENSOR   0      // 0 = disabled (only A7 water presence sensor installed); 1 = enable A8 leak probe
+#define WATER_DRY_THRESHOLD  500    // Dry at or below this ADC reading; submerged is near 1023
+#define ENABLE_LEAK_SENSOR   0      // 0 = disabled (only A9 water presence sensor installed); 1 = enable A8 leak probe
 #define LEAK_THRESHOLD       200    // Pump leak wet-detection ADC threshold (~0.98V on 5V ADC)
 #define WATER_FAULT_LIMIT    5      // 5 consecutive 500ms checks (2.5s) to trip/clear
 #define WATER_CHECK_MS       500UL  // Time-gated water & leak sampling interval (ms)
@@ -261,7 +260,7 @@ void setup() {
   stirCycleStart = bootNow;
 
   waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
-  waterDepleted = (waterRaw > WATER_DRY_TRIP_ADC);
+  waterDepleted = (waterRaw <= WATER_DRY_THRESHOLD);
   waterFaultCounter = waterDepleted ? WATER_FAULT_LIMIT : 0;
 
 #if ENABLE_LEAK_SENSOR
@@ -363,10 +362,10 @@ void loop() {
 
   // 5. Time-Gated Debounced Water Level (A7) & Pump Leak (A8) Verification (500ms cadence, 16x ADC avg)
   if (now - lastWaterCheck >= WATER_CHECK_MS) {
-    // 5a. Bath Water Level Probe (A7: dry mode when ADC > WATER_DRY_TRIP_ADC, clear below WATER_DRY_CLEAR_ADC)
+    // 5a. Bath Water Level Probe (A9: dry at/below WATER_DRY_THRESHOLD; submerged above it)
     waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
     if (!waterDepleted) {
-      if (waterRaw > WATER_DRY_TRIP_ADC) {
+      if (waterRaw <= WATER_DRY_THRESHOLD) {
         waterFaultCounter++;
         if (waterFaultCounter >= WATER_FAULT_LIMIT) {
           waterFaultCounter = WATER_FAULT_LIMIT;
@@ -376,7 +375,7 @@ void loop() {
         waterFaultCounter = 0;
       }
     } else {
-      if (waterRaw < WATER_DRY_CLEAR_ADC) {
+      if (waterRaw > WATER_DRY_THRESHOLD) {
         if (waterFaultCounter > 0) waterFaultCounter--;
         if (waterFaultCounter == 0) {
           waterDepleted = false;
@@ -587,8 +586,7 @@ void sendTelemetryStatus(unsigned long now) {
   doc["hysteresis"] = serialized(String(bottleHysteresis, 1));
   doc["water_low"] = waterDepleted ? 1 : 0;
   doc["water_adc"] = waterRaw;
-  doc["water_thr"] = WATER_DRY_TRIP_ADC;
-  doc["water_clear_thr"] = WATER_DRY_CLEAR_ADC;
+  doc["water_thr"] = WATER_DRY_THRESHOLD;
   doc["leak_enabled"] = ENABLE_LEAK_SENSOR;
   doc["pump_leak"] = pumpLeakDetected ? 1 : 0;
   doc["leak_adc"] = leakRaw;
