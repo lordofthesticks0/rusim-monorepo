@@ -1,75 +1,154 @@
-# LLM Agents Guide
+# LLM Agent Rules and Guidelines
 
-**IMPORTANT**: At NO circumstances should you ever modify this file. If you find discrepancies, tell the user instead of modifying yourself unless given explicit clearance. Notify the user instead, as a simple FYI instead of making it a big thing.
+## Description
 
-Do not open any documentation files unless you think it is relevant. There is plenty of documentation and you might drown yourself in unnecessary context.
+This project is a monorepo for an in-vitro rumen simulation. Remote is available on `https://github.com/lordofthesticks0/rusim-monorepo`
+
+Context is scarce. Do not read files or documentation unless they are relevant to the subsystem you are working on. Avoid exploring unrelated parts of the repository.
+
+Your users are undergraduate students who are learning while working on this project. Explain what you did, why you did it, and how it works. Be educational and sufficiently detailed without unnecessary wording.
 
 ## Prerequisites
 
-This project requires mainly three things: `bun`, `pio`, and `uv`. All need to be available in the terminal. Install them for the user if they are not yet installed.
+The following tools must be available in your terminal:
 
 - `bun`: https://bun.com/docs/installation
 - `pio`: https://docs.platformio.org/en/latest/core/installation/methods/installer-script.html
 - `uv`: https://docs.astral.sh/uv/getting-started/installation
 
-Before touching anything, always make sure you have the latest version of the code by pulling from the remote.
+Check their availability before starting work. Install missing prerequisites using their official instructions.
 
-## Roles
+## Rules
 
-As an AI agent, your job scope will be limited to a small subset of this repo. This monorepo contains both firmware and the dashboard, as well as documentation. Your primary task will most likely fall to be one of the two:
+The following rules are mandatory for all agents.
 
-### 1. Firmware engineer
-If the task at hand mentions firmware, you should ignore any thought of the dashboard. Your focus will be mainly C++ code available at `firmware/`. It is absolutely essential to look at the [hardware documentation](docs/hardware.md) first. DO NOT edit this documentation because it relies on human testing and input. At times, there might be references to the dashboard. Refer to its documentation too if necessary. If you feel this documentation is outdated or unclear, inform the user.
+### General
 
-As a firmware engineer, you will be working on memory-unsafe C code. A memory safety instruction called a "skill" should be loaded in your context. Tell them that the skill is not installed install it by running `bunx skills add https://github.com/wshobson/agents --skill memory-safety-patterns`. Load it yourself if the user forgots to.
+- NEVER modify this `AGENTS.md` file unless the user explicitly authorizes it. Report discrepancies to the user instead.
+- ALWAYS document subsystems.
+- When a decision needs to be made, ask the user first. Present the available options and their pros and cons before asking them to choose.
+- Before starting work, check the Git working tree and ensure you are working with the latest remote code. Do not overwrite local changes or resolve divergent branches without consulting the user.
+- NEVER commit anything unless the user explicitly authorizes it.
+- Never add AI attribution to commit messages.
+- Never read or modify any `.env` file. `.env.example` is allowed.
+- The `reusable-prompts/` directory is strictly off-limits. Only access its contents when the user explicitly instructs you to.
 
-If the user wants to make a one-off throwaway code, put it in `firmware/tests`. Modify the env to accomodate the latest firmware.
+### Firmware
+- Scope firmware-related work to `firmware/`. 
+- Read `docs/hardware.md` before making firmware changes. This documentation relies on human testing and input. NEVER modify it. Report outdated or unclear information to the user.
+- Load the `memory-safety-patterns` skill before working on firmware. If unavailable, inform the user and install it using:
+  `bunx skills add https://github.com/wshobson/agents --skill memory-safety-patterns`
+- Put one-off or temporary tests in `firmware/tests/`.
+- Adjust the relevant PlatformIO environment configuration when necessary to accommodate firmware changes.
 
-### 2. Full-stack web developer
-If the task at hand mentions the dashboard, you should ignore any thought of firmware. Your focus will be mainly TypeScript code available at `dashboard/`. References to the database should be looked up to [the documentation](docs/llm-generated/database.md). You are free to edit that documentation. 
+### Dashboard
+- Scope dashboard-related work to `dashboard/`.
+- Use Bun for package management, scripts, development, and testing. Do not substitute npm, yarn, or pnpm.
+- Consult the relevant database documentation in `docs/llm-summary/` before making database-related changes.
+- Never read or modify `.env` files. Use `.env.example` when configuration details are needed.
 
-The dashboard uses `bun` to run things. Stick to it.
+### Legacy Work
+- Scope legacy-related work to `legacy/`.
+- The legacy system runs on a Raspberry Pi 3B.
+- The device is reachable at `invitro@10.92.128.23`. Password authentication is disabled; SSH key authentication is configured.
+- The system consists of a self-contained HTML dashboard displayed through Chromium in kiosk mode and a Python Flask server that processes the data.
+- Before making changes, retrieve the existing files and data from the Raspberry Pi into this repository. Make and verify changes locally before deploying them.
+- Ask the user for explicit approval before pushing changes to the Raspberry Pi.
 
-**IMPORTANT**: Never ever, **EVER** read the raw `.env` file. Strictly off limits. The harness should disallow you but you should not test it regardless. Read `.env.example` instead if available.
+### Documentation
 
-### 3. Legacy System Administrator
-If the task at hand mentions any Raspberry Pi, your work will be scoped entirely within `legacy/`. The system is a Raspberry Pi 3B, reachable at `invitro@10.92.128.23`. Password login has been disabled; the keys from this device were added. In short, what it's doing is that it uses a self-contained HTML file as a dashboard with Chromium running at kiosk mode and a Python Flask server to process the data. 
+#### General Requirements
 
-Should you need to make changes, first pull the existing data to this repo, modify, then push to the Pi.  
+- Every subsystem must be documented. A subsystem is defined as a single microcontroller, a backend, or a frontend.
+- Write all AI-generated documentation in `docs/llm-summary/`.
+- The only exception is `docs/index.md`, which may be edited to maintain the documentation index.
+- ALWAYS update `docs/index.md` when adding new documentation files.
+- Do not write AI-generated documentation elsewhere.
+- Read documentation only when relevant to the subsystem being worked on.
+- Do not read unrelated documentation merely to learn its formatting. Keep documentation factual, descriptive, and educational.
+- Use minimal wording without unnecessary metaphors, embellishments, or vague expressions. Keep it simple for the user.
 
-## Context and Documentation
+#### Documentation Format
 
-Your context is limited in the codebase. This is a very large monorepo, with many lines of code and documentation. It is best practice to not immediately open any documentation files unless you think it is relevant. Only open documentation files when you are going to work on that specific part. Do not open them if you are not going to work on it.
-
-Make great use of `graphify` to not litter your context.
-
-Humans however, are not limited in a similar way. Which is why, you MUST write and document everything you do. Every subsystem should be documented in `docs/llm-generated/`. Do not put any documentation written by you outside of that directory. Follow the existing format, where you must ALWAYS add a footer as such:
+Every generated document must end with the following footer:
 
 ```
 ---
 Content generated by `provider/model-name` in `harness`.
 ```
 
-Further edits do NOT need to be clarified. Simply rewrite that you now generated the content.
+Replace the placeholders with the actual provider, model, and harness information when available. If not shown, say `Content generated by LLM`.
 
-Do not look up other documentation just to see the format. The only thing necessary is this footer. The full documentation index is available [here](docs/index.md). The file is the exception to the edit rule. You may edit the file if you were to add further documentation. You also MUST add to the documentation index whenever you add a new subsystem.
+When updating an existing generated document, update its contents and footer accordingly. Do not ask the user for clarification merely to revise generated documentation.
 
-Your users are students. It would help us if you were to be particularly astute with your documentation and descriptive. Keep minimal word garnish. Instead of "a parameter worth varying," word garnish would have been "a dial worth turning." Instead of "this point still matters," they write "this point earns its keep." The phrases exist to display the writer, not to convey the idea, and readers can tell. This truly irritates: it makes the reader work harder so the writer can perform. It is also imprecise. Metaphors drag in connotations the writer did not choose and cannot control. The fix is to say what you mean. When a literal phrase is available, use it. **Do not use word garnish.**
+#### Graphify
 
-Should the user decides to put off work into another day or another session, write it to [the backlog](backlog.md). Remind the user from time to time about the backlog. 
+Graphify is a local CLI tool that builds and queries a knowledge graph of the codebase. It is not an MCP dependency. Use its CLI directly to understand architecture and dependencies without repeatedly reading unrelated source files.
 
-When the user corrects you, document all mistakes in `docs/llm-generated/learned-mistakes.md`. You may also read the file to learn from previous mistakes.
+**Installation**
 
-Documentation is also assisted by `graphify`. Use it to search the code. Install with `uv tool install graphify` if not yet installed.
+The PyPI package is named `graphifyy` (two `y`s), while its executable is named `graphify`.
 
-## Decisions
+If Graphify is not installed, install it with:
 
-Whenever you need to decide, please ask the user first. List pros and cons each decision, then ask the user to choose. This may also double as a learning opportunity for the user. If your harness does not have a question answering tool, ask the user manually.
+```bash
+uv tool install graphifyy
+```
 
-## Restrictions
+Verify its availability:
 
-The following files and directories are **OFF LIMITS**. Do **NOT** read or edit these files:
-- `reusable-prompts/`. The user will instruct you to read a certain one if necessary, and generally the harness will attach the file for you anyways.
-- Any `.env` file. `.env.example` is allowed.
+```bash
+graphify --help
+```
 
-When using Git, remember to NEVER commit anything, unless the user explicitly says so. You can ask, but never commit on your own behalf, not until the user explicitly says you to commit. When doing so, do NOT add attributions to the commit message. Right before committing, run `graphify update .` to update Graphify's index.
+**Usage**
+
+1. Build or refresh the codebase graph:
+
+   ```bash
+   graphify update .
+   ```
+
+2. Ask architectural questions and explore relevant relationships:
+
+   ```bash
+   graphify query "How does the data flow through the backend?"
+   ```
+
+3. Inspect a specific component and its connections:
+
+   ```bash
+   graphify explain "ComponentName"
+   ```
+
+4. Trace the shortest dependency path between two components:
+
+   ```bash
+   graphify path "ComponentA" "ComponentB"
+   ```
+
+5. The default graph is stored in `graphify-out/graph.json`. CLI queries read from this graph.
+
+**Rules for Using Graphify**
+
+- Query Graphify before performing broad source-code searches.
+- Use `query` to understand architecture and locate relevant components.
+- Use `explain` to understand a specific component and its immediate relationships.
+- Use `path` to trace dependencies between components.
+- Use the graph's file and line references to locate the relevant source code.
+- Verify important findings against the actual source code. Graph relationships may be inferred or ambiguous.
+- Refresh the graph after significant code changes.
+- Before committing, run `graphify update .` to ensure the graph reflects the latest code.
+
+### Context Management
+
+- Do not explore unrelated files, it will bloat your context.
+- Prefer Graphify queries over broad file searches when exploring code relationships.
+- Read source files only after establishing which files are relevant.
+- Do not open entire documentation directories. Read only the documents necessary for the current task.
+
+### Backlog and Continuity
+
+- When the user decides to postpone work to another session, document the outstanding tasks in `backlog.md`.
+- When the user corrects an agent, document the mistake and its lesson in `docs/llm-summary/learned-mistakes.md`.
+- Agents may read `learned-mistakes.md` when relevant to avoid repeating previous mistakes.
