@@ -21,13 +21,13 @@
 // ==========================================
 float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
 float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
-#define MAX_WATER_BATH_TEMP  50.0   // Hard safety bath ceiling clamp (°C)
-#define WATER_DRY_THRESHOLD  500    // Dry at or below this ADC reading; submerged is near 1023
-#define IN_PUMP_STOP_ADC     550    // Stop reservoir inlet pump at or above this ADC reading
-#define OUT_PUMP_STOP_ADC    400    // Stop reservoir outlet pump at or below this ADC reading
+#define MAX_WATER_BATH_TEMP  60.0   // Hard safety bath ceiling clamp (°C)
+#define WATER_DRY_THRESHOLD  450    // Dry at or below this ADC reading; submerged is near 1023
+#define IN_PUMP_STOP_ADC     500    // Stop reservoir inlet pump at or above this ADC reading
+#define OUT_PUMP_STOP_ADC    350    // Stop reservoir outlet pump at or below this ADC reading
 #define ENABLE_LEAK_SENSOR   0      // 0 = disabled (only A9 water presence sensor installed); 1 = enable A8 leak probe
-#define LEAK_THRESHOLD       200    // Pump leak wet-detection ADC threshold (~0.98V on 5V ADC)
-#define WATER_FAULT_LIMIT    5      // 5 consecutive 500ms checks (2.5s) to trip/clear
+#define LEAK_THRESHOLD       200    // Pump leak wet-detection ADC threshold
+#define WATER_FAULT_LIMIT    3      // Amount of consecutive 500ms checks to trip/clear
 #define WATER_CHECK_MS       500UL  // Time-gated water & leak sampling interval (ms)
 #define WATER_ADC_SAMPLES    16     // Number of ADC samples averaged per check
 #define SLAVE_TIMEOUT_MS     12000  // Failsafe timeout if Slave stops responding

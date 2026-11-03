@@ -1,6 +1,7 @@
 # The Backlog 
 > For LLM agents: Add as little text as possible while still being descriptive. When things are done, **REMOVE** it. 
 
+- [LEGACY] Find a better way to tweak water level thresholds
 - [ALL] Remove LLM design artifacts (unnecessary descriptions like this).
 - [ALL] Indonesian localization.
 - [FIRMWARE] Delegate GPIOs in the master ESP for control.

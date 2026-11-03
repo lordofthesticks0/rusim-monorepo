@@ -1,17 +1,17 @@
-# Graph Report - rusim-monorepo  (2026-11-02)
+# Graph Report - rusim-monorepo  (2026-11-03)
 
 ## Corpus Check
-- 157 files · ~449,042 words
+- 157 files · ~449,038 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 12 file(s) not represented in the graph (top: (none) 4, .toml 2, .example 1)
 
 ## Summary
 - 1833 nodes · 3321 edges · 119 communities (108 shown, 11 thin omitted)
-- Extraction: 81% EXTRACTED · 19% INFERRED · 0% AMBIGUOUS · INFERRED: 643 edges (avg confidence: 0.91)
+- Extraction: 81% EXTRACTED · 19% INFERRED · 0% AMBIGUOUS · INFERRED: 644 edges (avg confidence: 0.91)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `09f02e9a`
+- Built from commit: `512256f4`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
