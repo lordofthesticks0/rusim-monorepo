@@ -21,7 +21,7 @@
 // ==========================================
 float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
 float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
-#define MAX_WATER_BATH_TEMP  60.0   // Hard safety bath ceiling clamp (°C)
+#define MAX_WATER_BATH_TEMP  50.0   // Hard safety bath ceiling clamp (°C)
 #define WATER_DRY_THRESHOLD  450    // Dry at or below this ADC reading; submerged is near 1023
 #define IN_PUMP_STOP_ADC     500    // Stop reservoir inlet pump at or above this ADC reading
 #define OUT_PUMP_STOP_ADC    350    // Stop reservoir outlet pump at or below this ADC reading
