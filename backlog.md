@@ -16,4 +16,3 @@
 - [FIRMWARE] Legacy master: add hysteresis to the pump level interlocks (a single ADC count at 550/400 restarts the 3 s ramp), let the `D6` switch restore `AUTO`, and make `MODE_AUTO` clear the boot `FORCE OFF` overrides. See docs/llm-generated/legacy-master.md §9.
 - [FIRMWARE] Legacy Pi CSV log has one `Pump` column fed by `pump1 || pump2`; split it so runs show which pump moved water. See docs/llm-generated/raspi-docs/07-data-and-logging.md.
 - [ALL] docs/hardware.md has a broken link (`../../firmware/max485-test/main.cpp`); it is a human-owned file, so a human must fix it.
-- [ALL] Five llm-generated docs have no generation footer (raspi-docs/02, raspi-docs/08, migration-notes.md, wt32-eth01.md, learned-mistakes.md); their original generator is unknown. See docs/llm-generated/documentation-review-legacy.md §3.
