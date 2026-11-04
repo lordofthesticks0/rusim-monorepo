@@ -12,28 +12,29 @@ This document explains what the dashboard is, what it does from page load to sig
 
 It is **read-only**. There is no write path in the application. It talks to Supabase over PostgREST and RPC only.
 
-There is no UI framework, no state library, and no chart library. The chart is hand-built SVG path data computed in a 20-line function. The client and its pure modules are about 1,500 lines; the tests add about 340.
+There is no UI framework, no state library, and no chart library. The chart is hand-built SVG path data computed in a 20-line function. The client and its pure modules are about 2,050 lines; the tests add about 440.
 
 ### 1.1 File map
 
 | File | Lines | Responsibility |
 |---|---|---|
 | `index.tsx` | 5 | Mounts `<App/>` into `#root`, imports the stylesheet |
-| `src/App.tsx` | 696 | Everything visible: login screen, both views, all components, all chart math |
+| `src/App.tsx` | 1145 | Everything visible: login screen, all three views, all components, all chart math |
 | `src/data.ts` | 275 | Every Supabase read, the auth RPCs, and the non-numbering domain logic |
 | `src/chambers.ts` | 58 | Maps stored 0-based bottle ids to displayed chamber numbers and splits current presence |
 | `src/history.ts` | 132 | Pure history helpers: reading sort, experiment/chamber selection, per-point details, chamber grouping, selection toggle |
-| `src/monitoring.ts` | 28 | Pure monitoring helpers: poll eligibility, active-experiment selection, monitoring-row selection |
+| `src/monitoring.ts` | 79 | Pure monitoring helpers: poll eligibility, active-experiment selection, monitoring-row selection, synthetic preview data |
+| `src/compare.ts` | 85 | Pure compare helpers: selection cap, duplicate check, add/remove, series labels and colours |
 | `src/auth.ts` | 110 | Session lifecycle: localStorage persistence, expiry timer, retry backoff |
 | `src/supabase.ts` | 72 | Client construction, schema pinning, session header injection |
 | `src/csv.ts` | 95 | RFC 4180 CSV serialisation and download |
-| `src/styles.css` | 244 | All styling, one declaration block per line |
+| `src/styles.css` | 279 | All styling: framed-sheet tokens, shell, presence strip, KPI strip, charts, tables, states |
 | `scripts/dev-db.ts` | 697 | Dev-only database seeding and token provisioning |
 | `supabase/migrations/*.sql` | 17 files | Schema, authentication, lockdown |
 | `netlify.toml` | 23 | Build config and security headers |
 | `src/types/domain.ts` | 60 | Hand-written domain types and experiment-id helpers |
 | `src/types/database.ts` | 840 | Supabase-generated schema types for `device_data` and legacy `public` |
-| `src/*.test.ts` | 338 | `bun test` suites for history grouping, monitoring isolation, chamber numbering, and CSV output |
+| `src/*.test.ts` | 442 | `bun test` suites for history grouping, monitoring isolation, chamber numbering, CSV output, and compare selection |
 
 ### 1.2 What it is not
 
@@ -312,21 +313,21 @@ The consequence is a worst-case latency of 5m30s for a device that samples every
 
 The default view, reached by the "Monitoring" nav tab.
 
-**Top bar** — connection status (`Loading` / `Unable to load` / `Data loaded` / `No readings`), the latest sample's localised timestamp, `Auto-refreshing` or `No live experiment`, and a sign-out button. The `.pulse` dot tone follows the view state: `pending` while loading, `error` on failure, `ok` with data, `idle` with none.
+**Shell** — a tinted L-frame (sidebar + 48px top bar on a green-grey ground) with the work on a white sheet inset 8px from the right and bottom edges, 16px radius, 1px edge, no shadow. The sidebar names the product (RuSim / Telemetry with a chamber mark), scopes to `Device {id}` with owner, and holds the three views (Monitoring, Experiment history, Compare) with a grey-pill active state. The top bar holds the page name, a freshness stamp (`Data loaded · Updated …`), and the near-black `Refresh data` primary. Sign out lives at the sidebar bottom with the session expiry. On a phone the frame disappears: the sidebar folds behind a Menu button and the sheet becomes the screen.
 
-**Empty state** — when no experiment looks live, the body is replaced by a panel headed `Tidak ada eksperimen aktif` ("no active experiment") pointing at Experiment History. The poll keeps running, so starting an experiment repopulates the view.
+**Empty state** — when no experiment looks live, the body is replaced by a panel headed `No live experiment` pointing at Experiment history. The poll keeps running, so starting an experiment repopulates the view.
 
-**Chamber selector** — a `<select>` with `bottleCount` options numbered `1` through `bottleCount`, defaulting to Chamber 1. Options retain internal values from `internalChamberIds(bottleCount)` and use `displayChamberNumber` for visible labels. This is the only client-side drill-down control in the whole app.
+**Preview flag** — `DEV_FORCE_LIVE_EXPERIMENT` in `monitoring.ts` is temporarily `1` so Monitoring can be reviewed without a device. When no real experiment is live, the view shows synthetic fresh data for experiment 999 (`generateSyntheticLiveReadings`: 12 samples per chamber at 5-minute intervals, latest 2 minutes ago, chambers 7 and 19 disconnected, one null sensor) with a `Preview` notice. History always shows real data. Set the flag to `0` before deploying.
 
-**Device identity strip** — `Device {id} | {owner_name} ({owner_email})`, with "Unnamed owner" when null.
+**Chamber presence strip** — one cell per configured chamber (`bottleCount` cells, 24 on the dev device), each labelled with its display number. Connected cells are white; disconnected cells (absent from the newest sample) take the warning tint. The selected chamber carries a 2px accent underline. Clicking a cell selects that chamber. This is the product's signature element: it shows the whole device at the latest sample at a glance.
 
-**Four status cards** — Chamber, Samples (that chamber's row count), Latest sample, and Connection. Connection resolves in priority order: `Disconnected` if the chamber is absent from the newest sample, else `Concluded` if the newest sample is older than 10 minutes, else `Live`, else `No data`.
+**Disconnection notice** — rendered only when a latest sample exists *and* at least one configured chamber is missing from it. With the default dev configuration (24 configured, chambers 1–8 reporting) this reads: "Disconnected at …: chambers Chamber 9, Chamber 10, … Chamber 24 sent no data."
 
-**Disconnection banner** — rendered only when a latest sample exists *and* at least one configured chamber is missing from it. With the default dev configuration (24 configured, chambers 1–8 reporting) this reads: "Disconnected at …: chambers Chamber 9, Chamber 10, … Chamber 24 sent no data."
+**Five KPI cells as parameter tabs** — pH, Temp, CO2, CH4, Pressure, read from the selected chamber's newest sample in the active experiment, in one container split by 1px dividers (no icons, no tiles). Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as a grey dash at label size. Selecting a cell switches the chart below to that parameter (the selected cell carries a 2px accent rule).
 
-**Five metric cards** — pH, Temp, CO2, CH4, Pressure, read from the selected chamber's newest sample in the active experiment. Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as `-` with "No reading".
+**Status line** — chamber, connection state (`Disconnected` / `Concluded` / `Live` / `No data`), sample count, and latest sample time, in one 12px line under the KPI strip.
 
-**One chart** — with a parameter picker defaulting to CH4, plotting the selected chamber's rows for the **active experiment only**; the panel heading still reads "Across experiments", which is the one label that no longer matches the data. Fewer than two rows renders "Not enough data for chart."
+**One chart** — plotting the selected chamber's rows for the **active experiment only**, headed `{parameter} readings` with the record count. The line is 2px in the chart teal with round y ticks and 3–5 gridlines; a `null` breaks the line. Each sample is a focusable point; hovering, focusing or clicking shows a tooltip above the point with timestamp and value. Fewer than two rows renders "Not enough data for chart."
 
 ### 5.6 Live vs concluded is inferred, never stored
 
@@ -349,7 +350,7 @@ Summaries are sorted by `experiment_id` **descending**, which puts the testing e
 
 Reached by the "Experiment History" nav tab. Two-stage drill-down.
 
-**Stage 1 — the list.** Built from the *same* in-memory `readings` array as the Monitoring view, not a separate query. Each item shows the formatted experiment id, its reading count, a `Testing experiment` marker when the id is 0, Concluded/Live, and the last sample time.
+**Stage 1 — the list.** Built from the *same* in-memory `readings` array as the Monitoring view, not a separate query. Each row shows the formatted experiment id, its reading count, a `Testing experiment` marker when the id is 0, a Live/Concluded pill, and the last sample time. The list is capped at six rows with a `Show all N` toggle. The selected row takes the active fill.
 
 Selection starts empty; clicking the selected item clears it (`toggleExperimentSelection()`), and choosing another replaces it. A notice asks the operator to select an experiment until one is chosen.
 
@@ -357,9 +358,9 @@ Selection starts empty; clicking the selected item clears it (`toggleExperimentS
 
 That ordering is load-bearing, and the comment says so: it keeps a multi-page read contiguous, so each chamber's samples stay together.
 
-**"Chamber Readings" sub-panel** — a chamber selector, five metric cards read from the selected chamber's newest sample (`selectedChamberReadings.at(-1)`), and five per-parameter charts in a grid. The charts are interactive: each sample is a focusable circle, and hovering, focusing or clicking it shows a tooltip with timestamp, chamber, experiment, parameter and value (`getHistoryPointDetails()`).
+**"Chamber Readings" sub-panel** — a chamber selector, and five per-parameter charts stacked in one column. The charts are interactive: each sample is a focusable circle, and hovering, focusing or clicking it shows a tooltip above the point with timestamp and value (`getHistoryPointDetails()`).
 
-**"Results" sub-panel** — three sections: a four-card overview (Experiment, Status, Chambers, Readings), one Min/Avg/Max block per parameter inside each chamber card, and one card per chamber produced by `groupReadingsByChamber`.
+**"Results" sub-panel** — one table with a row per chamber (`groupReadingsByChamber`): chamber, sample count, and for each parameter the mean with min – max as a 12px subline in the same right-aligned cell. A dash means no bottle reported that sensor.
 
 **CSV download** — see §8.
 
@@ -368,6 +369,16 @@ That ordering is load-bearing, and the comment says so: it keeps a multi-page re
 `isTruncated(readings.length)` compares against `MAX_READING_ROWS`. When a read hit the cap, the detail pane shows: *"Only the most recent 5,000 readings were loaded, so this experiment is incomplete on screen and any CSV export is truncated too."*
 
 The export is deliberately of what is on screen rather than a fresh query, and the comment explains the tradeoff: *"This exports what is already on screen rather than re-querying, so the file and the charts always describe the same rows. A truncated read therefore produces a truncated file, which is why the limit is called out on screen next to the button."*
+
+### 5.9 The Compare view
+
+Reached by the "Compare" nav tab. Overlays up to four chamber series on one chart; chambers may come from different experiments.
+
+**Selection** — a panel headed `Chambers to compare` with an Experiment select, a Chamber select (all configured chambers), an `Add chamber` button, and `Clear all`. Each added series becomes a chip with a colour dot, its label (`Experiment 3 · Chamber 5`), and a remove button. The header shows `n of 4`. The rules live in `compare.ts`: `MAX_COMPARE_SERIES` is 4, the same experiment and chamber cannot be added twice, but the same chamber in different experiments can. `Add chamber` is disabled at the cap or on a duplicate. Colours are assigned by position in the selection list (`--chart-1` teal, `--chart-2` saturated blue, `--chart-3` saturated orange, `--chart-4` saturated pink), so removing a middle chip shifts later colours.
+
+**Data** — each distinct experiment in the selection is fetched once via `fetchExperimentReadings` and cached in `readingsByExperiment`; the chart filters each cache entry with `selectChamberReadings`. Compare uses real data only (the synthetic preview experiment 999 never appears in the experiment list) and does not poll.
+
+**Chart** — `CompareChart` draws all series on one SVG with a shared y-axis (ticks computed from the flattened rows of every series) and x aligned by sample order (first sample to first sample, each series stretched across the plot width). The x labels come from the longest series. Each series is a 2px line in its colour with the same focusable points as the single-series charts; the tooltip above a point shows the series label, timestamp, and value. A legend lists each series with its colour dot and sample count. Fewer than two rows in every series renders "Not enough data for chart."
 
 ---
 
@@ -434,7 +445,7 @@ Four dashed horizontal gridlines, the SVG absolutely positioned over them, and `
 
 ### 6.4 What the chart is not
 
-No y-axis, no value labels, no gridline values, no tooltips, no zoom, no point markers, no crosshair. The only way to read a value off a chart is the metric cards.
+No zoom, no crosshair. Both the Monitoring and History charts have focusable points with a bare-text tooltip above the point (timestamp and value only). Values are read from the KPI strip (Monitoring) or the y ticks and tooltips (History).
 
 ---
 
@@ -593,9 +604,9 @@ The History list is derived from the same in-memory `readings` array, which is c
 
 The truncation notice only appears in the *detail* pane, so a vanished experiment is never explained. Only the Monitoring view has a per-experiment path to the full data, and it is the path that cannot reach the older rows.
 
-### 12.2 The chart heading says "Across experiments"
+### 12.2 The chart heading says "Across experiments" (fixed)
 
-The Monitoring chart is now filtered to the active experiment (`selectMonitoringReadings()`), but its eyebrow still reads "Across experiments". The label describes the previous behaviour.
+The Monitoring chart is filtered to the active experiment (`selectMonitoringReadings()`). The heading now reads `{parameter} readings` (for example `CH4 (ppm) readings`), so it no longer describes the previous behaviour.
 
 ### 12.3 Dead code
 
@@ -603,9 +614,6 @@ The Monitoring chart is now filtered to the active experiment (`selectMonitoring
 |---|---|---|
 | `ReadingWithStatus` | `data.ts:40` | Exported, never imported |
 | `Metadata` | `types/domain.ts:1` | Exported, never imported |
-| `.session-list` | `styles.css:24` | Unused half of a rule whose other selector, `.result-list`, is used |
-| `.experiment-status-card`, `.status-label`, `.experiment-code`, `.experiment-name` | `styles.css:6-10` | No matching JSX |
-| `.line-secondary` | `styles.css:4` | No matching JSX |
 
 `getMetricValue` (`App.tsx:608`) is not dead — `createChartPoints()` calls it on
 every row — but it is a one-line pass-through over `getParameterValue` and could
@@ -673,6 +681,7 @@ Open items:
 | `CONCLUDED_AFTER_MS` | 600,000 (10 min) | `data.ts:61` |
 | `POLL_INTERVAL_MS` | 330,000 (5m30s) | `data.ts:64` |
 | `MAX_READING_ROWS` | 5,000 | `data.ts:74` |
+| `MAX_COMPARE_SERIES` | 4 | `compare.ts` |
 | `PAGE_SIZE` | 1,000 | `data.ts:83` |
 | `TESTING_EXPERIMENT_ID` | `0` | `types/domain.ts:52` |
 | Session TTL | 12 hours | migration `20261001000000` |
@@ -708,13 +717,17 @@ Open items:
 
 Paste a device token → Postgres SHA-512s it, matches the digest against a stored hash, and returns a 256-bit session token scoped to that one device, valid 12 hours. The browser stores it in localStorage and sends it as `x-device-session` on every request. RLS resolves the header back to a `device_id`, and the query returns that device's rows and nothing else.
 
-The app pulls up to 5,000 rows newest-first, derives an experiment list by grouping on `experiment_id`, infers Live versus Concluded purely from whether the newest sample is under 10 minutes old, selects the first live experiment, works out which configured chambers are missing from its newest sample and calls them disconnected, then renders four status cards, five metric cards, and one hand-built SVG chart for the selected chamber. It re-polls every 5m30s whenever Monitoring is open, and halts permanently on any fetch error until Refresh is pressed.
+The app pulls up to 5,000 rows newest-first, derives an experiment list by grouping on `experiment_id`, infers Live versus Concluded purely from whether the newest sample is under 10 minutes old, selects the first live experiment, works out which configured chambers are missing from its newest sample and calls them disconnected, then renders a chamber presence strip, five KPI cells (which double as the chart parameter tabs), and one hand-built SVG chart for the selected chamber. It re-polls every 5m30s whenever Monitoring is open, and halts permanently on any fetch error until Refresh is pressed.
 
-The History tab reuses the same in-memory array to list experiments, then issues a second paged read for the selected one and shows a chamber selector, per-parameter charts, per-chamber min/average/max, and a CSV export of exactly the rows on screen.
+The History tab reuses the same in-memory array to list experiments, then issues a second paged read for the selected one and shows a chamber selector, per-parameter charts, a per-chamber results table (mean with min – max), and a CSV export of exactly the rows on screen.
+
+The Compare tab overlays up to four (experiment, chamber) series on one chart with a shared y-axis, aligned by sample order. Chambers may come from different experiments; each distinct experiment is fetched once and cached. Series colours are teal, saturated blue, saturated orange, and saturated pink by selection order.
 
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Content generated by `codebuff/deepseek-v4.1-flash` in `freebuff`.
+Content generated by `provider/model-name` in `harness`.
 
-Update by `xiaomi/mimo-v2.6-flash-slow` in `freebuff` (2026-10-27): re-counted files, added `history.ts` and `monitoring.ts`, corrected dead-code and constant line numbers.
+Update by `Crouton Alpha` in `Zed` (2026-11-04): redesigned the dashboard to the framed-sheet app style (seed 1346043069) — tinted L-frame with white sheet, IBM Plex Sans with Mono for IDs, chamber presence strip as the signature element, KPI cells as parameter tabs, y-axis ticks on charts, results as a table. Updated file line counts, Monitoring/History descriptions, chart notes, and fixed the "Across experiments" heading and dead CSS entries. Added temporary `DEV_FORCE_LIVE_EXPERIMENT=1` preview flag with synthetic live data for Monitoring (set to 0 before deploying).
+
+Update by `Crouton Alpha` in `Zed` (2026-11-04): added the Compare view — overlay up to four (experiment, chamber) series on one chart with distinct colours, shared y-axis, and sample-order alignment. Added `compare.ts` pure helpers with tests, `--chart-4` brick red, and §5.9 documentation.

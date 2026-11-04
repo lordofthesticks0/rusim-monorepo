@@ -18,10 +18,10 @@
     "semantic_hash": "9650c5a8b43e5d07fd9ad8f6ff928b66"
   },
   "dashboard/src/App.tsx": {
-    "mtime": 1792834881.5953887,
-    "seen": 1792987579.0866737,
-    "ast_hash": "2bedb7fc212b9fb771ad8a4747a4581e",
-    "semantic_hash": "2bedb7fc212b9fb771ad8a4747a4581e"
+    "mtime": 1793765497.1219532,
+    "seen": 1793766611.7785778,
+    "ast_hash": "a7170711e019d4532ba82edb7e9da697",
+    "semantic_hash": ""
   },
   "dashboard/src/auth.ts": {
     "mtime": 1790830385.3368845,
@@ -354,9 +354,9 @@
     "semantic_hash": ""
   },
   "legacy/master/master.cpp": {
-    "mtime": 1793680140.867951,
-    "seen": 1793680458.2268045,
-    "ast_hash": "d2e1707cdb177e890892749aee84f7e4",
+    "mtime": 1793691875.6166718,
+    "seen": 1793766611.7796984,
+    "ast_hash": "197d9c73d6e531181336f599858af219",
     "semantic_hash": ""
   },
   "legacy/pi/captive-portal-login.sh": {
@@ -433,9 +433,9 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1793162428.2368553,
-    "seen": 1793607813.811677,
-    "ast_hash": "acb545ea2129ffb4fc00c344806ec39d",
+    "mtime": 1793765922.1917453,
+    "seen": 1793766611.7799044,
+    "ast_hash": "6f41f5dc4f3627b644f98794410af4d6",
     "semantic_hash": ""
   },
   "README.md": {
@@ -445,15 +445,15 @@
     "semantic_hash": ""
   },
   "backlog.md": {
-    "mtime": 1793607782.4471927,
-    "seen": 1793607813.8116953,
-    "ast_hash": "428fa7f7ba415d6df504763ae2240b7c",
+    "mtime": 1793764805.149003,
+    "seen": 1793766611.7799199,
+    "ast_hash": "c0390536f348614fdc7aaacef39c8408",
     "semantic_hash": ""
   },
   "dashboard/index.html": {
-    "mtime": 1790171585.0117533,
-    "seen": 1792988778.3327024,
-    "ast_hash": "8ca56693c7b274d102a7df4c5305b1d9",
+    "mtime": 1793765307.437567,
+    "seen": 1793766611.779921,
+    "ast_hash": "cb5acfc7a04abc2eef11c644b0579c23",
     "semantic_hash": ""
   },
   "docs/calibration.md": {
@@ -469,9 +469,9 @@
     "semantic_hash": ""
   },
   "docs/index.md": {
-    "mtime": 1793424851.771958,
-    "seen": 1793607813.8117425,
-    "ast_hash": "7f947dde855ffbb730dbd3d200d62c0a",
+    "mtime": 1793766605.1069527,
+    "seen": 1793766611.7799535,
+    "ast_hash": "5385f4d744a5bdc5822025a6acd181df",
     "semantic_hash": ""
   },
   "docs/llm-generated/SUNTON-luna.md": {
@@ -517,9 +517,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/dashboard.md": {
-    "mtime": 1793089814.542723,
-    "seen": 1793092151.4812486,
-    "ast_hash": "e876298a6837be012f0cfb7893b8f13c",
+    "mtime": 1793765889.374689,
+    "seen": 1793766611.7800767,
+    "ast_hash": "1d8e6ead307675c19d7d282ec6b267fc",
     "semantic_hash": ""
   },
   "docs/llm-generated/database.md": {
@@ -589,9 +589,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/learned-mistakes.md": {
-    "mtime": 1793420482.1073358,
-    "seen": 1793607813.811998,
-    "ast_hash": "354d4093e62627daf7578ff0f34cbd98",
+    "mtime": 1793764820.1360366,
+    "seen": 1793766611.7802744,
+    "ast_hash": "48d016d202bdd1bb6d579ca76b08deca",
     "semantic_hash": ""
   },
   "docs/llm-generated/legacy-master.md": {
@@ -637,9 +637,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/migration-notes.md": {
-    "mtime": 1790841263.2017426,
-    "seen": 1792988778.3327339,
-    "ast_hash": "9bf46d8f297710c27463b470ea5579e8",
+    "mtime": 1793764773.9629302,
+    "seen": 1793766611.7803981,
+    "ast_hash": "fc217c2cafd04faa12e7680e7c61ecf6",
     "semantic_hash": ""
   },
   "docs/llm-generated/migration-plan.md": {
@@ -691,9 +691,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/raspi-docs/02-boot-and-kiosk.md": {
-    "mtime": 1792482804.1206963,
-    "seen": 1792988778.3327417,
-    "ast_hash": "919c7af57f98990f92ef246413602671",
+    "mtime": 1793764805.0820029,
+    "seen": 1793766611.7805316,
+    "ast_hash": "42df8cdd5d5dd04f362c4d9c6226a668",
     "semantic_hash": ""
   },
   "docs/llm-generated/raspi-docs/03-project-overview.md": {
@@ -727,9 +727,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/raspi-docs/08-auxiliary-tools.md": {
-    "mtime": 1792483286.2068594,
-    "seen": 1792988778.332749,
-    "ast_hash": "cd0b4e0b7a10af9445faea6b5ae0acdf",
+    "mtime": 1793764805.132003,
+    "seen": 1793766611.7806196,
+    "ast_hash": "ad6ee7770058997d57ca588a18cb7b95",
     "semantic_hash": ""
   },
   "docs/llm-generated/raspi-docs/09-network-and-services.md": {
@@ -793,9 +793,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/wt32-eth01.md": {
-    "mtime": 1789611589.0054963,
-    "seen": 1792988778.3327625,
-    "ast_hash": "3b9685fda8408605a0852556f70565bf",
+    "mtime": 1793764773.96493,
+    "seen": 1793766611.780815,
+    "ast_hash": "bbc9044e116c4b15b0773835bb7aaf79",
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/templates/index.html": {
@@ -838,6 +838,18 @@
     "mtime": 1793424851.736958,
     "seen": 1793607813.8123965,
     "ast_hash": "5a0b5ebf00fe85420552f186a2226ec0",
+    "semantic_hash": ""
+  },
+  "scripts-hardware/legacy-master-usb.ts": {
+    "mtime": 1793766580.9449096,
+    "seen": 1793766611.7797863,
+    "ast_hash": "1d671a8416631d1bbc6e2a0fe98865b5",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/legacy-master-usb-tool.md": {
+    "mtime": 1793766596.9749382,
+    "seen": 1793766611.780276,
+    "ast_hash": "2f6923a005d8b667996b447e808f6186",
     "semantic_hash": ""
   }
 }

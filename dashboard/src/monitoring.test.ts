@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DEV_FORCE_LIVE_EXPERIMENT,
+  generateSyntheticLiveReadings,
   isMonitoringPollingEligible,
+  isSyntheticExperiment,
   selectActiveExperiment,
   selectMonitoringReadings,
+  SYNTHETIC_EXPERIMENT_ID,
 } from "./monitoring";
 import type { ExperimentSummary } from "./data";
 import { displayChamberNumber, internalChamberIds, splitBottlesByPresence } from "./chambers";
@@ -161,5 +165,33 @@ describe("Chamber numbering", () => {
     expect(presence.disconnected).toEqual([1]);
     expect(displayChamberNumber(presence.connected[0]!)).toBe(1);
     expect(row.bottle_id).toBe(0);
+  });
+});
+
+describe("Synthetic preview data", () => {
+  test("preview flag is enabled for temporary review", () => {
+    expect(DEV_FORCE_LIVE_EXPERIMENT).toBe(1);
+  });
+
+  test("generates fresh readings for every chamber with a null and disconnected chambers", () => {
+    const now = Date.parse("2026-11-04T12:00:00Z");
+    const rows = generateSyntheticLiveReadings(1, 24, now);
+
+    expect(rows.length).toBe(24 * 12 - 2);
+    expect(rows.every((row) => row.experiment_id === SYNTHETIC_EXPERIMENT_ID)).toBe(true);
+    expect(isSyntheticExperiment(SYNTHETIC_EXPERIMENT_ID)).toBe(true);
+    expect(isSyntheticExperiment(3)).toBe(false);
+
+    const latest = rows.reduce((max, row) => (row.timestamp > max ? row.timestamp : max), rows[0]!.timestamp);
+    expect(Date.parse(latest)).toBe(now - 2 * 60 * 1000);
+
+    const reporting = new Set(rows.filter((row) => row.timestamp === latest).map((row) => row.bottle_id));
+    expect(reporting.has(6)).toBe(false);
+    expect(reporting.has(18)).toBe(false);
+    expect(rows.find((row) => row.bottle_id === 0 && row.timestamp === latest)?.ch4).toBeNull();
+  });
+
+  test("returns no rows when no chambers are configured", () => {
+    expect(generateSyntheticLiveReadings(1, 0)).toEqual([]);
   });
 });

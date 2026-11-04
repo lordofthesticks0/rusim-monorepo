@@ -105,6 +105,7 @@ document is the source of truth for anything measured on real hardware.
 | [`legacy/master/master.cpp`](../legacy/master/master.cpp) | ATmega2560 Mega Mini water-bath master controller: bath DS18B20, Slave UART poller, heater/pump overrides, and 3-second MOSFET PWM ramping on D3 for the pump and D4 for the stirrer. [legacy-master.md](llm-generated/legacy-master.md). |
 | [`scripts-hardware/read-legacy-slave.ts`](../scripts-hardware/read-legacy-slave.ts) | Bun wrapper that reads the slave's JSON stream and prints a per-bottle table. [legacy-slave-json-wrapper.md](llm-generated/legacy-slave-json-wrapper.md). |
 | [`scripts-hardware/monitor-legacy-pi.ts`](../scripts-hardware/monitor-legacy-pi.ts) | Bun monitor for the master on the Pi over SSH: `/status` polling by default, `--raw` follows the Flask app's `/raw` buffer without stopping the service. [legacy-pi-remote-monitor.md](llm-generated/legacy-pi-remote-monitor.md). |
+| [`scripts-hardware/legacy-master-usb.ts`](../scripts-hardware/legacy-master-usb.ts) | Bun interactive REPL for the legacy master over direct USB serial (115200 baud): sends `STATUS`/`MODE_*`/`HEATER_*`/`PUMP_*`/`PWM:*`/`STIR:*`/`TEMP:*` commands and prints `master_status` + forwarded slave telemetry. [legacy-master-usb-tool.md](llm-generated/legacy-master-usb-tool.md). |
 
 ## 3b. Raspberry Pi system documentation (`raspi-docs/`)
 

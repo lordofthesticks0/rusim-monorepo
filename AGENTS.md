@@ -23,7 +23,6 @@ Check their availability before starting work. Install missing prerequisites usi
 The following rules are mandatory for all agents.
 
 ### General
-
 - NEVER modify this `AGENTS.md` file unless the user explicitly authorizes it. Report discrepancies to the user instead.
 - ALWAYS document subsystems.
 - When a decision needs to be made, ask the user first. Present the available options and their pros and cons before asking them to choose.
@@ -60,7 +59,7 @@ The following rules are mandatory for all agents.
 #### General Requirements
 
 - Every subsystem must be documented. A subsystem is defined as a single microcontroller, a backend, or a frontend.
-- Write all AI-generated documentation in `docs/llm-summary/`.
+- Write all AI-generated documentation in `docs/llm-generated/`.
 - The only exception is `docs/index.md`, which may be edited to maintain the documentation index.
 - ALWAYS update `docs/index.md` when adding new documentation files.
 - Do not write AI-generated documentation elsewhere.
@@ -152,3 +151,4 @@ graphify --help
 - When the user decides to postpone work to another session, document the outstanding tasks in `backlog.md`.
 - When the user corrects an agent, document the mistake and its lesson in `docs/llm-summary/learned-mistakes.md`.
 - Agents may read `learned-mistakes.md` when relevant to avoid repeating previous mistakes.
+- For any throwaway or one-off scripts, place them in `.tmp`. Everything in here may be deleted without warning.
