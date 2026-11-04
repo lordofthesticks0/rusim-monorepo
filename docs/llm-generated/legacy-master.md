@@ -6,8 +6,8 @@
 
 - Non-blocking water-bath temperature acquisition via a DS18B20 sensor (`D2`).
 - Polling the 4-bottle sensor slave (`#1:PING*` over `Serial1` at 9600 baud) and parsing the returned JSON telemetry to compute average bottle temperature.
-- Time-gated, multi-sample analog water-level sensing on `A9`. The probe reads high when submerged (`~1023`) and low when dry; `waterDepleted` trips at `ADC <= 500` and throttles Pump 2. The heater uses the OUT pump's dry cutoff at `ADC <= 400` instead. Optional pump leak detection sensing on `A8` (`ADC >= 200`) is guarded by `#define ENABLE_LEAK_SENSOR 0` (disabled by default while only the `A9` water presence probe is installed, preventing floating-pin charge carryover on `A8` from triggering false leak cutoffs).
-- Two automatic pump interlocks driven by the same `A9` reading: Pump 1 (`D3`, pumps into the reservoir) stops at overflow (`ADC >= 550`), Pump 2 (`D7`, pumps out of the reservoir) stops when dry (`ADC <= 400`). Both run inside the band between those two values. See section 5.
+- Time-gated interquartile-mean analog water-level sensing on `A9` (`250 ms` cadence, middle 8 of 16 sorted samples) driving a 4-zone safety state machine with hysteresis deadbands and asymmetric fast-trip (`1.0 s`) / slow-recovery (`5.0 s`) timers. Optional pump leak detection sensing on `A8` (`ADC >= 200`) is guarded by `#define ENABLE_LEAK_SENSOR 0`.
+- Debounced pump and heater interlocks driven by `A9`: Pump 1 (`D3`, pumps into the reservoir) hard-stops on high water (`inletWaterFull`: trips `>= 500`, recovers `<= 460`), Pump 2 (`D7`, pumps out of the reservoir) throttles on low water (`waterDepleted`: trips `<= 450`, recovers `>= 480`) and hard-stops alongside the heater on critical dry (`waterCriticalLow`: trips `<= 350`, recovers `>= 420`). See sections 4 and 5.
 - Hysteresis control of the 300 W heater SSR (`D5`), with per-actuator manual overrides (`AUTO`, `FORCE ON`, `OFF`).
 - Unified non-blocking 3-second MOSFET PWM ramping (`slewMosfet`) across all 3 MOSFET channels (`Pin D3` Pump 1, `Pin D7` Pump 2, and `Pin D4` Stirrer), with individually adjustable target PWM ceilings (`0`–`255`) for water debit (flow rate) testing.
 - Bidirectional USB serial (`Serial` at 115200 baud) command and status telemetry with the Raspberry Pi Flask backend ([`web_control.py`](../../legacy/pi/water-control-system/web_control.py)).
@@ -22,7 +22,7 @@
 | `HEATER_PIN` | `D5` | `PE3` | Digital Output | 300 W Heater SSR trigger (Active-HIGH) |
 | `SYSTEM_SWITCH_PIN` | `D6` | `PH3` | `INPUT_PULLUP` | Physical `AUTO` / `OFF` switch (`LOW` forces `MODE_OFF`) |
 | `PUMP2_PIN` | `D7` | `PH4` (`OC4B`) | 16-bit PWM Output | Pump 2 MOSFET gate driver, pumps **out of** the reservoir (Active-HIGH PWM, `0`–`255`, Timer 4 `OC4B`) |
-| `WATER_SENSOR_PIN` | `A9` | `PK1` (`ADC9`) | Analog Input | Water bath level probe. ADC rises as the probe submerges: dry at or below `500`, `~1023` when fully submerged |
+| `WATER_SENSOR_PIN` | `A9` | `PK1` (`ADC9`) | Analog Input | Water bath level probe. ADC rises as the probe submerges: critical dry `<= 350`, low `<= 450`, full `>= 500` |
 | `LEAK_SENSOR_PIN` | `A8` | `PK0` (`ADC8`) | Analog Input (Disabled by default) | Optional pump leak detection probe (`ADC >= 200` indicates leak; guarded by `ENABLE_LEAK_SENSOR = 0`) |
 | `Serial` | `D0`/`D1` | `PE0`/`PE1` | UART0 (115200) | USB serial link to Raspberry Pi |
 | `Serial1` | `D19`/`D18` | `PD2`/`PD3` | UART1 (9600) | Direct UART link to Slave Mega (`#1`) |
@@ -51,25 +51,26 @@ Two consequences of these defaults:
 
 ## 4. Water-Level (`A9`) and Optional Pump Leak (`A8`) Sensing
 
-Analog water sensing runs every `WATER_CHECK_MS = 500UL` using `readAdcAveraged(uint8_t pin)`, which discards one initial `analogRead(pin)` to settle the AVR ADC multiplexer sample-and-hold capacitor and averages `WATER_ADC_SAMPLES = 16` consecutive readings.
+Analog water sensing runs every `WATER_CHECK_MS = 250UL` (4 Hz) using `readAdcAveraged(uint8_t pin)`, which discards one initial `analogRead(pin)` to settle the AVR ADC multiplexer sample-and-hold capacitor, collects `WATER_ADC_SAMPLES = 16` readings, sorts them via insertion sort, and returns the interquartile mean (average of the middle 8 samples). This rejects up to 4 low spikes and 4 high spikes per burst.
 
-### 4.1 Level thresholds
+### 4.1 Hysteresis thresholds
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `WATER_DRY_THRESHOLD` | `500` | `waterDepleted` trip and clear point; also reported as `water_thr` |
-| `IN_PUMP_STOP_ADC` | `550` | Pump 1 (`D3`) stops at or above this reading (overflow) |
-| `OUT_PUMP_STOP_ADC` | `400` | Pump 2 (`D7`) stops at or below this reading (dry) |
+| `OUT_PUMP_STOP_ADC` | `350` | Trips `waterCriticalLow` (`<= 350`): hard-stops Pump 2 (`D7`) and cuts Heater (`D5`) |
+| `OUT_PUMP_RECOVER_ADC` | `420` | Clears `waterCriticalLow` (`>= 420`) after 5.0 s of uninterrupted readings |
+| `WATER_DRY_THRESHOLD` | `450` | Trips `waterDepleted` (`<= 450`): throttles Pump 2 to `DRY_OUT_PUMP_PWM` (`100`) |
+| `WATER_DRY_RECOVER_ADC` | `480` | Clears `waterDepleted` (`>= 480`) after 5.0 s of uninterrupted readings |
+| `IN_PUMP_STOP_ADC` | `500` | Trips `inletWaterFull` (`>= 500`): hard-stops Pump 1 (`D3`) to prevent overflow |
+| `IN_PUMP_RECOVER_ADC` | `460` | Clears `inletWaterFull` (`<= 460`) after 5.0 s of uninterrupted readings |
 
-The probe voltage rises with the water level, so a high ADC means a full bath and a low ADC means an empty one.
+### 4.2 Asymmetric Fast-Trip / Slow-Recovery Debouncing
 
-### 4.2 `waterDepleted` debounce
+All three water-level safety flags (`waterCriticalLow`, `waterDepleted`, `inletWaterFull`) are updated via `updateLowTripFlag()` and `updateHighTripFlag()`:
 
-- **Trip**: 5 consecutive `500 ms` checks at or below `WATER_DRY_THRESHOLD` (`2.5 s` total) set `waterDepleted = true`. A single reading above the threshold resets the counter to `0`.
-- **Clear**: while depleted, each check above the threshold decrements `waterFaultCounter` by one; five such checks (`2.5 s`) set `waterDepleted = false`. A reading at or below the threshold reloads the counter to `WATER_FAULT_LIMIT`.
-- **Boot**: `setup()` takes one averaged reading and sets `waterDepleted` immediately, without the `2.5 s` debounce, and preloads `waterFaultCounter` to match.
-
-`waterDepleted` has one effect in the `MODE_AUTO` branch of `loop()`: Pump 2's target PWM is capped at `DRY_OUT_PUMP_PWM` (`100`) instead of the normal `AUTO_PUMP_PWM_LIMIT` (`200`). It does **not** call `forceAllOff()`, and it does **not** stop the heater. The heater shares the OUT pump's dry cutoff at `OUT_PUMP_STOP_ADC` (`400`) instead; see section 6.
+- **Fast Trip (`WATER_TRIP_LIMIT = 4`, `1.0 s`)**: 4 checks at `250 ms` beyond the trip threshold set the flag `true` and preload its counter to `WATER_RECOVER_LIMIT` (`20`). While untripped, a non-fault reading decrements the counter by 1 rather than zeroing it immediately so noisy fault signals still trip reliably.
+- **Slow Recovery (`WATER_RECOVER_LIMIT = 20`, `5.0 s`)**: While tripped, the reading must remain continuously past the hysteresis recovery threshold for 20 consecutive checks (`5.0 s`) before the flag clears to `false`. Any reading that fails to meet the recovery threshold resets the counter back to `20`, preventing momentary false readings from dry-firing the heater or restarting the inlet pump into a full reservoir.
+- **Boot**: `setup()` takes one interquartile-mean reading and initializes `waterCriticalLow`, `waterDepleted`, and `inletWaterFull` immediately, preloading any tripped flag's recovery counter to `WATER_RECOVER_LIMIT`.
 
 ### 4.3 Optional Pump Leak Detection Probe (`A8`)
 
@@ -79,29 +80,24 @@ The probe voltage rises with the water level, so a high ADC means a full bath an
 
 ## 5. Automatic Pump Interlocks
 
-`loop()` derives two booleans from the latest averaged `waterRaw` on every pass:
+`loop()` derives the interlock booleans from the debounced state flags:
 
 ```cpp
-bool inletLevelOk  = (waterRaw < IN_PUMP_STOP_ADC);   // 550
-bool outletLevelOk = (waterRaw > OUT_PUMP_STOP_ADC);  // 400
+bool inletLevelOk   = !inletWaterFull;   // trips >= 500, clears <= 460
+bool outletLevelOk  = !waterCriticalLow; // trips <= 350, clears >= 420
+bool heaterWaterLow = waterCriticalLow;
 ```
 
-Pump 1 (`D3`, into the reservoir) and Pump 2 (`D7`, out of the reservoir) both use the level boolean alone. Temperature is not part of either decision: `bathSensorOk` (valid DS18B20 reading) and `slaveActive` (a slave packet within `SLAVE_TIMEOUT_MS = 12000`) gate the **heater** in section 6 and nothing else. A detached or silent bottle slave therefore stops AUTO heating, but circulation keeps running.
+When `!inletLevelOk`, `resetMosfetOff(pump1Mosfet)` cuts Pump 1 (`D3`) to `0` PWM immediately without waiting for the 3-second soft-stop ramp. Likewise, when `!outletLevelOk`, `resetMosfetOff(pump2Mosfet)` cuts Pump 2 (`D7`) to `0` PWM immediately.
 
 AUTO behaviour with `currentMode == MODE_AUTO` and no leak:
 
-| `waterRaw` | State | Pump 1 (`D3`, IN) | Pump 2 (`D7`, OUT) |
-|---|---|---|---|
-| `>= 550` | overflow | **off** | on, `200` PWM |
-| `501`–`549` | in band | on, `200` PWM | on, `200` PWM |
-| `401`–`500` | `waterDepleted`, heater still allowed | on, `200` PWM | on, `100` PWM (`DRY_OUT_PUMP_PWM`) |
-| `<= 400` | dry | on, `200` PWM | **off** |
-
-Notes on that table:
-
-- The overflow and dry cut-offs are two separate constants, not one band with a single dry threshold. The heater and the OUT pump both stop at `400`; the `401`–`500` row is only flagged `water_low` for the UI and throttles the OUT pump to `100` PWM.
-- Pump 1 keeps running while depleted. That is what refills the reservoir; the `550` interlock is the backstop that stops it before the bath overflows.
-- The AUTO rows all apply `AUTO_PUMP_PWM_LIMIT = 200` as a ceiling, or `min(ch.maxPwm, 200, onPwm)` in `slewMosfet` terms. `PWM:<channel>:<value>` can lower `ch.maxPwm` below `200` but cannot raise the AUTO output above it.
+| Debounced State | ADC Trip / Clear | Pump 1 (`D3`, IN) | Pump 2 (`D7`, OUT) | Heater (`D5`) |
+|---|---|---|---|---|
+| `inletWaterFull` | Trips `>= 500`, clears `<= 460` | **hard off (`0` PWM)** | on, `200` PWM | allowed |
+| Normal band | Between recovery bands | on, `200` PWM | on, `200` PWM | allowed |
+| `waterDepleted` | Trips `<= 450`, clears `>= 480` | on, `200` PWM | throttled, `100` PWM (`DRY_OUT_PUMP_PWM`) | allowed |
+| `waterCriticalLow` | Trips `<= 350`, clears `>= 420` | on, `200` PWM | **hard off (`0` PWM)** | **hard off** |
 
 Override interaction:
 
@@ -111,7 +107,7 @@ Override interaction:
 | `1` FORCE ON | `inletLevelOk`, PWM `<= 255` (`maxPwm`) | `outletLevelOk`, PWM `<= 255` (`maxPwm`) |
 | `2` FORCE OFF | forced `0` | forced `0` |
 
-`FORCE ON` bypasses the `200` PWM cap and the `100` dry throttle. It does **not** bypass the level interlocks: `FORCE ON` still stops Pump 1 at `>= 550` and Pump 2 at `<= 400`.
+`FORCE ON` bypasses the `200` PWM cap and the `100` dry throttle, but never bypasses `!inletLevelOk` or `!outletLevelOk`.
 
 ## 6. Mode and Safety Cutoffs
 
@@ -125,7 +121,7 @@ if (currentMode == MODE_OFF || pumpLeakDetected) {
 
 Heater logic inside `MODE_AUTO`:
 
-1. `overTempCeiling` (`waterTemp >= MAX_WATER_BATH_TEMP`, `50.0 °C`), the water level being at or below `OUT_PUMP_STOP_ADC` (`400`), or `heaterOverride == 2` → heater off. These three win over every other case, including `HEATER_ON`.
+1. `overTempCeiling` (`waterTemp >= MAX_WATER_BATH_TEMP`, `50.0 °C`), `heaterWaterLow` (`waterCriticalLow == true`, tripped at `<= 350` and held until `>= 420` for `5.0 s`), or `heaterOverride == 2` → heater off. These three win over every other case, including `HEATER_ON`.
 2. `heaterOverride == 1` → heater on, subject to the block above.
 3. `heaterOverride == 0` (AUTO) → off while `bathSensorOk` or `slaveActive` is false; otherwise hysteresis on the average bottle temperature: on below `targetBottleTemp - bottleHysteresis`, off at or above `targetBottleTemp`.
 
@@ -160,7 +156,7 @@ Commands are newline-terminated ASCII strings received on `Serial` (115200 baud)
   - `heater_mode`, `pump_mode`, `pump1_mode`, `pump2_mode`, `stir_mode`, `stir_int_min`, `stir_pulse_sec`, `stir_timed_min`, `stir_rem_sec`
   - `pwm_d3`, `pwm_d7`, `pwm_d4` (configured `0`–`255` target PWM ceilings for `D3`, `D7`, `D4`)
   - `out_d3`, `out_d7`, `out_d4` (instantaneous `0`–`255` PWM output values for `D3`, `D7`, `D4`)
-  - `water_low`, `water_adc`, `water_thr` (water level sensor on `A9`; `water_low` is `waterDepleted`, `water_thr` is `WATER_DRY_THRESHOLD = 500`)
+  - `water_low`, `water_crit`, `water_full`, `water_adc`, `water_thr` (`450`), `out_stop_thr` (`350`), `in_stop_thr` (`500`)
   - `leak_enabled`, `pump_leak`, `leak_adc`, `leak_thr` (optional pump leak sensor on `A8`; `leak_enabled = 0`, `pump_leak = 0`, `leak_adc = -1` when disabled)
 - `MODE_AUTO` / `MODE_OFF`: Switches master system mode. `MODE_AUTO` does not change any override, so the pumps and heater stay in `FORCE OFF` until the matching `*_AUTO` command arrives. `MODE_OFF` calls `forceAllOff()`.
 - `HEATER_AUTO` / `HEATER_ON` / `HEATER_OFF`: Sets heater override mode (`0`, `1`, `2`). `HEATER_OFF` also drives the heater low immediately.
@@ -173,11 +169,9 @@ Commands are newline-terminated ASCII strings received on `Serial` (115200 baud)
 
 ## 9. Known Gaps
 
-- **No hysteresis on the pump or heater cutoffs.** `waterRaw < 550` and `waterRaw > 400` flip on a single ADC count. Because `slewMosfet` restarts its 3-second ramp on every target change, a reading hovering at a threshold keeps restarting the ramp and the pump never settles at its target PWM. Only `waterDepleted` (the `500` Pump 2 throttle) has debounce. The heater's `<= 400` cutoff is raw like the OUT pump, so it can toggle around that threshold.
-- **A silent bottle slave stops AUTO heating.** `slaveActive` is false when no packet with a bottle temperature between 15 and 60 °C has arrived in the last 12 s, which leaves `bottle_temp_avg` at `-999` and the heater off in AUTO. Circulation is unaffected. Before the 2026-11-02 change this flag also held Pump 2 off, which is what made the OUT pump appear dead at every water level while the slave was detached.
+- **A silent bottle slave stops AUTO heating.** `slaveActive` is false when no packet with a bottle temperature between 15 and 60 °C has arrived in the last 12 s, which leaves `bottle_temp_avg` at `-999` and the heater off in AUTO. Circulation is unaffected.
 - **The `D6` switch cannot restore `AUTO`.** See section 3.
-- **The pump interlock thresholds are not telemetered.** `STATUS` reports only `water_thr = 500`; `IN_PUMP_STOP_ADC` and `OUT_PUMP_STOP_ADC` are visible only in the source.
 - **`pump_mode` mirrors Pump 1 only.** Use `pump1_mode` and `pump2_mode`; `pump_mode` duplicates `pump1_mode`.
 
 ---
-Content generated by `opencode/deepseek-v4.1-flash-free` in `OpenCode`.
+Content generated by `google/gemini-4-argon` in `antigravity`.

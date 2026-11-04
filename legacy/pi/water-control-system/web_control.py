@@ -31,7 +31,8 @@ app = Flask(__name__)
 LOG_DIR = 'logs'
 MOUNT_POINT = '/media/usb'
 SLAVE_STALE_SECONDS = 12.0
-OUT_PUMP_STOP_ADC = 400
+OUT_PUMP_STOP_ADC = 350
+IN_PUMP_STOP_ADC = 500
 
 HOTSPOT_CON_NAME = "invitro-hotspot"
 HOTSPOT_SSID = "InVitro-Hotspot"
@@ -98,8 +99,12 @@ current_data = {
     'target_temp': 39.0,
     'hysteresis': 0.3,
     'water_low': False,
+    'water_crit': False,
+    'water_full': False,
     'water_adc': -1,
-    'water_thr': 500,
+    'water_thr': 450,
+    'out_stop_thr': 350,
+    'in_stop_thr': 500,
     'leak_enabled': False,
     'pump_leak': False,
     'leak_adc': -1,
@@ -444,10 +449,18 @@ def serial_worker():
                         current_data['target_temp'] = float(payload.get('target_temp', current_data['target_temp']))
                         current_data['hysteresis'] = float(payload.get('hysteresis', current_data['hysteresis']))
                         current_data['water_low'] = bool(payload.get('water_low', 0))
+                        if 'water_crit' in payload:
+                            current_data['water_crit'] = bool(payload.get('water_crit', 0))
+                        if 'water_full' in payload:
+                            current_data['water_full'] = bool(payload.get('water_full', 0))
                         if 'water_adc' in payload:
                             current_data['water_adc'] = int(payload.get('water_adc', -1))
                         if 'water_thr' in payload:
-                            current_data['water_thr'] = int(payload.get('water_thr', 500))
+                            current_data['water_thr'] = int(payload.get('water_thr', 450))
+                        if 'out_stop_thr' in payload:
+                            current_data['out_stop_thr'] = int(payload.get('out_stop_thr', OUT_PUMP_STOP_ADC))
+                        if 'in_stop_thr' in payload:
+                            current_data['in_stop_thr'] = int(payload.get('in_stop_thr', IN_PUMP_STOP_ADC))
                         leak_enabled = bool(payload.get('leak_enabled', 0))
                         current_data['leak_enabled'] = leak_enabled
                         if leak_enabled:
@@ -721,12 +734,15 @@ def control_api():
         water_adc = int(water_adc)
     except (TypeError, ValueError):
         water_adc = -1
-    # Heater shares the OUT pump's dry cutoff.
-    # water_low (ADC <= 500) only throttles Pump 2.
-    heater_water_low = 0 <= water_adc <= OUT_PUMP_STOP_ADC
+    out_stop_thr = int(current_data.get('out_stop_thr', OUT_PUMP_STOP_ADC))
+    in_stop_thr = int(current_data.get('in_stop_thr', IN_PUMP_STOP_ADC))
+    # Heater shares the OUT pump's debounced critical-dry cutoff.
+    heater_water_low = bool(current_data.get('water_crit')) or (0 <= water_adc <= out_stop_thr)
+    inlet_water_full = bool(current_data.get('water_full')) or (water_adc >= in_stop_thr)
     leak_trip = bool(current_data.get('leak_enabled') and current_data.get('pump_leak'))
     heater_safety_trip = bool(heater_water_low or leak_trip)
-    outlet_level_ok = water_adc > OUT_PUMP_STOP_ADC
+    inlet_level_ok = not inlet_water_full
+    outlet_level_ok = not heater_water_low
 
     if action == 'heater':
         mode = body.get('mode', 'AUTO')
@@ -746,7 +762,7 @@ def control_api():
                 send_serial_cmd(f"PUMP1_{mode}")
                 current_data['pump1_mode'] = mode
                 current_data['pump_mode'] = mode
-                current_data['pump1'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d3', 255) > 0
+                current_data['pump1'] = (mode == 'ON') and not leak_trip and inlet_level_ok and current_data.get('pwm_d3', 255) > 0
             elif action == 'pump2':
                 send_serial_cmd(f"PUMP2_{mode}")
                 current_data['pump2_mode'] = mode
@@ -756,7 +772,7 @@ def control_api():
                 current_data['pump_mode'] = mode
                 current_data['pump1_mode'] = mode
                 current_data['pump2_mode'] = mode
-                current_data['pump1'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d3', 255) > 0
+                current_data['pump1'] = (mode == 'ON') and not leak_trip and inlet_level_ok and current_data.get('pwm_d3', 255) > 0
                 current_data['pump2'] = (mode == 'ON') and not leak_trip and outlet_level_ok and current_data.get('pwm_d7', 255) > 0
             current_data['pump'] = bool(current_data.get('pump1') or current_data.get('pump2'))
             return jsonify({'status': 'success'})

@@ -1524,10 +1524,9 @@
                 syncedOnce: false
             };
 
-            // Level thresholds mirror legacy/master/master.cpp.
-            // The 500-level water flag throttles Pump 2; at 400 Pump 2 stops.
-            const OUT_PUMP_STOP_ADC = 400;
-            const HEATER_STOP_ADC = OUT_PUMP_STOP_ADC;
+            // Default level thresholds mirror legacy/master/master.cpp (350 critical dry, 450 low, 500 full).
+            const DEFAULT_OUT_PUMP_STOP_ADC = 350;
+            const DEFAULT_IN_PUMP_STOP_ADC = 500;
 
             const dateFmt = new Intl.DateTimeFormat([], { weekday: "short", month: "short", day: "numeric" });
 
@@ -2021,11 +2020,14 @@
                 setText(DOM.temp, Number.isFinite(temp) && temp > -50 ? temp.toFixed(1) + "°C" : "--°C");
 
                 const wAdc = Number(data.water_adc);
-                const wThr = Number.isFinite(Number(data.water_thr)) && Number(data.water_thr) > 0 ? Number(data.water_thr) : 500;
+                const wThr = Number.isFinite(Number(data.water_thr)) && Number(data.water_thr) > 0 ? Number(data.water_thr) : 450;
+                const outStopThr = Number.isFinite(Number(data.out_stop_thr)) && Number(data.out_stop_thr) > 0 ? Number(data.out_stop_thr) : DEFAULT_OUT_PUMP_STOP_ADC;
+                const inStopThr = Number.isFinite(Number(data.in_stop_thr)) && Number(data.in_stop_thr) > 0 ? Number(data.in_stop_thr) : DEFAULT_IN_PUMP_STOP_ADC;
                 const waterAdcValid = Number.isFinite(wAdc) && wAdc >= 0;
-                const criticalLow = waterAdcValid && wAdc <= OUT_PUMP_STOP_ADC;
-                const low = Boolean(data.water_low) || (waterAdcValid && wAdc <= wThr);
-                setText(DOM.water, criticalLow ? "CRITICAL LOW" : low ? "LOW" : "NORMAL");
+                const criticalLow = data.water_crit !== undefined ? Boolean(data.water_crit) : (waterAdcValid && wAdc <= outStopThr);
+                const fullLevel = data.water_full !== undefined ? Boolean(data.water_full) : (waterAdcValid && wAdc >= inStopThr);
+                const low = criticalLow || Boolean(data.water_low);
+                setText(DOM.water, criticalLow ? "CRITICAL LOW" : low ? "LOW" : fullLevel ? "FULL" : "NORMAL");
                 setClass(DOM.water, low ? "warning" : "on");
                 if (Number.isFinite(wAdc) && wAdc >= 0) {
                     setText(DOM.waterAdcVal, `${Math.round(wAdc)} / 1023`);
@@ -2035,7 +2037,7 @@
                     setText(DOM.waterVoltVal, "-- V");
                 }
                 setText(DOM.waterThrVal, `≤ ${Math.round(wThr)}`);
-                setText(DOM.outPumpStopVal, `≤ ${OUT_PUMP_STOP_ADC}`);
+                setText(DOM.outPumpStopVal, `≤ ${Math.round(outStopThr)}`);
 
                 const leakEnabled = Boolean(data.leak_enabled);
                 const leakDisplay = leakEnabled ? "" : "none";
@@ -2061,15 +2063,15 @@
                 setText(DOM.pumpLeak, leakFault ? "LEAK FAULT" : "DRY (OK)");
                 setClass(DOM.pumpLeak, leakFault ? "warning" : "on");
 
-                // The heater stops at the OUT pump's dry cutoff (ADC <= 400), not at the
-                // 500-level water_low flag only throttles Pump 2. Pump 1 keeps running
-                // while dry to refill, Pump 2 stops at ADC <= 400, and the stirrer is
-                // unaffected. Only a leak trip forces every actuator off.
-                const heaterWaterLow = Number.isFinite(wAdc) && wAdc >= 0 && wAdc <= HEATER_STOP_ADC;
+                // The heater and Pump 2 share the debounced critical-dry cutoff (water_crit).
+                // Pump 1 stops at the debounced high-water cutoff (water_full).
+                const heaterWaterLow = criticalLow;
                 const heatStop = heaterWaterLow || leakFault;
                 const heatStopLabel = leakFault ? "STOPPED (LEAK)" : "STOPPED (LOW WATER)";
                 const driveStop = leakFault;
                 const driveStopLabel = "STOPPED (LEAK)";
+                const pump1LevelStop = fullLevel;
+                const pump1StopLabel = pump1LevelStop ? "STOPPED (HIGH WATER)" : driveStopLabel;
                 const pump2LevelStop = criticalLow;
                 const pump2StopLabel = pump2LevelStop ? "STOPPED (CRITICAL LOW)" : driveStopLabel;
 
@@ -2087,10 +2089,10 @@
                 setText(DOM.heater, heatStop ? heatStopLabel : data.heater ? "HEATING" : "IDLE");
                 setClass(DOM.heater, data.heater && !heatStop ? "on" : (heatStop ? "warning" : ""));
 
-                const p1Running = Boolean(data.pump1 ?? data.pump);
+                const p1Running = Boolean(data.pump1 ?? data.pump) && !pump1LevelStop;
                 setText(DOM.homePump1Label, `PUMP 1 (D3 · ${p1Mode})`);
-                setText(DOM.pump1, driveStop ? driveStopLabel : p1Running ? `RUNNING (${outD3})` : "IDLE");
-                setClass(DOM.pump1, p1Running && !driveStop ? "on" : (driveStop ? "warning" : ""));
+                setText(DOM.pump1, driveStop ? driveStopLabel : pump1LevelStop ? pump1StopLabel : p1Running ? `RUNNING (${outD3})` : "IDLE");
+                setClass(DOM.pump1, p1Running && !driveStop ? "on" : (driveStop || pump1LevelStop ? "warning" : ""));
 
                 const p2Running = Boolean(data.pump2) && !pump2LevelStop;
                 setText(DOM.homePump2Label, `PUMP 2 (D7 · ${p2Mode})`);
