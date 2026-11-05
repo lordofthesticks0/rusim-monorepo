@@ -67,11 +67,12 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
 ### `serial_worker` (daemon thread)
 
 - Scans `['/dev/ttyACM0', '/dev/ttyUSB0', '/dev/ttyACM1', '/dev/ttyUSB1']` and
-  opens the first present port at 115200, with a 2 s settle.
+  opens the first present port at 115200 (`timeout=1.0`, `write_timeout=1.0`), with a 2 s settle.
+- Tracks reception freshness using `time.monotonic()` (`last_slave_rx_time`, `last_master_rx_time`, and `last_serial_rx_mono`) so wall-clock jumps from `/set_time` or `sync_clock_from_lan_http()` never corrupt the 12-second staleness window.
+- Enforces a 10-second silent-Master watchdog (`MASTER_SILENCE_RECONNECT_SECONDS = 10.0`): if no valid line arrives from the Master for `>= 10 s` (or if `send_serial_cmd()` hits a serial write error), `close_serial_conn()` closes the serial port so `serial_worker` reopens it on the next loop, pulsing DTR to reset a wedged Master MCU.
 - Each line is recorded in the raw buffer, then classified if it is JSON:
-  1. `bottles` array or `type == 'slave_telemetry'` → merge into
-     `current_data['bottles']` by id.
-  2. Single bottle (`id` + `temp`) → merge by id.
+  1. `bottles` array or `type == 'slave_telemetry'` → validate each bottle via `is_valid_bottle_payload()` (`id` integer in `VALID_BOTTLE_IDS = (1, 2, 3, 4)` and finite numeric values for all `REQUIRED_BOTTLE_KEYS = ('id', 'temp', 'ph', 'methane', 'co2', 'press')`), then merge into `current_data['bottles']` by `id` (retaining only valid IDs `1..4` sorted by `id`).
+  2. Single bottle (`is_valid_bottle_payload(payload)`) → merge by `id`.
   3. `type == 'master_status'` → update bath temp, bottle average,
      heater / Pump 1 (`D3`) / Pump 2 (`D7`) / Stirrer (`D4`) states, modes,
      target PWM ceilings (`pwm_d3`, `pwm_d7`, `pwm_d4`), live PWM outputs
@@ -81,6 +82,7 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
      `leak_adc`, `leak_thr`; `pump_leak` is forced `False` and `leak_adc` `-1`
      when `leak_enabled` is false/absent), and `system_mode`.
   4. Anything else → `current_data.update(payload)`.
+- In `/status`, when `master_fresh` (`now_mono - last_master_rx_time < 12.0`) is `False`, `temp` and `bottle_avg_temp` are reported as `-999.0`; when `slave_fresh` (`now_mono - last_slave_rx_time < 12.0`) is `False`, `bottles` is returned as `[]` and `bottle_avg_temp` as `-999.0`.
 
 ### `polling_worker` (daemon thread)
 

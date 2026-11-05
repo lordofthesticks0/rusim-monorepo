@@ -2170,10 +2170,13 @@
 
                 let validBottleTempSum = 0;
                 let validBottleTempCount = 0;
+                const validBottles = Array.isArray(data.bottles)
+                    ? data.bottles.filter((b) => b && Number.isInteger(Number(b.id)) && Number(b.id) >= 1 && Number(b.id) <= 4)
+                    : [];
 
-                if (Array.isArray(data.bottles) && data.bottles.length > 0) {
-                    ensureBottleCards(data.bottles);
-                    data.bottles.forEach((b, idx) => {
+                if (validBottles.length > 0) {
+                    ensureBottleCards(validBottles);
+                    validBottles.forEach((b, idx) => {
                         const bId = b.id || idx + 1;
                         const bTemp = Number(b.temp);
                         const isTempValid = b.temp !== undefined && b.temp !== null && Number.isFinite(bTemp) && bTemp !== -999 && bTemp > -50;
@@ -2187,6 +2190,7 @@
                             validBottleTempCount++;
                         }
                         if (activeTab === "bottles") {
+                            setText(document.getElementById(`bTitle_${idx}`), `BOTTLE ${bId}`);
                             setHTMLIfChanged(`bTemp_${idx}`, fmtMetric(b.temp, "°C", -999));
                             setHTMLIfChanged(`bPh_${idx}`, fmtMetric(b.ph, "", -1));
                             setHTMLIfChanged(`bCh4_${idx}`, fmtMetric(b.methane, "ppm", -1));
@@ -2198,6 +2202,10 @@
                     });
                 } else {
                     for (let i = 1; i <= 4; i++) setText(DOM["homeBTemp" + i], "--°C");
+                    if (renderedBottleCount !== 0) {
+                        DOM.bottleGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text-secondary);">Waiting for Sensor Data...</div>';
+                        renderedBottleCount = 0;
+                    }
                 }
 
                 const backendAvg = Number(data.bottle_temp_avg);

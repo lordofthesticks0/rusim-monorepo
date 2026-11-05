@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <avr/wdt.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <ArduinoJson.h>
@@ -100,8 +101,12 @@ unsigned long lastWaterCheck = 0;
 unsigned long lastSlavePollTime = 0;
 unsigned long lastSlavePacketTime = 0;
 String slaveRxBuffer = "";
+String usbRxBuffer = "";
 
-// Forward declaration
+// Forward declarations
+bool isValidBottleObject(JsonObject b);
+void pollSlaveSerial(unsigned long now);
+void handleUsbCommand(String &cmd, unsigned long now);
 void sendTelemetryStatus(unsigned long now);
 
 // ==========================================
@@ -252,9 +257,96 @@ void updateHighTripFlag(bool &tripped, uint8_t &counter, int adc, int tripThr, i
 // ==========================================
 void sendSlavePing(byte id) {
   while (Serial1.available()) Serial1.read();
+  slaveRxBuffer = "";
   Serial1.print("#");
   Serial1.print(id);
   Serial1.print(":PING*");
+}
+
+bool isValidBottleObject(JsonObject b) {
+  if (b.isNull()) return false;
+  if (!b.containsKey("id") || !b.containsKey("temp") ||
+      !b.containsKey("ph") || !b.containsKey("methane") ||
+      !b.containsKey("co2") || !b.containsKey("press")) {
+    return false;
+  }
+  int id = b["id"] | 0;
+  return (id >= 1 && id <= 4);
+}
+
+__attribute__((noinline)) void pollSlaveSerial(unsigned long now) {
+  while (Serial1.available() > 0) {
+    char c = Serial1.read();
+    if (c == '\n') {
+      slaveRxBuffer.trim();
+      if (slaveRxBuffer.length() > 0) {
+        int jsonStart = slaveRxBuffer.indexOf('{');
+        int jsonEnd = slaveRxBuffer.lastIndexOf('}');
+
+        if (jsonStart >= 0 && jsonEnd > jsonStart) {
+          String cleanJson = slaveRxBuffer.substring(jsonStart, jsonEnd + 1);
+
+          StaticJsonDocument<1536> doc;
+          DeserializationError err = deserializeJson(doc, cleanJson);
+
+          if (!err) {
+            bool frameValid = false;
+            float sumTemp = 0.0;
+            int validCount = 0;
+
+            if (doc.containsKey("bottles") && doc["bottles"].is<JsonArray>()) {
+              JsonArray bottles = doc["bottles"].as<JsonArray>();
+              if (bottles.size() > 0 && bottles.size() <= 4) {
+                frameValid = true;
+                uint8_t seenMask = 0;
+                for (JsonObject b : bottles) {
+                  if (!isValidBottleObject(b)) {
+                    frameValid = false;
+                    break;
+                  }
+                  int id = b["id"].as<int>();
+                  uint8_t bit = (uint8_t)(1U << (id - 1));
+                  if (seenMask & bit) {
+                    frameValid = false;
+                    break;
+                  }
+                  seenMask |= bit;
+                  float t = b["temp"];
+                  if (t > 15.0 && t < 60.0) {
+                    sumTemp += t;
+                    validCount++;
+                  }
+                }
+              }
+            } else if (isValidBottleObject(doc.as<JsonObject>())) {
+              frameValid = true;
+              float t = doc["temp"];
+              if (t > 15.0 && t < 60.0) {
+                sumTemp += t;
+                validCount++;
+              }
+            }
+
+            if (frameValid) {
+              Serial.println(cleanJson);
+              if (validCount > 0) {
+                currentBottleTemp = sumTemp / validCount;
+                bottleTelemetryValid = true;
+                lastSlavePacketTime = now;
+              }
+            }
+          }
+        }
+      }
+      slaveRxBuffer = "";
+    } else if (c != '\r') {
+      if (slaveRxBuffer.length() < 512) {
+        slaveRxBuffer += c;
+      } else {
+        slaveRxBuffer = "";
+      }
+    }
+  }
 }
 
 // ==========================================
@@ -307,8 +399,11 @@ void updateStirrer(unsigned long now) {
 // SETUP
 // ==========================================
 void setup() {
+  wdt_disable();
   Serial.begin(115200);  // USB to Raspberry Pi
   Serial1.begin(9600);   // Direct UART to Slave Mega Pro
+  slaveRxBuffer.reserve(512);
+  usbRxBuffer.reserve(128);
 
   pinMode(WATER_SENSOR_PIN, INPUT);
 #if ENABLE_LEAK_SENSOR
@@ -352,13 +447,18 @@ void setup() {
 #endif
 
   lastWaterCheck = bootNow;
+  wdt_enable(WDTO_4S);
 }
 
 // ==========================================
 // MAIN LOOP
 // ==========================================
 void loop() {
+  wdt_reset();
   unsigned long now = millis();
+
+  // Drain Serial1 before and after peripheral reads to prevent 64-byte RX ring buffer overflow
+  pollSlaveSerial(now);
 
   // 1. Non-Blocking Bath Temperature Read
   if (now - lastTempRequest >= TEMP_INTERVAL_MS) {
@@ -370,6 +470,7 @@ void loop() {
     }
     bathSensor.requestTemperatures();
     lastTempRequest = now;
+    pollSlaveSerial(now);
   }
 
   // 2. Poll Slave Mega Pro (#1)
@@ -378,60 +479,8 @@ void loop() {
     lastSlavePollTime = now;
   }
 
-  // 3. Ingest, Clean, and Forward Slave Telemetry
-  while (Serial1.available() > 0) {
-    char c = Serial1.read();
-    if (c == '\n') {
-      slaveRxBuffer.trim();
-      if (slaveRxBuffer.length() > 0) {
-        int jsonStart = slaveRxBuffer.indexOf('{');
-        int jsonEnd = slaveRxBuffer.lastIndexOf('}');
-
-        if (jsonStart >= 0 && jsonEnd > jsonStart) {
-          String cleanJson = slaveRxBuffer.substring(jsonStart, jsonEnd + 1);
-          Serial.println(cleanJson);
-
-          StaticJsonDocument<1536> doc;
-          DeserializationError err = deserializeJson(doc, cleanJson);
-
-          if (!err) {
-            float sumTemp = 0.0;
-            int validCount = 0;
-
-            if (doc.containsKey("bottles")) {
-              JsonArray bottles = doc["bottles"];
-              for (JsonObject b : bottles) {
-                float t = b["temp"];
-                if (t > 15.0 && t < 60.0) {
-                  sumTemp += t;
-                  validCount++;
-                }
-              }
-            } else if (doc.containsKey("temp")) {
-              float t = doc["temp"];
-              if (t > 15.0 && t < 60.0) {
-                sumTemp += t;
-                validCount++;
-              }
-            }
-
-            if (validCount > 0) {
-              currentBottleTemp = sumTemp / validCount;
-              bottleTelemetryValid = true;
-              lastSlavePacketTime = now;
-            }
-          }
-        }
-      }
-      slaveRxBuffer = "";
-    } else {
-      if (slaveRxBuffer.length() < 512) {
-        slaveRxBuffer += c;
-      } else {
-        slaveRxBuffer = "";
-      }
-    }
-  }
+  // 3. Ingest, Validate, and Forward Slave Telemetry
+  pollSlaveSerial(now);
 
   // 4. Physical Switch Verification (Pin 6 pulled LOW forces OFF)
   if (digitalRead(SYSTEM_SWITCH_PIN) == LOW) {
@@ -476,6 +525,7 @@ void loop() {
 #endif
 
     lastWaterCheck = now;
+    pollSlaveSerial(now);
   }
 
   bool bathSensorOk = (waterTemp > 0.0 && waterTemp < 85.0);
@@ -537,82 +587,96 @@ void loop() {
     updateStirrer(now);
   }
 
-  // 7. Pi USB Interface Commands
-  if (Serial.available() > 0) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
+  // 7. Non-Blocking Pi USB Interface Commands
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\n') {
+      usbRxBuffer.trim();
+      if (usbRxBuffer.length() > 0) {
+        handleUsbCommand(usbRxBuffer, now);
+      }
+      usbRxBuffer = "";
+    } else if (c != '\r') {
+      if (usbRxBuffer.length() < 128) {
+        usbRxBuffer += c;
+      } else {
+        usbRxBuffer = "";
+      }
+    }
+  }
+}
 
-    if (cmd == "STATUS") {
-      sendTelemetryStatus(now);
-    } 
-    else if (cmd == "MODE_AUTO") {
-      if (currentMode == MODE_OFF) {
-        stirCycleStart = now;
-      }
-      currentMode = MODE_AUTO;
-    } 
-    else if (cmd == "MODE_OFF") {
-      currentMode = MODE_OFF;
-      forceAllOff();
+void handleUsbCommand(String &cmd, unsigned long now) {
+  if (cmd == "STATUS") {
+    sendTelemetryStatus(now);
+  } 
+  else if (cmd == "MODE_AUTO") {
+    if (currentMode == MODE_OFF) {
+      stirCycleStart = now;
     }
-    else if (cmd == "HEATER_AUTO") { heaterOverride = 0; }
-    else if (cmd == "HEATER_ON")   { heaterOverride = 1; }
-    else if (cmd == "HEATER_OFF")  { heaterOverride = 2; driveHeater(false); }
-    else if (cmd == "PUMP_AUTO")   { pump1Override = 0; pump2Override = 0; }
-    else if (cmd == "PUMP_ON")     { pump1Override = 1; pump2Override = 1; }
-    else if (cmd == "PUMP_OFF")    { pump1Override = 2; pump2Override = 2; }
-    else if (cmd == "PUMP1_AUTO")  { pump1Override = 0; }
-    else if (cmd == "PUMP1_ON")    { pump1Override = 1; }
-    else if (cmd == "PUMP1_OFF")   { pump1Override = 2; }
-    else if (cmd == "PUMP2_AUTO")  { pump2Override = 0; }
-    else if (cmd == "PUMP2_ON")    { pump2Override = 1; }
-    else if (cmd == "PUMP2_OFF")   { pump2Override = 2; }
-    else if (cmd.startsWith("PWM:")) {
-      // Format: PWM:<D3|D7|D4|PUMP1|PUMP2|STIR>:<0-255>
-      int p1 = cmd.indexOf(':');
-      int p2 = cmd.indexOf(':', p1 + 1);
-      if (p1 > 0 && p2 > p1) {
-        String chName = cmd.substring(p1 + 1, p2);
-        chName.toUpperCase();
-        int val = constrain(cmd.substring(p2 + 1).toInt(), 0, 255);
-        if (chName == "D3" || chName == "3" || chName == "PUMP1") {
-          pump1Mosfet.maxPwm = (uint8_t)val;
-        } else if (chName == "D7" || chName == "7" || chName == "PUMP2") {
-          pump2Mosfet.maxPwm = (uint8_t)val;
-        } else if (chName == "D4" || chName == "4" || chName == "STIR" || chName == "STIRRER") {
-          stirMosfet.maxPwm = (uint8_t)val;
-        }
-      }
-    }
-    else if (cmd.startsWith("STIR:")) {
-      // Format: STIR:<mode_int>:<interval_or_timed_min>:<pulse_sec>
-      int p1 = cmd.indexOf(':');
-      int p2 = cmd.indexOf(':', p1 + 1);
-      int p3 = cmd.indexOf(':', p2 + 1);
-      if (p1 > 0 && p2 > p1 && p3 > p2) {
-        int m = cmd.substring(p1 + 1, p2).toInt();
-        long mins = cmd.substring(p2 + 1, p3).toInt();
-        long secs = cmd.substring(p3 + 1).toInt();
-        stirMode = constrain(m, 0, 3);
-        if (mins > 0) {
-          if (stirMode == 2) stirIntervalMin = mins;
-          if (stirMode == 3) stirTimedMin = mins;
-        }
-        if (secs > 0) stirPulseSec = secs;
-        stirCycleStart = now;
-        updateStirrer(now);
+    currentMode = MODE_AUTO;
+  } 
+  else if (cmd == "MODE_OFF") {
+    currentMode = MODE_OFF;
+    forceAllOff();
+  }
+  else if (cmd == "HEATER_AUTO") { heaterOverride = 0; }
+  else if (cmd == "HEATER_ON")   { heaterOverride = 1; }
+  else if (cmd == "HEATER_OFF")  { heaterOverride = 2; driveHeater(false); }
+  else if (cmd == "PUMP_AUTO")   { pump1Override = 0; pump2Override = 0; }
+  else if (cmd == "PUMP_ON")     { pump1Override = 1; pump2Override = 1; }
+  else if (cmd == "PUMP_OFF")    { pump1Override = 2; pump2Override = 2; }
+  else if (cmd == "PUMP1_AUTO")  { pump1Override = 0; }
+  else if (cmd == "PUMP1_ON")    { pump1Override = 1; }
+  else if (cmd == "PUMP1_OFF")   { pump1Override = 2; }
+  else if (cmd == "PUMP2_AUTO")  { pump2Override = 0; }
+  else if (cmd == "PUMP2_ON")    { pump2Override = 1; }
+  else if (cmd == "PUMP2_OFF")   { pump2Override = 2; }
+  else if (cmd.startsWith("PWM:")) {
+    // Format: PWM:<D3|D7|D4|PUMP1|PUMP2|STIR>:<0-255>
+    int p1 = cmd.indexOf(':');
+    int p2 = cmd.indexOf(':', p1 + 1);
+    if (p1 > 0 && p2 > p1) {
+      String chName = cmd.substring(p1 + 1, p2);
+      chName.toUpperCase();
+      int val = constrain(cmd.substring(p2 + 1).toInt(), 0, 255);
+      if (chName == "D3" || chName == "3" || chName == "PUMP1") {
+        pump1Mosfet.maxPwm = (uint8_t)val;
+      } else if (chName == "D7" || chName == "7" || chName == "PUMP2") {
+        pump2Mosfet.maxPwm = (uint8_t)val;
+      } else if (chName == "D4" || chName == "4" || chName == "STIR" || chName == "STIRRER") {
+        stirMosfet.maxPwm = (uint8_t)val;
       }
     }
-    else if (cmd.startsWith("TEMP:")) {
-      // Format: TEMP:<target_float>:<hyst_float>
-      int p1 = cmd.indexOf(':');
-      int p2 = cmd.indexOf(':', p1 + 1);
-      if (p1 > 0 && p2 > p1) {
-        float t = cmd.substring(p1 + 1, p2).toFloat();
-        float h = cmd.substring(p2 + 1).toFloat();
-        if (t >= 20.0 && t <= 50.0) targetBottleTemp = t;
-        if (h >= 0.1 && h <= 5.0)   bottleHysteresis = h;
+  }
+  else if (cmd.startsWith("STIR:")) {
+    // Format: STIR:<mode_int>:<interval_or_timed_min>:<pulse_sec>
+    int p1 = cmd.indexOf(':');
+    int p2 = cmd.indexOf(':', p1 + 1);
+    int p3 = cmd.indexOf(':', p2 + 1);
+    if (p1 > 0 && p2 > p1 && p3 > p2) {
+      int m = cmd.substring(p1 + 1, p2).toInt();
+      long mins = cmd.substring(p2 + 1, p3).toInt();
+      long secs = cmd.substring(p3 + 1).toInt();
+      stirMode = constrain(m, 0, 3);
+      if (mins > 0) {
+        if (stirMode == 2) stirIntervalMin = mins;
+        if (stirMode == 3) stirTimedMin = mins;
       }
+      if (secs > 0) stirPulseSec = secs;
+      stirCycleStart = now;
+      updateStirrer(now);
+    }
+  }
+  else if (cmd.startsWith("TEMP:")) {
+    // Format: TEMP:<target_float>:<hyst_float>
+    int p1 = cmd.indexOf(':');
+    int p2 = cmd.indexOf(':', p1 + 1);
+    if (p1 > 0 && p2 > p1) {
+      float t = cmd.substring(p1 + 1, p2).toFloat();
+      float h = cmd.substring(p2 + 1).toFloat();
+      if (t >= 20.0 && t <= 50.0) targetBottleTemp = t;
+      if (h >= 0.1 && h <= 5.0)   bottleHysteresis = h;
     }
   }
 }
@@ -671,4 +735,5 @@ void sendTelemetryStatus(unsigned long now) {
 
   serializeJson(doc, Serial);
   Serial.println();
+  pollSlaveSerial(now);
 }

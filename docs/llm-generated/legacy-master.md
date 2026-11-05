@@ -5,7 +5,8 @@
 [`legacy/master/master.cpp`](../../legacy/master/master.cpp) is the ATmega2560 Mega Mini firmware for the water-bath master controller (PlatformIO environment `[env:legacy-master]` in [`platformio.ini`](../../platformio.ini)). It manages:
 
 - Non-blocking water-bath temperature acquisition via a DS18B20 sensor (`D2`).
-- Polling the 4-bottle sensor slave (`#1:PING*` over `Serial1` at 9600 baud) and parsing the returned JSON telemetry to compute average bottle temperature.
+- Polling the 4-bottle sensor slave (`#1:PING*` over `Serial1` at 9600 baud), draining `Serial1` frequently via `pollSlaveSerial(now)` to prevent 64-byte AVR UART RX ring-buffer overflows, and validating each returned JSON packet and bottle schema (`id` in `1..4`, no duplicates, required `temp`, `ph`, `methane`, `co2`, `press` fields) via `isValidBottleObject()` before forwarding to the Raspberry Pi or updating average bottle temperature.
+- Hardware watchdog protection (`wdt_enable(WDTO_4S)` in `setup()`, `wdt_reset()` every `loop()` iteration) and non-blocking USB serial command reception (`usbRxBuffer` + `handleUsbCommand()`).
 - Time-gated interquartile-mean analog water-level sensing on `A9` (`250 ms` cadence, middle 8 of 16 sorted samples) driving a 4-zone safety state machine with hysteresis deadbands and asymmetric fast-trip (`1.0 s`) / slow-recovery (`5.0 s`) timers. Optional pump leak detection sensing on `A8` (`ADC >= 200`) is guarded by `#define ENABLE_LEAK_SENSOR 0`.
 - Debounced pump and heater interlocks driven by `A9`: Pump 1 (`D3`, pumps into the reservoir) hard-stops on high water (`inletWaterFull`: trips `>= 500`, recovers `<= 460`), Pump 2 (`D7`, pumps out of the reservoir) throttles on low water (`waterDepleted`: trips `<= 450`, recovers `>= 480`) and hard-stops alongside the heater on critical dry (`waterCriticalLow`: trips `<= 350`, recovers `>= 420`). See sections 4 and 5.
 - Hysteresis control of the 300 W heater SSR (`D5`), with per-actuator manual overrides (`AUTO`, `FORCE ON`, `OFF`).
@@ -146,7 +147,16 @@ void slewMosfet(MosfetChannel &ch, bool wantOn, unsigned long now,
   - `stirMode == 3` (`TIMED RUN`): 3-second ramp up, continuous hold at `stirMosfet.maxPwm`, and 3-second ramp down at the end of the timed duration, after which `stirMode` returns to `0`.
 - For Pump 1 (`D3`) and Pump 2 (`D7`), `slewMosfet` ramps each pump over 3 seconds to the target described in section 5 and ramps down to `0` over 3 seconds when the interlock or override switches it off.
 
-## 8. Raspberry Pi USB Serial Protocol
+## 8. Slave UART Polling, Validation, and Watchdog (`Serial1`)
+
+A 4-bottle slave JSON line is ~340 bytes at 9600 baud (~350 ms on the wire), while the AVR `HardwareSerial` RX ring buffer is 64 bytes (~66 ms at 9600 baud). To prevent `Serial1` buffer overflows during DS18B20 1-Wire conversions, 16-sample ADC bursts, or USB status serializations:
+
+- **Frequent `Serial1` Draining (`pollSlaveSerial(now)`)**: `loop()` calls `pollSlaveSerial(now)` at the start of the loop, immediately after `sensors.getTempCByIndex(0)`, after `readAdcAveraged()`, after `sendTelemetryStatus()`, and at the end of `loop()`. `slaveRxBuffer.reserve(512)` is pre-allocated in `setup()` to prevent AVR heap fragmentation.
+- **Pre-Forwarding JSON & Schema Validation (`isValidBottleObject`)**: When a newline arrives on `Serial1`, `pollSlaveSerial` extracts the `{...}` substring and runs `deserializeJson(doc, cleanJson)` **before** forwarding anything to the Raspberry Pi. If `doc["bottles"]` is present, every element must pass `isValidBottleObject()` (`id` integer in `1..4`, no duplicate IDs in the array, and non-null `temp`, `ph`, `methane`, `co2`, and `press` fields). Truncated or corrupted packets (such as UART byte-drop splices producing invalid IDs or missing fields) are discarded instead of forwarded to the Pi.
+- **Non-Blocking USB Command Reception (`usbRxBuffer`)**: `Serial` is drained character-by-character into `usbRxBuffer` (reserved to 128 bytes, capped at `USB_RX_MAX_LEN = 96`) and dispatched via `handleUsbCommand(usbRxBuffer, now)` on `\n`, avoiding `Serial.readStringUntil('\n')` blocking stalls.
+- **Hardware Watchdog (`WDTO_4S`)**: `setup()` disables any residual watchdog early (`wdt_disable()`) and enables a 4-second hardware watchdog (`wdt_enable(WDTO_4S)`) at the end of initialization. `loop()` feeds the watchdog (`wdt_reset()`) on every iteration so any EMI/brownout lockup when switching inductive loads automatically resets the MCU into safe boot defaults (`forceAllOff()`).
+
+## 9. Raspberry Pi USB Serial Protocol
 
 Commands are newline-terminated ASCII strings received on `Serial` (115200 baud):
 
@@ -167,7 +177,7 @@ Commands are newline-terminated ASCII strings received on `Serial` (115200 baud)
 - `STIR:<mode>:<mins>:<secs>`: Configures stirrer mode (`0`–`3`), interval/timed minutes, and pulse duration seconds. Also resets `stirCycleStart`.
 - `TEMP:<target>:<hysteresis>`: Updates `targetBottleTemp` (`20.0`–`50.0` °C) and `bottleHysteresis` (`0.1`–`5.0` °C).
 
-## 9. Known Gaps
+## 10. Known Gaps
 
 - **A silent bottle slave stops AUTO heating.** `slaveActive` is false when no packet with a bottle temperature between 15 and 60 °C has arrived in the last 12 s, which leaves `bottle_temp_avg` at `-999` and the heater off in AUTO. Circulation is unaffected.
 - **The `D6` switch cannot restore `AUTO`.** See section 3.

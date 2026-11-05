@@ -36,6 +36,9 @@ app = Flask(__name__)
 LOG_DIR = 'logs'
 MOUNT_POINT = '/media/usb'
 SLAVE_STALE_SECONDS = 12.0
+MASTER_SILENCE_RECONNECT_SECONDS = 10.0
+VALID_BOTTLE_IDS = (1, 2, 3, 4)
+REQUIRED_BOTTLE_KEYS = ('id', 'temp', 'ph', 'methane', 'co2', 'press')
 OUT_PUMP_STOP_ADC = 350
 IN_PUMP_STOP_ADC = 500
 
@@ -60,8 +63,9 @@ raw_lines = deque(maxlen=500)
 raw_line_seq = 0
 serial_conn = None
 logging_active = False
-last_slave_rx_time = 0.0
-last_master_rx_time = 0.0
+last_slave_rx_time = -1000.0
+last_master_rx_time = -1000.0
+last_serial_rx_mono = -1000.0
 
 # Actuators start OFF. These are sent once on the first serial connection so
 # the master is off even when it was flashed with AUTO boot defaults.
@@ -175,17 +179,40 @@ def update_packet_metrics():
     packet_stats['lost'] = lost
     packet_stats['loss_pct'] = round((lost / tx) * 100.0, 1) if tx > 0 else 0.0
 
+def is_valid_bottle_payload(b):
+    if not isinstance(b, dict):
+        return False
+    b_id = b.get('id')
+    if isinstance(b_id, bool) or not isinstance(b_id, int) or b_id not in VALID_BOTTLE_IDS:
+        return False
+    for k in REQUIRED_BOTTLE_KEYS:
+        val = b.get(k)
+        if val is None or isinstance(val, bool) or not isinstance(val, (int, float)):
+            return False
+    return True
+
+def close_serial_conn():
+    global serial_conn
+    conn = serial_conn
+    serial_conn = None
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 def send_serial_cmd(cmd_str):
     """Thread-safe helper to send a command line to the Master Arduino."""
-    if serial_conn:
+    conn = serial_conn
+    if conn:
         try:
             with serial_write_lock:
-                serial_conn.write(f"{cmd_str}\n".encode('utf-8'))
+                conn.write(f"{cmd_str}\n".encode('utf-8'))
             packet_stats['outgoing'] += 1
             update_packet_metrics()
             return True
         except Exception:
-            pass
+            close_serial_conn()
     return False
 
 def make_qr_data_uri(payload_text):
@@ -558,7 +585,7 @@ def telemetry_worker():
 
 # --- BACKGROUND WORKER 1: LOCK-FREE SERIAL INGESTION ---
 def serial_worker():
-    global serial_conn, last_slave_rx_time, last_master_rx_time, raw_line_seq
+    global serial_conn, last_slave_rx_time, last_master_rx_time, last_serial_rx_mono, raw_line_seq
     possible_ports = ['/dev/ttyACM0', '/dev/ttyUSB0', '/dev/ttyACM1', '/dev/ttyUSB1']
 
     while True:
@@ -566,8 +593,9 @@ def serial_worker():
             for p in possible_ports:
                 if os.path.exists(p):
                     try:
-                        s = serial.Serial(p, 115200, timeout=0.2)
+                        s = serial.Serial(p, 115200, timeout=0.2, write_timeout=1.0)
                         time.sleep(2)
+                        last_serial_rx_mono = time.monotonic()
                         serial_conn = s
                         print(f"Serial connected successfully on {p}")
                         break
@@ -581,6 +609,7 @@ def serial_worker():
                 wire_line = serial_conn.readline().decode('utf-8', errors='ignore').rstrip('\r\n')
                 raw_line = wire_line.strip()
                 if wire_line:
+                    last_serial_rx_mono = time.monotonic()
                     with raw_lines_lock:
                         raw_line_seq += 1
                         raw_lines.append({
@@ -589,34 +618,51 @@ def serial_worker():
                             'line': wire_line
                         })
             else:
+                if serial_conn and (time.monotonic() - last_serial_rx_mono) >= MASTER_SILENCE_RECONNECT_SECONDS:
+                    print("Serial RX silent for >10s; reopening port to recover master")
+                    close_serial_conn()
+                    time.sleep(1.0)
+                    continue
                 time.sleep(0.02)
                 continue
 
             if raw_line.startswith('{') and raw_line.endswith('}'):
                 try:
                     payload = json.loads(raw_line)
-                    now_ts = time.time()
+                    now_mono = time.monotonic()
 
                     if 'bottles' in payload or payload.get('type') == 'slave_telemetry':
-                        packet_stats['rx_slave'] += 1
-                        last_slave_rx_time = now_ts
                         new_bottles = payload.get('bottles', [])
-                        existing_map = {b['id']: b for b in current_data['bottles'] if isinstance(b, dict) and 'id' in b}
-                        for nb in new_bottles:
-                            if isinstance(nb, dict) and 'id' in nb:
+                        valid_incoming = [
+                            nb for nb in new_bottles
+                            if is_valid_bottle_payload(nb)
+                        ] if isinstance(new_bottles, list) else []
+                        if valid_incoming:
+                            packet_stats['rx_slave'] += 1
+                            last_slave_rx_time = now_mono
+                            existing_map = {
+                                b['id']: b
+                                for b in current_data['bottles']
+                                if is_valid_bottle_payload(b)
+                            }
+                            for nb in valid_incoming:
                                 existing_map[nb['id']] = nb
-                        current_data['bottles'] = list(existing_map.values())
+                            current_data['bottles'] = [existing_map[i] for i in sorted(existing_map)]
 
-                    elif 'id' in payload and 'temp' in payload:
+                    elif is_valid_bottle_payload(payload):
                         packet_stats['rx_slave'] += 1
-                        last_slave_rx_time = now_ts
-                        existing_map = {b['id']: b for b in current_data['bottles'] if isinstance(b, dict) and 'id' in b}
+                        last_slave_rx_time = now_mono
+                        existing_map = {
+                            b['id']: b
+                            for b in current_data['bottles']
+                            if is_valid_bottle_payload(b)
+                        }
                         existing_map[payload['id']] = payload
-                        current_data['bottles'] = list(existing_map.values())
+                        current_data['bottles'] = [existing_map[i] for i in sorted(existing_map)]
 
                     elif payload.get('type') == 'master_status':
                         packet_stats['rx_master'] += 1
-                        last_master_rx_time = now_ts
+                        last_master_rx_time = now_mono
                         current_data['temp'] = float(payload.get('water_temp', current_data['temp']))
                         current_data['bottle_avg_temp'] = float(payload.get('bottle_temp_avg', current_data['bottle_avg_temp']))
                         current_data['heater'] = bool(payload.get('heater', 0))
@@ -673,21 +719,18 @@ def serial_worker():
                             current_data['leak_thr'] = int(payload.get('leak_thr', 200))
                         current_data['system_mode'] = payload.get('system_mode', current_data['system_mode'])
 
-                    else:
+                    elif isinstance(payload, dict):
                         packet_stats['rx_master'] += 1
-                        last_master_rx_time = now_ts
-                        current_data.update(payload)
+                        last_master_rx_time = now_mono
+                        for k, v in payload.items():
+                            if k != 'bottles' and k in current_data:
+                                current_data[k] = v
 
                     update_packet_metrics()
                 except json.JSONDecodeError:
                     pass
         except Exception:
-            if serial_conn:
-                try:
-                    serial_conn.close()
-                except Exception:
-                    pass
-                serial_conn = None
+            close_serial_conn()
             time.sleep(2)
 
 
@@ -778,9 +821,9 @@ def log_data_to_csv():
         fp = get_todays_filename()
         write_headers_if_new(fp)
 
-        now_ts = time.time()
-        master_fresh = (now_ts - last_master_rx_time) < SLAVE_STALE_SECONDS
-        slave_fresh = (now_ts - last_slave_rx_time) < SLAVE_STALE_SECONDS
+        now_mono = time.monotonic()
+        master_fresh = (now_mono - last_master_rx_time) < SLAVE_STALE_SECONDS
+        slave_fresh = (now_mono - last_slave_rx_time) < SLAVE_STALE_SECONDS
 
         row = [
             datetime.now().strftime("%H:%M:%S"),
@@ -887,11 +930,18 @@ def index():
 
 @app.route('/status')
 def status():
-    now_ts = time.time()
-    slave_fresh = (now_ts - last_slave_rx_time) < SLAVE_STALE_SECONDS
+    now_mono = time.monotonic()
+    master_fresh = (now_mono - last_master_rx_time) < SLAVE_STALE_SECONDS
+    slave_fresh = (now_mono - last_slave_rx_time) < SLAVE_STALE_SECONDS
     res = current_data.copy()
+    if not master_fresh:
+        res['temp'] = -999.0
+        res['bottle_avg_temp'] = -999.0
     if not slave_fresh:
         res['bottles'] = []
+        res['bottle_avg_temp'] = -999.0
+    else:
+        res['bottles'] = [b for b in res.get('bottles', []) if is_valid_bottle_payload(b)]
     res['logging'] = logging_active
     res['packets'] = packet_stats
     res['sys'] = cached_sys_stats

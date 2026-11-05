@@ -46,13 +46,13 @@ a copy of this file.
 
 ## Main loop
 
-1. Non-blocking DS18B20 read every 750 ms.
-2. Poll slave #1 every 3500 ms with `#1:PING*` on `Serial1`.
-3. Ingest slave JSON, extract the `{...}` substring, forward it to the Pi, and
-   compute the average bottle temperature from `bottles[].temp` or `temp`.
-4. Read D6. `LOW` forces `MODE_OFF`.
-5. Water-level check every 250 ms: computes the interquartile mean of 16 samples on `A9` (`readAdcAveraged()`) and updates the debounced `waterCriticalLow`, `waterDepleted`, and `inletWaterFull` flags (`1.0 s` trip, `5.0 s` recovery with hysteresis).
-6. Actuator control:
+1. Feed the 4-second AVR hardware watchdog (`wdt_reset()`) and drain `Serial1` via `pollSlaveSerial(now)`.
+2. Non-blocking DS18B20 read every 750 ms (calling `pollSlaveSerial(now)` immediately afterward so `Serial1`'s 64-byte ring buffer cannot overflow during the 1-Wire scratchpad read).
+3. Poll slave #1 every 3500 ms with `#1:PING*` on `Serial1`.
+4. In `pollSlaveSerial(now)`, extract the `{...}` substring, validate `deserializeJson(doc, cleanJson)` and every bottle object (`isValidBottleObject`: `id` in `1..4`, no duplicates, required keys `temp`, `ph`, `methane`, `co2`, `press`), forward the validated JSON to the Pi over `Serial`, and compute the average bottle temperature.
+5. Read D6. `LOW` forces `MODE_OFF`.
+6. Water-level check every 250 ms: computes the interquartile mean of 16 samples on `A9` (`readAdcAveraged()`) and updates the debounced `waterCriticalLow`, `waterDepleted`, and `inletWaterFull` flags (`1.0 s` trip, `5.0 s` recovery with hysteresis).
+7. Actuator control:
    - If `currentMode == MODE_OFF` or `pumpLeakDetected`: `forceAllOff()` cuts heater, both pumps, and stirrer immediately.
    - If `inletWaterFull`: `resetMosfetOff(pump1Mosfet)` cuts Pump 1 immediately.
    - If `waterCriticalLow`: `resetMosfetOff(pump2Mosfet)` and `driveHeater(false)` cut Pump 2 and the heater immediately.
@@ -61,7 +61,7 @@ a copy of this file.
      - heater: hysteresis around the target, hard-off at the bath ceiling, or
        forced by override;
      - stirrer: state machine above.
-7. Handle newline-terminated commands on USB serial.
+8. Accumulate USB serial characters non-blockingly into `usbRxBuffer` and dispatch newline-terminated commands via `handleUsbCommand()`, draining `Serial1` between status replies.
 
 ## Boot defaults
 

@@ -8,7 +8,7 @@ Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-st
 |---|---|
 | **Home (Water)** | Bath water temp card; avg bottle temp card (expandable per-bottle breakdown); system status card (`WATER LEVEL (A9)` with tap-to-expand ADC drawer, `HEATER (D5)`, `PUMP 1 (D3)`, `PUMP 2 (D7)`, `STIRRER (D4)`, and `EXHAUST FAN`; optional `PUMP LEAK (A8)` row and pills are hidden unless `leak_enabled` is true). |
 | **Controls** | Per-actuator mode overrides (`AUTO` / `FORCE ON` / `OFF`) for `HEATER (D5)`, `PUMP 1 (D3)`, and `PUMP 2 (D7)`; temporary `0–255` MOSFET PWM speed controls labeled by pin (`Pin D3`, `Pin D7`, `Pin D4`) for water debit testing; stirrer schedule controller (`Pin D4`); bottle hysteresis target controls. |
-| **Bottle** | 4-bottle grid: temp, pH, methane ppm + mL, CO2 ppm + mL, pressure. |
+| **Bottle** | 4-bottle grid: temp, pH, methane ppm + mL, CO2 ppm + mL, pressure. Filters `data.bottles` to valid bottle IDs `1..4`, updates card titles dynamically, and resets the grid to `"Waiting for Sensor Data..."` whenever `data.bottles` becomes empty (e.g., when the slave goes offline for `>= 12 s`). |
 | **Logs (Data)** | List of CSV log files; live log inspector; LAN QR download and USB drive export. |
 | **Settings** | Pi perf strip (CPU load, RAM, SoC temp, SD storage, 5 V rail); packet statistics strip; device info (SSID/IP); refresh + shutdown; timezone + manual date/time. |
 
