@@ -1581,7 +1581,14 @@
                 }
             }
 
+            let lastServerClock = null;
+
             function updateClock() {
+                if (lastServerClock && lastServerClock.time && lastServerClock.date) {
+                    setText(DOM.clockTime, lastServerClock.time);
+                    setText(DOM.clockDate, lastServerClock.date);
+                    return;
+                }
                 const now = new Date();
                 const hh = String(now.getHours()).padStart(2, "0");
                 const mm = String(now.getMinutes()).padStart(2, "0");
@@ -1605,11 +1612,13 @@
                 if (tab === "data") {
                     loadFiles();
                     loadDrives();
-                } else if (tab === "settings" && !settingsLoaded) {
+                } else if (tab === "settings") {
                     checkNetwork();
-                    loadTimezones();
+                    if (!settingsLoaded) {
+                        loadTimezones();
+                        settingsLoaded = true;
+                    }
                     initTimeInput();
-                    settingsLoaded = true;
                 }
             }
 
@@ -1959,6 +1968,10 @@
                     });
             }
             function initTimeInput() {
+                if (lastServerClock && lastServerClock.iso) {
+                    DOM.timeInput.value = lastServerClock.iso;
+                    return;
+                }
                 const now = new Date();
                 now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
                 DOM.timeInput.value = now.toISOString().slice(0, 16);
@@ -1970,7 +1983,14 @@
                     body: JSON.stringify({ datetime: DOM.timeInput.value.replace("T", " ") }),
                 })
                     .then((r) => r.json())
-                    .then((d) => setText(DOM.timeMsg, d.status === "success" ? "Updated!" : "Error"));
+                    .then((d) => {
+                        if (d.clock) {
+                            lastServerClock = d.clock;
+                            updateClock();
+                            initTimeInput();
+                        }
+                        setText(DOM.timeMsg, d.status === "success" ? "Updated!" : "Error");
+                    });
             }
             function setSystemTimezone() {
                 fetch("/set_timezone", {
@@ -1979,7 +1999,14 @@
                     body: JSON.stringify({ timezone: DOM.tzSelect.value }),
                 })
                     .then((r) => r.json())
-                    .then((d) => setText(DOM.timeMsg, d.status === "success" ? "Zone Set!" : "Error"));
+                    .then((d) => {
+                        if (d.clock) {
+                            lastServerClock = d.clock;
+                            updateClock();
+                            initTimeInput();
+                        }
+                        setText(DOM.timeMsg, d.status === "success" ? "Zone Set!" : "Error");
+                    });
             }
 
             function fmtMetric(v, u, sentinel) {
@@ -2016,6 +2043,10 @@
             }
 
             function updateUI(data) {
+                if (data.clock) {
+                    lastServerClock = data.clock;
+                    updateClock();
+                }
                 const temp = Number(data.temp);
                 setText(DOM.temp, Number.isFinite(temp) && temp > -50 ? temp.toFixed(1) + "°C" : "--°C");
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import io
 import os
+import re
+import ssl
 import glob
 import json
 import time
@@ -9,10 +11,13 @@ import socket
 import shutil
 import threading
 import subprocess
+import urllib.error
+import urllib.request
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 from flask import (
     Flask, render_template, render_template_string,
     jsonify, request, send_from_directory
@@ -133,7 +138,32 @@ try:
 except Exception:
     CACHED_TIMEZONES = ["Asia/Jakarta", "UTC"]
 
+# --- LAN HTTP CLOCK SYNC (CAPTIVE-PORTAL SAFE, NO LOGIN) ---
+# When connected to the campus LAN behind a captive portal, UDP/123 (NTP) to
+# internet pools is blocked until someone logs in. However, HTTP/HTTPS servers
+# reachable on the LAN (either the probe target when open, or the captive
+# portal / gateway login server when walled) still return a standard UTC
+# `Date:` header in their HTTP response.
+CLOCK_PROBE_URLS = (
+    "http://connectivitycheck.gstatic.com/generate_204",
+    "http://example.com/",
+)
+CLOCK_RETRY_SECONDS = 5.0
+CLOCK_RESYNC_SECONDS = 900.0
+clock_synced = False
+manual_time_set = False
+
 _prev_cpu_times = None
+
+
+def get_clock_payload():
+    now = datetime.now()
+    return {
+        "time": now.strftime("%H:%M"),
+        "date": f"{now.strftime('%a, %b')} {now.day}",
+        "iso": now.strftime("%Y-%m-%dT%H:%M"),
+        "synced": clock_synced,
+    }
 
 def update_packet_metrics():
     tx = packet_stats['outgoing']
@@ -297,6 +327,175 @@ def disable_wifi_client_and_stop_hotspot():
         subprocess.run(["sudo", "nmcli", "device", "connect", "eth0"], check=False, timeout=4)
     except Exception:
         pass
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _parse_http_date_header(headers):
+    if not headers:
+        return None
+    date_hdr = headers.get("Date") or headers.get("date")
+    if not date_hdr:
+        return None
+    try:
+        dt = parsedate_to_datetime(date_hdr)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        if dt.year >= 2025:
+            return dt
+    except Exception:
+        pass
+    return None
+
+
+def _extract_portal_redirect_url(base_url, headers, body_text):
+    if headers:
+        loc = headers.get("Location") or headers.get("location")
+        if loc:
+            resolved = urljoin(base_url, loc.strip())
+            if resolved.startswith(("http://", "https://")):
+                return resolved
+    if body_text:
+        m = re.search(
+            r'window\.location(?:\.href)?\s*=\s*["\']([^"\']+)["\']',
+            body_text,
+            re.IGNORECASE,
+        )
+        if not m:
+            m = re.search(
+                r'http-equiv=["\']?refresh["\']?[^>]*content=["\'][^"\']*url=([^"\'\s>]+)',
+                body_text,
+                re.IGNORECASE,
+            )
+        if m:
+            resolved = urljoin(base_url, m.group(1).strip())
+            if resolved.startswith(("http://", "https://")):
+                return resolved
+    return None
+
+
+def _fetch_http_date(url, follow_portal=True):
+    """
+    Fetch an HTTP/HTTPS URL without logging into any captive portal and return
+    its UTC `Date` header as a timezone-aware datetime.
+    - Unverified SSL context is used so an out-of-sync Pi clock or captive-portal
+      certificate does not block reading the response headers.
+    - If a captive-portal interceptor replies with a bare JS redirect stub that
+      lacks a `Date` header, we follow that redirect URL once (still without
+      submitting credentials) to read the `Date` header from the portal web server.
+    """
+    ctx = ssl._create_unverified_context()
+    opener = urllib.request.build_opener(
+        _NoRedirectHandler(),
+        urllib.request.HTTPSHandler(context=ctx),
+    )
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"},
+    )
+    headers = None
+    body_text = ""
+    try:
+        with opener.open(req, timeout=4.0) as resp:
+            headers = resp.headers
+            dt = _parse_http_date_header(headers)
+            if dt is not None:
+                return dt
+            if follow_portal:
+                body_text = resp.read(2048).decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as e:
+        headers = e.headers
+        dt = _parse_http_date_header(headers)
+        if dt is not None:
+            return dt
+        if follow_portal and e.fp is not None:
+            try:
+                body_text = e.fp.read(2048).decode("utf-8", errors="ignore")
+            except Exception:
+                pass
+    except Exception:
+        return None
+
+    if follow_portal:
+        portal_url = _extract_portal_redirect_url(url, headers, body_text)
+        if portal_url and portal_url != url:
+            return _fetch_http_date(portal_url, follow_portal=False)
+    return None
+
+
+def _get_default_gateway_ip():
+    try:
+        out = subprocess.check_output(
+            ["ip", "-4", "route", "show", "default"],
+            timeout=1.5,
+        ).decode("utf-8", errors="ignore")
+        for line in out.splitlines():
+            parts = line.split()
+            if "via" in parts:
+                idx = parts.index("via")
+                if idx + 1 < len(parts):
+                    return parts[idx + 1]
+    except Exception:
+        pass
+    return None
+
+
+def sync_clock_from_lan_http():
+    """
+    Synchronize the Pi system clock from an HTTP `Date` header over the LAN.
+    Works whether the LAN port is open or walled behind a captive portal, and
+    never attempts a captive-portal login.
+    """
+    global clock_synced
+    if manual_time_set:
+        return True
+    if get_lan_ip() == "Disconnected":
+        return False
+
+    candidate_urls = list(CLOCK_PROBE_URLS)
+    gw = _get_default_gateway_ip()
+    if gw:
+        candidate_urls.extend([
+            f"https://{gw}:1003/",
+            f"https://{gw}/",
+            f"http://{gw}/",
+        ])
+
+    utc_dt = None
+    for url in candidate_urls:
+        utc_dt = _fetch_http_date(url, follow_portal=True)
+        if utc_dt is not None:
+            break
+
+    if utc_dt is None:
+        return False
+
+    try:
+        drift = abs(utc_dt.timestamp() - time.time())
+        if not clock_synced or drift > 2.0:
+            utc_str = utc_dt.strftime("%Y-%m-%d %H:%M:%S")
+            subprocess.run(["sudo", "timedatectl", "set-ntp", "false"], check=False, timeout=4)
+            subprocess.run(["sudo", "date", "-u", "-s", utc_str], check=True, timeout=4)
+            if hasattr(time, "tzset"):
+                time.tzset()
+        clock_synced = True
+        return True
+    except Exception:
+        return False
+
+
+def clock_sync_worker():
+    while True:
+        if manual_time_set:
+            time.sleep(CLOCK_RESYNC_SECONDS)
+            continue
+        ok = sync_clock_from_lan_http()
+        time.sleep(CLOCK_RESYNC_SECONDS if ok else CLOCK_RETRY_SECONDS)
 
 
 # --- BACKGROUND WORKER 0: ZERO-SUBPROCESS HARDWARE TELEMETRY ---
@@ -625,6 +824,7 @@ def log_data_to_csv():
 
 threading.Thread(target=disable_wifi_client_and_stop_hotspot, daemon=True).start()
 threading.Thread(target=start_download_server, daemon=True).start()
+threading.Thread(target=clock_sync_worker, daemon=True).start()
 threading.Thread(target=telemetry_worker, daemon=True).start()
 threading.Thread(target=serial_worker, daemon=True).start()
 threading.Thread(target=polling_worker, daemon=True).start()
@@ -695,6 +895,7 @@ def status():
     res['logging'] = logging_active
     res['packets'] = packet_stats
     res['sys'] = cached_sys_stats
+    res['clock'] = get_clock_payload()
     return jsonify(res)
 
 @app.route('/raw')
@@ -976,16 +1177,30 @@ def get_timezones():
 @app.route('/set_timezone', methods=['POST'])
 def set_timezone():
     try:
-        subprocess.run(['sudo', 'timedatectl', 'set-timezone', request.json.get('timezone')], check=True)
-        return jsonify({'status': 'success'})
+        tz = (request.json or {}).get('timezone', '').strip()
+        if not tz:
+            return jsonify({'status': 'error'}), 400
+        subprocess.run(['sudo', 'timedatectl', 'set-timezone', tz], check=True, timeout=5)
+        if hasattr(time, 'tzset'):
+            time.tzset()
+        return jsonify({'status': 'success', 'clock': get_clock_payload()})
     except Exception:
         return jsonify({'status': 'error'})
 
 @app.route('/set_time', methods=['POST'])
 def set_time():
+    global manual_time_set, clock_synced
     try:
-        subprocess.run(['sudo', 'date', '-s', request.json.get('datetime')], check=True)
-        return jsonify({'status': 'success'})
+        dt_str = (request.json or {}).get('datetime', '').strip()
+        if not dt_str:
+            return jsonify({'status': 'error'}), 400
+        subprocess.run(['sudo', 'timedatectl', 'set-ntp', 'false'], check=False, timeout=5)
+        subprocess.run(['sudo', 'date', '-s', dt_str], check=True, timeout=5)
+        if hasattr(time, 'tzset'):
+            time.tzset()
+        manual_time_set = True
+        clock_synced = True
+        return jsonify({'status': 'success', 'clock': get_clock_payload()})
     except Exception:
         return jsonify({'status': 'error'})
 

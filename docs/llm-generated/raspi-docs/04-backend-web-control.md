@@ -97,12 +97,20 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
   usage into `cached_sys_stats`. It also reads
   `/sys/class/hwmon/hwmon1/in0_lcrit_alarm` for `power_ok`.
 
+### `clock_sync_worker` (daemon thread)
+
+- Syncs the Pi's system clock from HTTP `Date` response headers over the LAN (`sync_clock_from_lan_http()`) without logging into the captive portal:
+  - Probes `http://connectivitycheck.gstatic.com/generate_204` and `http://example.com/` (plus the default gateway as fallback).
+  - If the port is walled by a captive portal that returns a bare JavaScript `window.location` redirect stub without a `Date` header, follows that redirect URL once (with an unverified SSL context) to read the `Date` header from the captive-portal web server itself.
+  - When the UTC timestamp differs from the local clock by more than 2 s (or on first sync), disables `systemd-timesyncd` override (`sudo timedatectl set-ntp false`), sets the UTC system clock (`sudo date -u -s ...`), and calls `time.tzset()`.
+  - Retries every 5 s until the first sync succeeds, then re-checks every 900 s unless manual time was set via `/set_time`.
+
 ## REST routes
 
 | Route | Method | Purpose |
 |---|---|---|
 | `/` | GET | Render `index.html` |
-| `/status` | GET | `current_data` + `logging`, `packets`, `sys` |
+| `/status` | GET | `current_data` + `logging`, `packets`, `sys`, `clock` (`time`, `date`, `iso`, `synced`) |
 | `/raw` | GET | Buffered received lines |
 | `/control` | POST | Heater, Pump 1 (`D3`), Pump 2 (`D7`), Stirrer (`D4`), per-pin `0–255` PWM (`mosfet_pwm`), and hysteresis target updates |
 | `/sys_stats` | GET | `cached_sys_stats` + `packets` |
@@ -118,8 +126,8 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
 | `/m/<filename>` | GET, POST | Password-protected log download page |
 | `/get_ip` | GET | Local IP plus interface mode string |
 | `/get_timezones` | GET | `timedatectl list-timezones` |
-| `/set_timezone` | POST | `sudo timedatectl set-timezone` |
-| `/set_time` | POST | `sudo date -s` |
+| `/set_timezone` | POST | `sudo timedatectl set-timezone`, `time.tzset()`, returns updated `clock` |
+| `/set_time` | POST | `sudo timedatectl set-ntp false` then `sudo date -s`, pauses background HTTP clock resync, returns updated `clock` |
 
 ### `POST /control` Actions
 
