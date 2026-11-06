@@ -354,9 +354,9 @@
     "semantic_hash": ""
   },
   "legacy/master/master.cpp": {
-    "mtime": 1793944318.359294,
-    "seen": 1793944670.8437207,
-    "ast_hash": "a0fd8c0363adbc087c9db9ee08fd00a9",
+    "mtime": 1793945873.893461,
+    "seen": 1793946591.4346428,
+    "ast_hash": "92f7c8bc1c3c25d76530180ffdb4bdad",
     "semantic_hash": ""
   },
   "legacy/pi/captive-portal-login.sh": {
@@ -372,9 +372,9 @@
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/web_control.py": {
-    "mtime": 1793944585.7182758,
-    "seen": 1793944670.8437235,
-    "ast_hash": "6514d7c6f8b906452242a319e0062276",
+    "mtime": 1793945928.371475,
+    "seen": 1793946591.434728,
+    "ast_hash": "6d5dca3fc35688fd6712888829feda04",
     "semantic_hash": ""
   },
   "legacy/slave/new-slave.cpp": {
@@ -469,9 +469,9 @@
     "semantic_hash": ""
   },
   "docs/index.md": {
-    "mtime": 1793766605.1069527,
-    "seen": 1793944670.8437402,
-    "ast_hash": "5385f4d744a5bdc5822025a6acd181df",
+    "mtime": 1793946535.6856418,
+    "seen": 1793946591.4352918,
+    "ast_hash": "1eb003cc99173fe86baacda030d085ac",
     "semantic_hash": ""
   },
   "docs/llm-generated/SUNTON-luna.md": {
@@ -595,9 +595,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/legacy-master.md": {
-    "mtime": 1793944623.7412727,
-    "seen": 1793944670.8437617,
-    "ast_hash": "1188d7977490cfd31f658eadc3a7c6b2",
+    "mtime": 1793945996.4954984,
+    "seen": 1793946591.4360664,
+    "ast_hash": "9f81e70587cb45e4c555e962ba69312f",
     "semantic_hash": ""
   },
   "docs/llm-generated/legacy-pi-remote-monitor.md": {
@@ -703,9 +703,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/raspi-docs/04-backend-web-control.md": {
-    "mtime": 1793944612.4862735,
-    "seen": 1793944670.8437772,
-    "ast_hash": "e8cc239cbcda771172ed71ec33941deb",
+    "mtime": 1793946035.925512,
+    "seen": 1793946591.4366608,
+    "ast_hash": "5a28543f0881cc364920592290393421",
     "semantic_hash": ""
   },
   "docs/llm-generated/raspi-docs/05-frontend-ui.md": {
@@ -856,6 +856,18 @@
     "mtime": 1793768689.2289896,
     "seen": 1793944670.8436694,
     "ast_hash": "c6c6b337b7ad4e3ef188a4acf0a096c8",
+    "semantic_hash": ""
+  },
+  "legacy/pi/water-control-system/flask_cli.py": {
+    "mtime": 1793946388.9256334,
+    "seen": 1793946591.4347246,
+    "ast_hash": "d5abb58513e9c24cc805d11076b1a96b",
+    "semantic_hash": ""
+  },
+  "docs/llm-generated/legacy-flask-cli.md": {
+    "mtime": 1793946528.3596423,
+    "seen": 1793946591.4360273,
+    "ast_hash": "cc5e4a37131b20f3e4c6d1ab9172e6db",
     "semantic_hash": ""
   }
 }

@@ -7,8 +7,8 @@
 - Non-blocking water-bath temperature acquisition via a DS18B20 sensor (`D2`).
 - Polling the 4-bottle sensor slave (`#1:PING*` over `Serial1` at 9600 baud), draining `Serial1` frequently via `pollSlaveSerial(now)` to prevent 64-byte AVR UART RX ring-buffer overflows, and validating each returned JSON packet and bottle schema (`id` in `1..4`, no duplicates, required `temp`, `ph`, `methane`, `co2`, `press` fields) via `isValidBottleObject()` before forwarding to the Raspberry Pi or updating average bottle temperature.
 - Hardware watchdog protection (`wdt_enable(WDTO_4S)` in `setup()`, `wdt_reset()` every `loop()` iteration) and non-blocking USB serial command reception (`usbRxBuffer` + `handleUsbCommand()`).
-- Time-gated interquartile-mean analog water-level sensing on `A9` (`250 ms` cadence, middle 8 of 16 sorted samples) driving a 4-zone safety state machine with hysteresis deadbands and asymmetric fast-trip (`1.0 s`) / slow-recovery (`5.0 s`) timers. Optional pump leak detection sensing on `A8` (wet fault at or above `leakThreshold`, boot default `200`) is guarded by `#define ENABLE_LEAK_SENSOR 0`. Thresholds are RAM-only variables set by the Pi via `THRESH:...` (§4.1, §9); the master forgets them on reboot.
-- Debounced pump and heater interlocks driven by `A9`: Pump 1 (`D3`, pumps into the reservoir) hard-stops on high water (`inletWaterFull`: trips at or above `inPumpStopAdc`, recovers at or below `inPumpRecoverAdc`), Pump 2 (`D7`, pumps out of the reservoir) throttles on low water (`waterDepleted`: trips at or below `waterDryThreshold`, recovers at or above `waterDryRecoverAdc`) and hard-stops alongside the heater on critical dry (`waterCriticalLow`: trips at or below `outPumpStopAdc`, recovers at or above `outPumpRecoverAdc`). Boot defaults `550`/`480`, `460`/`500`, `400`/`440`. See sections 4 and 5. Pump `FORCE ON` (§5) is debug-only and ignores these interlocks.
+- Time-gated interquartile-mean analog water-level sensing on `A9` (`250 ms` cadence, middle 8 of 16 sorted samples) driving a 4-zone safety state machine with trip-only thresholds and asymmetric fast-trip (`1.0 s`) / slow-recovery (`5.0 s`) timers. Optional pump leak detection sensing on `A8` (wet fault at or above `leakThreshold`, boot default `200`) is guarded by `#define ENABLE_LEAK_SENSOR 0`. Thresholds are RAM-only variables set by the Pi via `THRESH:...` (§4.1, §9); the master forgets them on reboot.
+- Debounced pump and heater interlocks driven by `A9`: Pump 1 (`D3`, pumps into the reservoir) hard-stops on high water (`inletWaterFull`: trips at or above `inPumpStopAdc`), Pump 2 (`D7`, pumps out of the reservoir) throttles on low water (`waterDepleted`: trips at or below `waterDryThreshold`) and hard-stops alongside the heater on critical dry (`waterCriticalLow`: trips at or below `outPumpStopAdc`). Boot defaults `550`, `460`, `400`. See sections 4 and 5. Pump `FORCE ON` (§5) is debug-only and ignores these interlocks.
 - Hysteresis control of the 300 W heater SSR (`D5`), with per-actuator manual overrides (`AUTO`, `FORCE ON`, `OFF`).
 - Unified non-blocking 3-second MOSFET PWM ramping (`slewMosfet`) across all 3 MOSFET channels (`Pin D3` Pump 1, `Pin D7` Pump 2, and `Pin D4` Stirrer), with individually adjustable target PWM ceilings (`0`–`255`) for water debit (flow rate) testing.
 - Bidirectional USB serial (`Serial` at 115200 baud) command and status telemetry with the Raspberry Pi Flask backend ([`web_control.py`](../../legacy/pi/water-control-system/web_control.py)).
@@ -42,7 +42,7 @@ The firmware boots with all actuators OFF and all MOSFET target PWM ceilings set
 | `pump1Mosfet.maxPwm` | `255` | Target PWM ceiling (`0`–`255`) for `Pin D3`. |
 | `pump2Mosfet.maxPwm` | `255` | Target PWM ceiling (`0`–`255`) for `Pin D7`. |
 | `stirMosfet.maxPwm` | `255` | Target PWM ceiling (`0`–`255`) for `Pin D4`. |
-| `outPumpStopAdc` etc. (§4.1) | `400`/`440`/`460`/`500`/`550`/`480`/`200` | RAM-only thresholds; forgotten on reboot until the Pi re-sends `THRESH:...`. |
+| `outPumpStopAdc` etc. (§4.1) | `400`/`460`/`550`/`200` | RAM-only thresholds; forgotten on reboot until the Pi re-sends `THRESH:...`. |
 
 `setup()` calls `forceAllOff()` and drives `D3`, `D7`, `D4`, and `D5` `LOW` before the first loop iteration. `web_control.py` also sends `HEATER_OFF`, `PUMP1_OFF`, `PUMP2_OFF`, and `STIR:0:10:30` on its first serial connection (`BOOT_DEFAULT_COMMANDS`), then its `THRESH:...` constants so the master adopts the Pi values.
 
@@ -55,32 +55,29 @@ Two consequences of these defaults:
 
 Analog water sensing runs every `WATER_CHECK_MS = 250UL` (4 Hz) using `readAdcAveraged(uint8_t pin)`, which discards one initial `analogRead(pin)` to settle the AVR ADC multiplexer sample-and-hold capacitor, collects `WATER_ADC_SAMPLES = 16` readings, sorts them via insertion sort, and returns the interquartile mean (average of the middle 8 samples). This rejects up to 4 low spikes and 4 high spikes per burst.
 
-### 4.1 Hysteresis thresholds
+### 4.1 Trip thresholds
 
-Thresholds are RAM-only variables (`outPumpStopAdc`, `outPumpRecoverAdc`,
-`waterDryThreshold`, `waterDryRecoverAdc`, `inPumpStopAdc`,
-`inPumpRecoverAdc`, `leakThreshold`) so the Pi can change them at runtime
-via `THRESH:...` (see §9). They are not stored in EEPROM: on reboot the
-master forgets them and returns to the boot defaults below. The Pi re-sends
-its constants on every serial connect and whenever the master's reported
-values drift (see `04-backend-web-control.md`).
+Thresholds are RAM-only variables (`outPumpStopAdc`,
+`waterDryThreshold`, `inPumpStopAdc`, `leakThreshold`) so the Pi can change
+them at runtime via `THRESH:...` (see §9). Trip-only: no recover deadbands
+(the water fills too fast for a deadband). They are not stored in EEPROM:
+on reboot the master forgets them and returns to the boot defaults below.
+The Pi re-sends its constants on every serial connect and whenever the
+master's reported values drift (see `04-backend-web-control.md`).
 
 | Variable | Boot default | Meaning |
 |---|---|---|
 | `outPumpStopAdc` | `400` | Trips `waterCriticalLow` (`<= 400`): hard-stops Pump 2 (`D7`) and cuts Heater (`D5`) |
-| `outPumpRecoverAdc` | `440` | Clears `waterCriticalLow` (`>= 440`) after 5.0 s of uninterrupted readings |
 | `waterDryThreshold` | `460` | Trips `waterDepleted` (`<= 460`): throttles Pump 2 to `DRY_OUT_PUMP_PWM` (`100`) |
-| `waterDryRecoverAdc` | `500` | Clears `waterDepleted` (`>= 500`) after 5.0 s of uninterrupted readings |
 | `inPumpStopAdc` | `550` | Trips `inletWaterFull` (`>= 550`): hard-stops Pump 1 (`D3`) to prevent overflow |
-| `inPumpRecoverAdc` | `480` | Clears `inletWaterFull` (`<= 480`) after 5.0 s of uninterrupted readings |
 | `leakThreshold` | `200` | Wet-fault level for the optional `A8` leak probe |
 
 ### 4.2 Asymmetric Fast-Trip / Slow-Recovery Debouncing
 
-All three water-level safety flags (`waterCriticalLow`, `waterDepleted`, `inletWaterFull`) are updated via `updateLowTripFlag()` and `updateHighTripFlag()`:
+All three water-level safety flags (`waterCriticalLow`, `waterDepleted`, `inletWaterFull`) are updated via `updateLowTripFlag()` and `updateHighTripFlag()` with a single trip threshold per flag:
 
 - **Fast Trip (`WATER_TRIP_LIMIT = 4`, `1.0 s`)**: 4 checks at `250 ms` beyond the trip threshold set the flag `true` and preload its counter to `WATER_RECOVER_LIMIT` (`20`). While untripped, a non-fault reading decrements the counter by 1 rather than zeroing it immediately so noisy fault signals still trip reliably.
-- **Slow Recovery (`WATER_RECOVER_LIMIT = 20`, `5.0 s`)**: While tripped, the reading must remain continuously past the hysteresis recovery threshold for 20 consecutive checks (`5.0 s`) before the flag clears to `false`. Any reading that fails to meet the recovery threshold resets the counter back to `20`, preventing momentary false readings from dry-firing the heater or restarting the inlet pump into a full reservoir.
+- **Slow Recovery (`WATER_RECOVER_LIMIT = 20`, `5.0 s`)**: While tripped, the reading must remain continuously past the same trip threshold for 20 consecutive checks (`5.0 s`) before the flag clears to `false`. Any reading that fails to clear resets the counter back to `20`, preventing momentary false readings from dry-firing the heater or restarting the inlet pump into a full reservoir.
 - **Boot**: `setup()` takes one interquartile-mean reading and initializes `waterCriticalLow`, `waterDepleted`, and `inletWaterFull` immediately, preloading any tripped flag's recovery counter to `WATER_RECOVER_LIMIT`.
 
 ### 4.3 Optional Pump Leak Detection Probe (`A8`)
@@ -94,21 +91,21 @@ All three water-level safety flags (`waterCriticalLow`, `waterDepleted`, `inletW
 `loop()` derives the interlock booleans from the debounced state flags:
 
 ```cpp
-bool inletLevelOk   = !inletWaterFull;   // trips >= inPumpStopAdc, clears <= inPumpRecoverAdc
-bool outletLevelOk  = !waterCriticalLow; // trips <= outPumpStopAdc, clears >= outPumpRecoverAdc
+bool inletLevelOk   = !inletWaterFull;   // trips >= inPumpStopAdc
+bool outletLevelOk  = !waterCriticalLow; // trips <= outPumpStopAdc
 bool heaterWaterLow = waterCriticalLow;
 ```
 
 When `!inletLevelOk`, `resetMosfetOff(pump1Mosfet)` cuts Pump 1 (`D3`) to `0` PWM immediately without waiting for the 3-second soft-stop ramp. Likewise, when `!outletLevelOk`, `resetMosfetOff(pump2Mosfet)` cuts Pump 2 (`D7`) to `0` PWM immediately.
 
-AUTO behaviour with `currentMode == MODE_AUTO` and no leak (boot defaults shown; thresholds are Pi-settable, see §4.1):
+AUTO behaviour with `currentMode == MODE_AUTO` and no leak (boot defaults shown; thresholds are Pi-settable, see §4.1; each flag uses one trip threshold):
 
-| Debounced State | ADC Trip / Clear | Pump 1 (`D3`, IN) | Pump 2 (`D7`, OUT) | Heater (`D5`) |
+| Debounced State | ADC Trip | Pump 1 (`D3`, IN) | Pump 2 (`D7`, OUT) | Heater (`D5`) |
 |---|---|---|---|---|
-| `inletWaterFull` | Trips `>= 550`, clears `<= 480` | **hard off (`0` PWM)** | on, `200` PWM | allowed |
-| Normal band | Between recovery bands | on, `200` PWM | on, `200` PWM | allowed |
-| `waterDepleted` | Trips `<= 460`, clears `>= 500` | on, `200` PWM | throttled, `100` PWM (`DRY_OUT_PUMP_PWM`) | allowed |
-| `waterCriticalLow` | Trips `<= 400`, clears `>= 440` | on, `200` PWM | **hard off (`0` PWM)** | **hard off** |
+| `inletWaterFull` | Trips `>= 550` | **hard off (`0` PWM)** | on, `200` PWM | allowed |
+| Normal band | Between thresholds | on, `200` PWM | on, `200` PWM | allowed |
+| `waterDepleted` | Trips `<= 460` | on, `200` PWM | throttled, `100` PWM (`DRY_OUT_PUMP_PWM`) | allowed |
+| `waterCriticalLow` | Trips `<= 400` | on, `200` PWM | **hard off (`0` PWM)** | **hard off** |
 
 Override interaction:
 
@@ -137,7 +134,7 @@ if (currentMode == MODE_OFF || pumpLeakDetected) {
 
 Heater logic inside `MODE_AUTO`:
 
-1. `overTempCeiling` (`waterTemp >= MAX_WATER_BATH_TEMP`, `50.0 °C`), `heaterWaterLow` (`waterCriticalLow == true`, tripped at `<= outPumpStopAdc` and held until `>= outPumpRecoverAdc` for `5.0 s`), or `heaterOverride == 2` → heater off. These three win over every other case, including `HEATER_ON`.
+1. `overTempCeiling` (`waterTemp >= MAX_WATER_BATH_TEMP`, `50.0 °C`), `heaterWaterLow` (`waterCriticalLow == true`, tripped at `<= outPumpStopAdc` and held for `5.0 s` past the threshold), or `heaterOverride == 2` → heater off. These three win over every other case, including `HEATER_ON`.
 2. `heaterOverride == 1` → heater on, subject to the block above.
 3. `heaterOverride == 0` (AUTO) → off while `bathSensorOk` or `slaveActive` is false; otherwise hysteresis on the average bottle temperature: on below `targetBottleTemp - bottleHysteresis`, off at or above `targetBottleTemp`.
 
@@ -181,7 +178,7 @@ Commands are newline-terminated ASCII strings received on `Serial` (115200 baud)
   - `heater_mode`, `pump_mode`, `pump1_mode`, `pump2_mode`, `stir_mode`, `stir_int_min`, `stir_pulse_sec`, `stir_timed_min`, `stir_rem_sec`
   - `pwm_d3`, `pwm_d7`, `pwm_d4` (configured `0`–`255` target PWM ceilings for `D3`, `D7`, `D4`)
   - `out_d3`, `out_d7`, `out_d4` (instantaneous `0`–`255` PWM output values for `D3`, `D7`, `D4`)
-  - `water_low`, `water_crit`, `water_full`, `water_adc`, `water_thr`, `out_stop_thr`, `out_recover_thr`, `dry_recover_thr`, `in_stop_thr`, `in_recover_thr` (live thresholds; boot defaults `460`, `400`, `440`, `500`, `550`, `480`)
+  - `water_low`, `water_crit`, `water_full`, `water_adc`, `water_thr`, `out_stop_thr`, `in_stop_thr` (live thresholds; boot defaults `460`, `400`, `550`)
   - `leak_enabled`, `pump_leak`, `leak_adc`, `leak_thr` (optional pump leak sensor on `A8`; `leak_enabled = 0`, `pump_leak = 0`, `leak_adc = -1` when disabled)
 - `MODE_AUTO` / `MODE_OFF`: Switches master system mode. `MODE_AUTO` does not change any override, so the pumps and heater stay in `FORCE OFF` until the matching `*_AUTO` command arrives. `MODE_OFF` calls `forceAllOff()`.
 - `HEATER_AUTO` / `HEATER_ON` / `HEATER_OFF`: Sets heater override mode (`0`, `1`, `2`). `HEATER_OFF` also drives the heater low immediately.
@@ -191,7 +188,7 @@ Commands are newline-terminated ASCII strings received on `Serial` (115200 baud)
 - `PWM:<D3|D7|D4>:<0-255>`: Sets the target PWM ceiling (`0`–`255`) for `Pin D3` (Pump 1), `Pin D7` (Pump 2), or `Pin D4` (Stirrer).
 - `STIR:<mode>:<mins>:<secs>`: Configures stirrer mode (`0`–`3`), interval/timed minutes, and pulse duration seconds. Also resets `stirCycleStart`.
 - `TEMP:<target>:<hysteresis>`: Updates `targetBottleTemp` (`20.0`–`50.0` °C) and `bottleHysteresis` (`0.1`–`5.0` °C).
-- `THRESH:<out_stop>:<out_recover>:<dry>:<dry_recover>:<in_stop>:<in_recover>:<leak>` (example `THRESH:400:440:460:500:550:480:200`): Updates the seven RAM-only water/leak thresholds (§4.1). All seven values must be `0`–`1023` and the deadbands must straddle the trip points (`out_recover > out_stop`, `dry_recover > dry`, `in_recover < in_stop`); otherwise the whole line is ignored. Applied atomically and effective on the next 250 ms sample. Never written to EEPROM — the master forgets them on reboot. The Pi sends this on every serial connect from its module constants (or live `thresholds` dict) in `web_control.py`.
+- `THRESH:<out_stop>:<dry>:<in_stop>:<leak>` (example `THRESH:400:460:550:200`): Updates the four RAM-only water/leak thresholds (§4.1). All four values must be `0`–`1023`; otherwise the whole line is ignored. Applied atomically and effective on the next 250 ms sample. Never written to EEPROM — the master forgets them on reboot. The Pi sends this on every serial connect from its module constants (or live `thresholds` dict) in `web_control.py`.
 
 ## 10. Known Gaps
 

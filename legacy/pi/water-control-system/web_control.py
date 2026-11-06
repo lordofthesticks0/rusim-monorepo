@@ -46,24 +46,18 @@ REQUIRED_BOTTLE_KEYS = ('id', 'temp', 'ph', 'methane', 'co2', 'press')
 # To tweak: edit these values and restart Flask, or POST them live (see
 # /control action "thresholds"). No reflash needed.
 OUT_PUMP_STOP_ADC = 400
-OUT_PUMP_RECOVER_ADC = 440
 WATER_DRY_THRESHOLD = 460
-WATER_DRY_RECOVER_ADC = 500
 IN_PUMP_STOP_ADC = 550
-IN_PUMP_RECOVER_ADC = 480
 LEAK_THRESHOLD = 200
 
 # Volatile runtime copy of the thresholds. Initialised from the file
 # constants above; POST /control action "thresholds" updates this dict
 # and re-sends THRESH:... immediately. Lost on Flask restart (falls back
-# to the file constants).
+# to the file constants). Trip-only: no recover deadbands.
 thresholds = {
     'out_stop': OUT_PUMP_STOP_ADC,
-    'out_recover': OUT_PUMP_RECOVER_ADC,
     'dry': WATER_DRY_THRESHOLD,
-    'dry_recover': WATER_DRY_RECOVER_ADC,
     'in_stop': IN_PUMP_STOP_ADC,
-    'in_recover': IN_PUMP_RECOVER_ADC,
     'leak': LEAK_THRESHOLD,
 }
 
@@ -142,10 +136,7 @@ current_data = {
     'water_adc': -1,
     'water_thr': 460,
     'out_stop_thr': 400,
-    'out_recover_thr': 440,
-    'dry_recover_thr': 500,
     'in_stop_thr': 550,
-    'in_recover_thr': 480,
     'leak_enabled': False,
     'pump_leak': False,
     'leak_adc': -1,
@@ -250,11 +241,7 @@ def send_serial_cmd(cmd_str):
 def threshold_command():
     """Build the THRESH:... line from the live `thresholds` dict."""
     t = thresholds
-    return (
-        f"THRESH:{t['out_stop']}:{t['out_recover']}:"
-        f"{t['dry']}:{t['dry_recover']}:"
-        f"{t['in_stop']}:{t['in_recover']}:{t['leak']}"
-    )
+    return f"THRESH:{t['out_stop']}:{t['dry']}:{t['in_stop']}:{t['leak']}"
 
 def thresholds_match_current():
     """True when the last reported master thresholds match `thresholds`."""
@@ -262,29 +249,20 @@ def thresholds_match_current():
     try:
         return (
             int(current_data.get('out_stop_thr', t['out_stop'])) == t['out_stop']
-            and int(current_data.get('out_recover_thr', t['out_recover'])) == t['out_recover']
             and int(current_data.get('water_thr', t['dry'])) == t['dry']
-            and int(current_data.get('dry_recover_thr', t['dry_recover'])) == t['dry_recover']
             and int(current_data.get('in_stop_thr', t['in_stop'])) == t['in_stop']
-            and int(current_data.get('in_recover_thr', t['in_recover'])) == t['in_recover']
             and int(current_data.get('leak_thr', t['leak'])) == t['leak']
         )
     except (TypeError, ValueError):
         return False
 
 def validate_thresholds(new):
-    """Check ADC ranges and hysteresis deadbands (mirrors the master)."""
+    """Check ADC ranges (mirrors the master; trip-only, no deadbands)."""
     try:
-        vals = [int(new[k]) for k in
-                ('out_stop', 'out_recover', 'dry', 'dry_recover',
-                 'in_stop', 'in_recover', 'leak')]
+        vals = [int(new[k]) for k in ('out_stop', 'dry', 'in_stop', 'leak')]
     except (KeyError, TypeError, ValueError):
         return False
-    if not all(0 <= v <= 1023 for v in vals):
-        return False
-    return (new['out_recover'] > new['out_stop']
-            and new['dry_recover'] > new['dry']
-            and new['in_recover'] < new['in_stop'])
+    return all(0 <= v <= 1023 for v in vals)
 
 def make_qr_data_uri(payload_text):
     if not QR_AVAILABLE:
@@ -775,14 +753,8 @@ def serial_worker():
                             current_data['water_thr'] = int(payload.get('water_thr', WATER_DRY_THRESHOLD))
                         if 'out_stop_thr' in payload:
                             current_data['out_stop_thr'] = int(payload.get('out_stop_thr', OUT_PUMP_STOP_ADC))
-                        if 'out_recover_thr' in payload:
-                            current_data['out_recover_thr'] = int(payload.get('out_recover_thr', OUT_PUMP_RECOVER_ADC))
-                        if 'dry_recover_thr' in payload:
-                            current_data['dry_recover_thr'] = int(payload.get('dry_recover_thr', WATER_DRY_RECOVER_ADC))
                         if 'in_stop_thr' in payload:
                             current_data['in_stop_thr'] = int(payload.get('in_stop_thr', IN_PUMP_STOP_ADC))
-                        if 'in_recover_thr' in payload:
-                            current_data['in_recover_thr'] = int(payload.get('in_recover_thr', IN_PUMP_RECOVER_ADC))
                         leak_enabled = bool(payload.get('leak_enabled', 0))
                         current_data['leak_enabled'] = leak_enabled
                         if leak_enabled:
@@ -1161,38 +1133,30 @@ def control_api():
         return jsonify({'status': 'success'})
 
     elif action == 'thresholds':
-        # POST {"action": "thresholds", "out_stop": .., "out_recover": ..,
-        #       "dry": .., "dry_recover": .., "in_stop": ..,
-        #       "in_recover": .., "leak": ..}
+        # POST {"action": "thresholds", "out_stop": .., "dry": ..,
+        #       "in_stop": .., "leak": ..}
         # Volatile: updates the live dict and re-sends THRESH:... now.
         # Lost on Flask restart (falls back to the file constants).
+        # Trip-only: no recover deadbands.
         global thresholds
         try:
             new = {
                 'out_stop': int(body.get('out_stop')),
-                'out_recover': int(body.get('out_recover')),
                 'dry': int(body.get('dry')),
-                'dry_recover': int(body.get('dry_recover')),
                 'in_stop': int(body.get('in_stop')),
-                'in_recover': int(body.get('in_recover')),
                 'leak': int(body.get('leak')),
             }
         except (TypeError, ValueError):
             return jsonify({'status': 'error',
-                            'message': 'All seven thresholds are required ints'}), 400
+                            'message': 'All four thresholds are required ints'}), 400
         if not validate_thresholds(new):
             return jsonify({'status': 'error',
-                            'message': 'Invalid thresholds: need 0..1023 and '
-                                       'out_recover>out_stop, dry_recover>dry, '
-                                       'in_recover<in_stop'}), 400
+                            'message': 'Invalid thresholds: need 0..1023 each'}), 400
         thresholds = new
         send_serial_cmd(threshold_command())
         current_data['out_stop_thr'] = new['out_stop']
-        current_data['out_recover_thr'] = new['out_recover']
         current_data['water_thr'] = new['dry']
-        current_data['dry_recover_thr'] = new['dry_recover']
         current_data['in_stop_thr'] = new['in_stop']
-        current_data['in_recover_thr'] = new['in_recover']
         current_data['leak_thr'] = new['leak']
         return jsonify({'status': 'success', 'thresholds': new,
                         'command': threshold_command()})

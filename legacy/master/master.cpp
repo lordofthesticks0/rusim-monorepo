@@ -25,17 +25,15 @@ float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define MAX_WATER_BATH_TEMP    50.0   // Hard safety bath ceiling clamp (°C)
 // Water thresholds are RAM-only variables so the Pi can change them at
 // runtime via THRESH:... — they revert to these defaults on reboot.
+// Trip-only (no recover deadbands): water fills too fast for a deadband.
 int outPumpStopAdc    = 400;  // Trip critical dry cutoff (Heater & Pump 2 OFF) at or below this ADC
-int outPumpRecoverAdc = 440;  // Clear critical dry cutoff only at or above this ADC
 int waterDryThreshold = 460;  // Trip low-water Pump 2 throttle at or below this ADC
-int waterDryRecoverAdc = 500; // Clear low-water Pump 2 throttle only at or above this ADC
 int inPumpStopAdc     = 550;  // Trip high-water cutoff (Pump 1 OFF) at or above this ADC
-int inPumpRecoverAdc  = 480;  // Clear high-water cutoff only at or below this ADC
 #define ENABLE_LEAK_SENSOR     0      // 0 = disabled (only A9 water presence sensor installed); 1 = enable A8 leak probe
 int leakThreshold     = 200;  // Pump leak wet-detection ADC threshold
 #define WATER_CHECK_MS         250UL  // Time-gated water & leak sampling interval (250ms = 4 Hz)
 #define WATER_TRIP_LIMIT       4      // 4 checks (1.0s) to trip safety cutoff
-#define WATER_RECOVER_LIMIT    20     // 20 uninterrupted checks (5.0s) past hysteresis band to recover
+#define WATER_RECOVER_LIMIT    20     // 20 uninterrupted checks (5.0s) past the trip point to recover
 #define WATER_FAULT_LIMIT      4      // Alias used by optional A8 leak sensor debounce
 #define WATER_ADC_SAMPLES      16     // Number of ADC samples per burst (middle 8 averaged)
 #define SLAVE_TIMEOUT_MS     12000  // Failsafe timeout if Slave stops responding
@@ -88,11 +86,11 @@ bool bottleTelemetryValid = false;
 
 int waterRaw = 0;
 uint8_t waterFaultCounter = 0;
-bool waterDepleted = false;       // Debounced low-water throttle state (see waterDryThreshold / waterDryRecoverAdc)
+bool waterDepleted = false;       // Debounced low-water throttle state (see waterDryThreshold)
 uint8_t waterCritCounter = 0;
-bool waterCriticalLow = false;    // Debounced critical-dry cutoff for Heater & Pump 2 (see outPumpStopAdc / outPumpRecoverAdc)
+bool waterCriticalLow = false;    // Debounced critical-dry cutoff for Heater & Pump 2 (see outPumpStopAdc)
 uint8_t inletFullCounter = 0;
-bool inletWaterFull = false;      // Debounced high-water cutoff for Pump 1 (see inPumpStopAdc / inPumpRecoverAdc)
+bool inletWaterFull = false;      // Debounced high-water cutoff for Pump 1 (see inPumpStopAdc)
 
 int leakRaw = -1;
 int leakFaultCounter = 0;
@@ -208,9 +206,9 @@ int readAdcAveraged(uint8_t pin) {
   return (int)(sum / kept);
 }
 
-void updateLowTripFlag(bool &tripped, uint8_t &counter, int adc, int tripThr, int recoverThr) {
+void updateLowTripFlag(bool &tripped, uint8_t &counter, int adc, int thr) {
   if (!tripped) {
-    if (adc <= tripThr) {
+    if (adc <= thr) {
       counter++;
       if (counter >= WATER_TRIP_LIMIT) {
         tripped = true;
@@ -220,7 +218,7 @@ void updateLowTripFlag(bool &tripped, uint8_t &counter, int adc, int tripThr, in
       counter--;
     }
   } else {
-    if (adc >= recoverThr) {
+    if (adc > thr) {
       if (counter > 0) counter--;
       if (counter == 0) {
         tripped = false;
@@ -231,9 +229,9 @@ void updateLowTripFlag(bool &tripped, uint8_t &counter, int adc, int tripThr, in
   }
 }
 
-void updateHighTripFlag(bool &tripped, uint8_t &counter, int adc, int tripThr, int recoverThr) {
+void updateHighTripFlag(bool &tripped, uint8_t &counter, int adc, int thr) {
   if (!tripped) {
-    if (adc >= tripThr) {
+    if (adc >= thr) {
       counter++;
       if (counter >= WATER_TRIP_LIMIT) {
         tripped = true;
@@ -243,7 +241,7 @@ void updateHighTripFlag(bool &tripped, uint8_t &counter, int adc, int tripThr, i
       counter--;
     }
   } else {
-    if (adc <= recoverThr) {
+    if (adc < thr) {
       if (counter > 0) counter--;
       if (counter == 0) {
         tripped = false;
@@ -491,11 +489,11 @@ void loop() {
 
   // 5. Time-Gated Debounced Water Level (A9) & Pump Leak (A8) Verification (250ms cadence, interquartile ADC avg)
   if (now - lastWaterCheck >= WATER_CHECK_MS) {
-    // 5a. Bath Water Level Probe (A9: asymmetric fast-trip / slow-recovery with hysteresis deadbands)
+    // 5a. Bath Water Level Probe (A9: asymmetric fast-trip / slow-recovery, trip-only)
     waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
-    updateLowTripFlag(waterCriticalLow, waterCritCounter, waterRaw, outPumpStopAdc, outPumpRecoverAdc);
-    updateLowTripFlag(waterDepleted, waterFaultCounter, waterRaw, waterDryThreshold, waterDryRecoverAdc);
-    updateHighTripFlag(inletWaterFull, inletFullCounter, waterRaw, inPumpStopAdc, inPumpRecoverAdc);
+    updateLowTripFlag(waterCriticalLow, waterCritCounter, waterRaw, outPumpStopAdc);
+    updateLowTripFlag(waterDepleted, waterFaultCounter, waterRaw, waterDryThreshold);
+    updateHighTripFlag(inletWaterFull, inletFullCounter, waterRaw, inPumpStopAdc);
 
     // 5b. Pump Leak Detection Sensor (A8: wet fault when ADC >= leakThreshold, disabled when ENABLE_LEAK_SENSOR == 0)
 #if ENABLE_LEAK_SENSOR
@@ -542,7 +540,7 @@ void loop() {
     bool inletLevelOk = !inletWaterFull;
     bool outletLevelOk = !waterCriticalLow;
     // The heater shares the OUT pump's debounced critical-dry cutoff (uses
-    // outPumpStopAdc / outPumpRecoverAdc). The waterDepleted flag only
+    // outPumpStopAdc). The waterDepleted flag only
     // throttles Pump 2; it does not cut the heater.
     bool heaterWaterLow = waterCriticalLow;
 
@@ -687,41 +685,25 @@ void handleUsbCommand(String &cmd, unsigned long now) {
     }
   }
   else if (cmd.startsWith("THRESH:")) {
-    // Format: THRESH:<out_stop>:<out_recover>:<dry>:<dry_recover>:<in_stop>:<in_recover>:<leak>
+    // Format: THRESH:<out_stop>:<dry>:<in_stop>:<leak>
     int p1 = cmd.indexOf(':');
     int p2 = (p1 > 0) ? cmd.indexOf(':', p1 + 1) : -1;
     int p3 = (p2 > 0) ? cmd.indexOf(':', p2 + 1) : -1;
     int p4 = (p3 > 0) ? cmd.indexOf(':', p3 + 1) : -1;
     int p5 = (p4 > 0) ? cmd.indexOf(':', p4 + 1) : -1;
-    int p6 = (p5 > 0) ? cmd.indexOf(':', p5 + 1) : -1;
-    int p7 = (p6 > 0) ? cmd.indexOf(':', p6 + 1) : -1;
-    if (p1 > 0 && p2 > p1 && p3 > p2 && p4 > p3 && p5 > p4 && p6 > p5 && p7 > p6) {
+    if (p1 > 0 && p2 > p1 && p3 > p2 && p4 > p3 && p5 == -1) {
       int vOutStop = cmd.substring(p1 + 1, p2).toInt();
-      int vOutRec = cmd.substring(p2 + 1, p3).toInt();
-      int vDry = cmd.substring(p3 + 1, p4).toInt();
-      int vDryRec = cmd.substring(p4 + 1, p5).toInt();
-      int vInStop = cmd.substring(p5 + 1, p6).toInt();
-      int vInRec = cmd.substring(p6 + 1, p7).toInt();
-      int vLeak = cmd.substring(p7 + 1).toInt();
+      int vDry = cmd.substring(p2 + 1, p3).toInt();
+      int vInStop = cmd.substring(p3 + 1, p4).toInt();
+      int vLeak = cmd.substring(p4 + 1).toInt();
       bool rangeOk = (vOutStop >= 0 && vOutStop <= 1023 &&
-                      vOutRec >= 0 && vOutRec <= 1023 &&
                       vDry >= 0 && vDry <= 1023 &&
-                      vDryRec >= 0 && vDryRec <= 1023 &&
                       vInStop >= 0 && vInStop <= 1023 &&
-                      vInRec >= 0 && vInRec <= 1023 &&
                       vLeak >= 0 && vLeak <= 1023);
-      // Hysteresis deadbands must straddle the trip points, or the debounced
-      // flags can never trip or can never recover.
-      bool orderOk = (vOutRec > vOutStop &&
-                      vDryRec > vDry &&
-                      vInRec < vInStop);
-      if (rangeOk && orderOk) {
+      if (rangeOk) {
         outPumpStopAdc = vOutStop;
-        outPumpRecoverAdc = vOutRec;
         waterDryThreshold = vDry;
-        waterDryRecoverAdc = vDryRec;
         inPumpStopAdc = vInStop;
-        inPumpRecoverAdc = vInRec;
         leakThreshold = vLeak;
       }
     }
@@ -773,10 +755,7 @@ void sendTelemetryStatus(unsigned long now) {
   doc["water_adc"] = waterRaw;
   doc["water_thr"] = waterDryThreshold;
   doc["out_stop_thr"] = outPumpStopAdc;
-  doc["out_recover_thr"] = outPumpRecoverAdc;
-  doc["dry_recover_thr"] = waterDryRecoverAdc;
   doc["in_stop_thr"] = inPumpStopAdc;
-  doc["in_recover_thr"] = inPumpRecoverAdc;
   doc["leak_enabled"] = ENABLE_LEAK_SENSOR;
   doc["pump_leak"] = pumpLeakDetected ? 1 : 0;
   doc["leak_adc"] = leakRaw;
