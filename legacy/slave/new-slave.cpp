@@ -35,7 +35,8 @@ const float PPM_MAX              = 10000.0f;
 const float RS_AIR[NUM_BOTTLES]  = {6160.3f, 5370.7f, 8592.1f, 7950.2f};
 const float RS_SPAN[NUM_BOTTLES] = {259.8083f, 370.7250f, 382.4533f, 300.8875f};
 const float PPM_AIR              = 2.0f;
-const float PPM_SPAN             = 442.0f;
+// Reference concentrations paired with the per-sensor mean RS_SPAN values.
+const float PPM_SPAN[NUM_BOTTLES] = {432.0f, 450.0f, 387.0f, 499.0f};
 
 float curve_exp[NUM_BOTTLES];
 float rs_at_max[NUM_BOTTLES];
@@ -158,7 +159,7 @@ void updateAllMethane() {
       continue;
     }
 
-    float ppm = PPM_SPAN * pow(RS_SPAN[i] / rs, curve_exp[i]);
+    float ppm = PPM_SPAN[i] * pow(RS_SPAN[i] / rs, curve_exp[i]);
     if (!isfinite(ppm) || ppm <= 0.0f || ppm > PPM_MAX) {
       cachedMethane[i] = -1.0f;
     } else {
@@ -375,9 +376,9 @@ void setup() {
     pinMode(PIN_PH[i], INPUT);
     pinMode(PIN_CO2_PWM[i], INPUT);
 
-    ch4_cal_ok[i] = fitExponent(RS_AIR[i], PPM_AIR, RS_SPAN[i], PPM_SPAN, curve_exp[i]);
+    ch4_cal_ok[i] = fitExponent(RS_AIR[i], PPM_AIR, RS_SPAN[i], PPM_SPAN[i], curve_exp[i]);
     if (ch4_cal_ok[i]) {
-      rs_at_max[i] = RS_SPAN[i] * pow(PPM_SPAN / PPM_MAX, 1.0f / curve_exp[i]);
+      rs_at_max[i] = RS_SPAN[i] * pow(PPM_SPAN[i] / PPM_MAX, 1.0f / curve_exp[i]);
       ch4_cal_ok[i] = isfinite(rs_at_max[i]) && rs_at_max[i] > 0.0f;
     }
   }

@@ -306,9 +306,9 @@
     "semantic_hash": ""
   },
   "firmware/methane-calibrate/main.cpp": {
-    "mtime": 1790310091.5744016,
-    "seen": 1793944670.8437111,
-    "ast_hash": "2589b5478ddc63c033b4102819aeff74",
+    "mtime": 1793953595.0000741,
+    "seen": 1793953794.150833,
+    "ast_hash": "83336baa10c4f63fe0c17f19bcea8867",
     "semantic_hash": ""
   },
   "firmware/motor-driver/main.cpp": {
@@ -378,9 +378,9 @@
     "semantic_hash": ""
   },
   "legacy/slave/new-slave.cpp": {
-    "mtime": 1792832807.0529993,
-    "seen": 1793944670.8437245,
-    "ast_hash": "0228b634381b3bedb3a1273bbe6cbf7d",
+    "mtime": 1793953594.945074,
+    "seen": 1793953794.1510918,
+    "ast_hash": "f9b9121404c7982a4276db41d4dd2691",
     "semantic_hash": ""
   },
   "scripts-hardware/flash-factory.ts": {
@@ -469,8 +469,8 @@
     "semantic_hash": ""
   },
   "docs/index.md": {
-    "mtime": 1793946535.6856418,
-    "seen": 1793946591.4352918,
+    "mtime": 1793948171.5364785,
+    "seen": 1793953794.15132,
     "ast_hash": "1eb003cc99173fe86baacda030d085ac",
     "semantic_hash": ""
   },
@@ -613,9 +613,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/legacy-slave.md": {
-    "mtime": 1793161878.020537,
-    "seen": 1793944670.8437643,
-    "ast_hash": "9415de7f285d17ae749b364f687341b4",
+    "mtime": 1793953595.0430741,
+    "seen": 1793953794.1517255,
+    "ast_hash": "3cc0d1fddb6f0d7c8dfcf6714db8b054",
     "semantic_hash": ""
   },
   "docs/llm-generated/link-serial-protocol.md": {
@@ -781,9 +781,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/sensor-calibration-firmware.md": {
-    "mtime": 1793161909.1956568,
-    "seen": 1793944670.8437896,
-    "ast_hash": "d921e4d919a9ceb1b0c369afd7e2d29e",
+    "mtime": 1793953595.1020741,
+    "seen": 1793953794.1522005,
+    "ast_hash": "438cab841efd9fa04f00a6153e6f5dae",
     "semantic_hash": ""
   },
   "docs/llm-generated/wt32-eth01-captive-recon.md": {
@@ -799,8 +799,8 @@
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/templates/index.html": {
-    "mtime": 1793942952.3120291,
-    "seen": 1793944670.8437932,
+    "mtime": 1793948171.5374115,
+    "seen": 1793953794.1522477,
     "ast_hash": "57e45368c7a7b6b26e0a002831beab15",
     "semantic_hash": ""
   },
@@ -868,6 +868,12 @@
     "mtime": 1793946528.3596423,
     "seen": 1793946591.4360273,
     "ast_hash": "cc5e4a37131b20f3e4c6d1ab9172e6db",
+    "semantic_hash": ""
+  },
+  "firmware/tests/test_methane_calibration.py": {
+    "mtime": 1793953741.9942122,
+    "seen": 1793953794.1509402,
+    "ast_hash": "862c23b378366ada4ff78586073f9e5d",
     "semantic_hash": ""
   }
 }

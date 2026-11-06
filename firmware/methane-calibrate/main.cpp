@@ -1,7 +1,7 @@
 // TGS2611 4-Sensor Rumen Logger (ATmega2560)
 // Uses Two-Point Power-Law (log-log) Calibration per sensor:
 //   ppm = PPM_AIR * (RS_AIR / rs) ^ N
-// Fit N from span point: N = log(PPM_SPAN/PPM_AIR) / log(RS_AIR/RS_SPAN)
+// Fit N[i] = log(PPM_SPAN[i]/PPM_AIR) / log(RS_AIR[i]/RS_SPAN[i])
 #include <Arduino.h>
 
 const int NUM_SENSORS = 4;
@@ -16,11 +16,11 @@ const float VCC = 5; // MEASURE your Mega's 5V pin with a multimeter!
 // Point 1: Rs measured in PPM_AIR for each sensor
 const float RS_AIR[NUM_SENSORS] = {6160.3, 5370.7, 8592.1, 7950.2};
 
-// Point 2: Rs measured in your PPM_SPAN ppm Span Gas for each sensor
-const float RS_SPAN[NUM_SENSORS] = {1450.0, 1480.0, 1550.0, 1420.0};
+// Point 2: Mean Rs from each sensor's own reference-gas exposure.
+const float RS_SPAN[NUM_SENSORS] = {259.8083f, 370.7250f, 382.4533f, 300.8875f};
 
-const float PPM_AIR = 2.0;   // Background methane
-const float PPM_SPAN = 300.0; // Factory baseline gas for raw curve fit
+const float PPM_AIR = 2.0;   // Assumed background methane
+const float PPM_SPAN[NUM_SENSORS] = {432.0f, 450.0f, 387.0f, 499.0f};
 
 // --- FIELD RECALIBRATION (PPM-space, no Rs needed) ---
 // Output: ppm = CORR_SLOPE[i] * ppm_raw + CORR_OFFSET[i]
@@ -46,10 +46,9 @@ void setup() {
   delay(100);
 
   // Fit N for EACH sensor from its two points:
-  //   N[i] = log10(PPM_SPAN / PPM_AIR) / log10(RS_AIR[i] / RS_SPAN[i])
-  float log_ppm_span = log10(PPM_SPAN / PPM_AIR);
+  //   N[i] = log10(PPM_SPAN[i] / PPM_AIR) / log10(RS_AIR[i] / RS_SPAN[i])
   for (int i = 0; i < NUM_SENSORS; i++) {
-    curve_exp[i] = log_ppm_span / log10(RS_AIR[i] / RS_SPAN[i]);
+    curve_exp[i] = log10(PPM_SPAN[i] / PPM_AIR) / log10(RS_AIR[i] / RS_SPAN[i]);
   }
 }
 
