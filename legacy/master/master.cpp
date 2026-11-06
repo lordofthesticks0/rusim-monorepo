@@ -546,24 +546,26 @@ void loop() {
 
     // --- PUMP 1 LOGIC (Pin D3: Inlet to reservoir) ---
     // FORCE ON is debug-only: naively on/off, ignores water-level interlocks.
+    // FORCE OFF cuts immediately; interlock stops ramp down (soft stop).
     if (pump1Override == 2) {
-      slewMosfet(pump1Mosfet, false, now);
+      resetMosfetOff(pump1Mosfet);
     } else if (pump1Override == 1) {
       slewMosfet(pump1Mosfet, true, now);
     } else if (!inletLevelOk) {
-      resetMosfetOff(pump1Mosfet);
+      slewMosfet(pump1Mosfet, false, now);
     } else {
       slewMosfet(pump1Mosfet, true, now, AUTO_PUMP_PWM_LIMIT);
     }
 
     // --- PUMP 2 LOGIC (Pin D7: Outlet from reservoir) ---
     // FORCE ON is debug-only: naively on/off, ignores critical/dry interlocks.
+    // FORCE OFF cuts immediately; interlock stops ramp down (soft stop).
     if (pump2Override == 2) {
-      slewMosfet(pump2Mosfet, false, now);
+      resetMosfetOff(pump2Mosfet);
     } else if (pump2Override == 1) {
       slewMosfet(pump2Mosfet, true, now);
     } else if (!outletLevelOk) {
-      resetMosfetOff(pump2Mosfet);
+      slewMosfet(pump2Mosfet, false, now);
     } else {
       // Water movement depends on the level only. Bath and bottle temperature
       // gate the heater, never the circulation pumps.

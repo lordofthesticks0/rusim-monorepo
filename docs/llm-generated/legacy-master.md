@@ -96,24 +96,24 @@ bool outletLevelOk  = !waterCriticalLow; // trips <= outPumpStopAdc
 bool heaterWaterLow = waterCriticalLow;
 ```
 
-When `!inletLevelOk`, `resetMosfetOff(pump1Mosfet)` cuts Pump 1 (`D3`) to `0` PWM immediately without waiting for the 3-second soft-stop ramp. Likewise, when `!outletLevelOk`, `resetMosfetOff(pump2Mosfet)` cuts Pump 2 (`D7`) to `0` PWM immediately.
+When `!inletLevelOk`, Pump 1 (`D3`) ramps down via `slewMosfet(..., false)` (3-second soft stop). Likewise, when `!outletLevelOk`, Pump 2 (`D7`) ramps down. Pump `FORCE OFF` instead cuts immediately via `resetMosfetOff()`. `MODE_OFF`/leak still call `forceAllOff()` (immediate).
 
 AUTO behaviour with `currentMode == MODE_AUTO` and no leak (boot defaults shown; thresholds are Pi-settable, see §4.1; each flag uses one trip threshold):
 
 | Debounced State | ADC Trip | Pump 1 (`D3`, IN) | Pump 2 (`D7`, OUT) | Heater (`D5`) |
 |---|---|---|---|---|
-| `inletWaterFull` | Trips `>= 550` | **hard off (`0` PWM)** | on, `200` PWM | allowed |
+| `inletWaterFull` | Trips `>= 550` | **ramped off (`0` PWM over 3 s)** | on, `200` PWM | allowed |
 | Normal band | Between thresholds | on, `200` PWM | on, `200` PWM | allowed |
 | `waterDepleted` | Trips `<= 460` | on, `200` PWM | throttled, `100` PWM (`DRY_OUT_PUMP_PWM`) | allowed |
-| `waterCriticalLow` | Trips `<= 400` | on, `200` PWM | **hard off (`0` PWM)** | **hard off** |
+| `waterCriticalLow` | Trips `<= 400` | on, `200` PWM | **ramped off (`0` PWM over 3 s)** | **hard off** |
 
 Override interaction:
 
 | Override | Pump 1 (`D3`) | Pump 2 (`D7`) |
 |---|---|---|
-| `0` AUTO | `inletLevelOk`, PWM `<= 200` | `outletLevelOk`, PWM `200` or `100` |
+| `0` AUTO | `inletLevelOk`, PWM `<= 200`; interlock stop ramps down | `outletLevelOk`, PWM `200` or `100`; interlock stop ramps down |
 | `1` FORCE ON | naive on, PWM `<= 255` (`maxPwm`), ignores water levels | naive on, PWM `<= 255` (`maxPwm`), ignores water levels |
-| `2` FORCE OFF | forced `0` | forced `0` |
+| `2` FORCE OFF | immediate `0` (`resetMosfetOff`) | immediate `0` (`resetMosfetOff`) |
 
 `FORCE ON` is debug-only: naively on/off, it ignores `inletWaterFull`,
 `waterCriticalLow` and the `waterDepleted` throttle so the pump can be
@@ -157,7 +157,7 @@ void slewMosfet(MosfetChannel &ch, bool wantOn, unsigned long now,
   - `stirMode == 1` (`CONSTANT ON`): 3-second ramp up to `stirMosfet.maxPwm`.
   - `stirMode == 2` (`PULSE INTERVAL`): 3-second ramp up at the start of each pulse window and 3-second ramp down before the pulse window ends.
   - `stirMode == 3` (`TIMED RUN`): 3-second ramp up, continuous hold at `stirMosfet.maxPwm`, and 3-second ramp down at the end of the timed duration, after which `stirMode` returns to `0`.
-- For Pump 1 (`D3`) and Pump 2 (`D7`), `slewMosfet` ramps each pump over 3 seconds to the target described in section 5 and ramps down to `0` over 3 seconds when the interlock or override switches it off.
+- For Pump 1 (`D3`) and Pump 2 (`D7`), `slewMosfet` ramps each pump over 3 seconds to the target described in section 5 and ramps down to `0` over 3 seconds when an interlock switches it off. `FORCE OFF` instead cuts immediately via `resetMosfetOff()`.
 
 ## 8. Slave UART Polling, Validation, and Watchdog (`Serial1`)
 

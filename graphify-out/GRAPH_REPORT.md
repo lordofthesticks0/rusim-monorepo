@@ -1,17 +1,17 @@
 # Graph Report - rusim-monorepo  (2026-11-06)
 
 ## Corpus Check
-- 162 files · ~460,162 words
+- 162 files · ~460,209 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 12 file(s) not represented in the graph (top: (none) 4, .toml 2, .example 1)
 
 ## Summary
-- 1948 nodes · 3575 edges · 124 communities (116 shown, 8 thin omitted)
-- Extraction: 81% EXTRACTED · 19% INFERRED · 0% AMBIGUOUS · INFERRED: 667 edges (avg confidence: 0.91)
+- 1948 nodes · 3577 edges · 124 communities (116 shown, 8 thin omitted)
+- Extraction: 81% EXTRACTED · 19% INFERRED · 0% AMBIGUOUS · INFERRED: 669 edges (avg confidence: 0.91)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `10eb9600`
+- Built from commit: `afd84b58`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -142,8 +142,8 @@
 1. `millis()` - 49 edges
 2. `delay()` - 28 edges
 3. `Dashboard()` - 26 edges
-4. `handle_line()` - 23 edges
-5. `ui_update_bell()` - 23 edges
+4. `ui_update_bell()` - 23 edges
+5. `handle_line()` - 23 edges
 6. `render_current()` - 23 edges
 7. `logf()` - 23 edges
 8. `Endpoint details` - 21 edges
@@ -151,16 +151,16 @@
 10. `screen_setup_poll()` - 20 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `2. The two sources` --references--> `serial_worker()`  [INFERRED]
-  docs/llm-generated/legacy-pi-remote-monitor.md → legacy/pi/water-control-system/web_control.py
-- `Architecture at a glance` --references--> `serial_worker()`  [INFERRED]
-  docs/llm-generated/raspi-docs/README.md → legacy/pi/water-control-system/web_control.py
-- `CSV format (current schema)` --references--> `log_data_to_csv()`  [INFERRED]
-  docs/llm-generated/raspi-docs/07-data-and-logging.md → legacy/pi/water-control-system/web_control.py
-- `6.3 Passthrough mode (`PASSTH`)` --references--> `serial_cmd_poll()`  [INFERRED]
-  docs/llm-generated/comms-rework-plan.md → firmware/display-v9/serial_cmd.cpp
 - `5.1 Request` --references--> `handlePingStream()`  [INFERRED]
   docs/llm-generated/legacy-slave.md → legacy/slave/new-slave.cpp
+- `5.3 Which port gets the reply` --references--> `serviceMasterPing()`  [INFERRED]
+  docs/llm-generated/legacy-slave.md → legacy/slave/new-slave.cpp
+- `6. Responsiveness` --references--> `serviceMasterPing()`  [INFERRED]
+  docs/llm-generated/legacy-slave.md → legacy/slave/new-slave.cpp
+- `5.4 USB stream` --references--> `serviceUsbTelemetry()`  [INFERRED]
+  docs/llm-generated/legacy-slave.md → legacy/slave/new-slave.cpp
+- `12.5 Security posture` --references--> `authenticate()`  [INFERRED]
+  docs/llm-generated/dashboard.md → dashboard/src/data.ts
 
 ## Import Cycles
 - None detected.
@@ -640,7 +640,7 @@ Nodes (24): authenticate(), 10.1 Security headers, 10.2 The legacy `public` sche
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `millis()` connect `dev-db.ts` to `display-v9/main.cpp`, `millis`, `wt32-eth01_captive-recon/main.cpp`, `link_serial.cpp`, `new-slave.cpp`, `Pin Layout Overview`, `analogRead`, `handle_line`, `3. States`, `syncDbLatest`, `provision_ap.cpp`, `temp-probe/main.cpp`, `Display <-> WT32 link: `rusim-line` v1`, `ui_shell.cpp`, `network-master/main.cpp`, `delay`, `ui_mk_label`, `Arduino.h`, `3.2.1 Redesign plan — `/home``, `master.cpp`, `Verification`?**
-  _High betweenness centrality (0.141) - this node is a cross-community bridge._
+  _High betweenness centrality (0.145) - this node is a cross-community bridge._
 - **Are the 48 inferred relationships involving `millis()` (e.g. with `PWM Output Pins` and `7.3 State machine (semantics kept, shape changed)`) actually correct?**
   _`millis()` has 48 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `MODE_OFF`, `MODE_AUTO`, `pin` to the rest of the system?**
@@ -648,7 +648,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `App.tsx` be split into smaller, more focused modules?**
   _Cohesion score 0.11375661375661375 - nodes in this community are weakly interconnected._
 - **Why does `authenticate()` connect `authenticate` to `App.tsx`, `auth.ts`, `authenticate`, `syncDbLatest`, `millis`, `ESP to database sync — plan`, `Dashboard — full walkthrough`?**
-  _High betweenness centrality (0.122) - this node is a cross-community bridge._
+  _High betweenness centrality (0.121) - this node is a cross-community bridge._
 - **Are the 27 inferred relationships involving `delay()` (e.g. with `What is shared vs stubbed` and `link_serial_init()`) actually correct?**
   _`delay()` has 27 INFERRED edges - model-reasoned connections that need verification._
 - **Should `HoldBtnCtx` be split into smaller, more focused modules?**
