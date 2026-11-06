@@ -35,9 +35,12 @@ current_data = {
     'water_crit': False,      # master's debounced waterCriticalLow flag: Heater & Pump 2 cutoff
     'water_full': False,      # master's debounced inletWaterFull flag: Pump 1 cutoff
     'water_adc': -1,          # interquartile-mean bath water sensor ADC on A9 (0..1023, rises when submerged)
-    'water_thr': 450,         # WATER_DRY_THRESHOLD reported by master
-    'out_stop_thr': 350,      # OUT_PUMP_STOP_ADC reported by master
-    'in_stop_thr': 500,       # IN_PUMP_STOP_ADC reported by master
+    'water_thr': 460,         # WATER_DRY_THRESHOLD reported by master
+    'out_stop_thr': 400,      # OUT_PUMP_STOP_ADC reported by master
+    'out_recover_thr': 440,   # OUT_PUMP_RECOVER_ADC reported by master
+    'dry_recover_thr': 500,   # WATER_DRY_RECOVER_ADC reported by master
+    'in_stop_thr': 550,       # IN_PUMP_STOP_ADC reported by master
+    'in_recover_thr': 480,    # IN_PUMP_RECOVER_ADC reported by master
     'leak_enabled': False,    # True only when ENABLE_LEAK_SENSOR == 1 on the master
     'pump_leak': False,       # pump leak fault flag on A8 (forced False when leak_enabled is False)
     'leak_adc': -1,           # 16-sample averaged pump leak sensor ADC on A8 (-1 when disabled)
@@ -50,6 +53,25 @@ current_data = {
 Plus module-level `serial_conn`, `serial_write_lock`, `logging_active`,
 `last_slave_rx_time`, `last_master_rx_time`, `packet_stats`,
 `cached_sys_stats`, and the raw line buffer described below.
+
+Water-level thresholds are owned by the Pi. The seven module constants
+`OUT_PUMP_STOP_ADC=400`, `OUT_PUMP_RECOVER_ADC=440`,
+`WATER_DRY_THRESHOLD=460`, `WATER_DRY_RECOVER_ADC=500`,
+`IN_PUMP_STOP_ADC=550`, `IN_PUMP_RECOVER_ADC=480`,
+`LEAK_THRESHOLD=200` seed the volatile `thresholds` dict and are built
+into a `THRESH:...` line by `threshold_command()`. Tweak live without a
+restart via `POST /control` `action=thresholds` (volatile — lost on Flask
+restart, which falls back to the file constants), or edit the constants
+and restart Flask — no reflash needed in either case. The master keeps
+them in RAM only, so it forgets them on reboot; the Pi re-sends on every
+serial reconnect and when the master's reported values drift (2 s
+debounce), via `thresholds_sent` / `thresholds_match_current()`. Both the
+Pi (`validate_thresholds()`) and the master validate the deadbands
+(`out_recover > out_stop`, `dry_recover > dry`, `in_recover < in_stop`,
+all `0–1023`) and ignore a malformed line. Pump `FORCE ON`
+(`/control` `mode=ON`) is mirrored optimistically as naively on (ignores
+water levels, like the master's debug behaviour; `MODE_OFF`/leak still
+cut it on the master).
 
 ## Raw line buffer
 
@@ -77,7 +99,8 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
      heater / Pump 1 (`D3`) / Pump 2 (`D7`) / Stirrer (`D4`) states, modes,
      target PWM ceilings (`pwm_d3`, `pwm_d7`, `pwm_d4`), live PWM outputs
      (`out_d3`, `out_d7`, `out_d4`), bath water level (`water_low`, `water_crit`,
-     `water_full`, `water_adc`, `water_thr`, `out_stop_thr`, `in_stop_thr`),
+     `water_full`, `water_adc`, `water_thr`, `out_stop_thr`, `out_recover_thr`,
+     `dry_recover_thr`, `in_stop_thr`, `in_recover_thr`),
      optional pump leak sensor (`leak_enabled`, `pump_leak`,
      `leak_adc`, `leak_thr`; `pump_leak` is forced `False` and `leak_adc` `-1`
      when `leak_enabled` is false/absent), and `system_mode`.
@@ -89,6 +112,11 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
 - On the first loop where `serial_conn` is open, writes the boot-default
   commands `HEATER_OFF`, `PUMP1_OFF`, `PUMP2_OFF`, and `STIR:0:10:30` in that
   order, then sets `boot_defaults_applied = True`.
+- On every (re)connect, writes `THRESH:...` from `threshold_command()` and
+  sets `thresholds_sent = True`. While connected, if `thresholds_match_current()`
+  is false (master rebooted while the Pi stayed connected), re-sends
+  `THRESH:...` at most once per 2 s. `thresholds_sent` resets when the
+  serial conn is `None`.
 - Every 1.0 s, while connected, writes `b"STATUS\n"` under `serial_write_lock`
   and increments `outgoing`.
 - While `logging_active`, calls `log_data_to_csv()` once per loop.
@@ -140,12 +168,13 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
 - `{"action": "mosfet_pwm", "pin": "D3"|"D7"|"D4", "pwm": 0..255}` → sends `PWM:<pin>:<pwm>` to adjust the target PWM ceiling (`0`–`255`) for water debit testing on `Pin D3` (Pump 1), `Pin D7` (Pump 2), or `Pin D4` (Stirrer).
 - `{"action": "stirrer", "mode": "OFF"|"ON"|"PULSE"|"TIMED", "minutes": int, "seconds": int}` → sends `STIR:<m>:<mins>:<secs>`.
 - `{"action": "temp_target", "target": float, "hysteresis": float}` → sends `TEMP:<target>:<hyst>`.
+- `{"action": "thresholds", "out_stop": int, "out_recover": int, "dry": int, "dry_recover": int, "in_stop": int, "in_recover": int, "leak": int}` (example `{"action":"thresholds","out_stop":400,"out_recover":440,"dry":460,"dry_recover":500,"in_stop":550,"in_recover":480,"leak":200}`) → validates (`0–1023`, `out_recover>out_stop`, `dry_recover>dry`, `in_recover<in_stop`), updates the volatile `thresholds` dict, sends `THRESH:...`, and caches the values optimistically. `400` on malformed/unknown action. Volatile: lost on Flask restart.
 
 Actuator modes are cached optimistically when a command is accepted, until the next `STATUS` reply overwrites them (polled every 1 s). The optimistic write reflects what the firmware will actually do:
 
-- Heater: `ON` caches `heater = True` only while `water_crit` is false (`water_adc > out_stop_thr`, `350`) and no leak trip is active.
-- Pump 1: `ON` caches `pump1 = True` only while `water_full` is false (`water_adc < in_stop_thr`, `500`), no leak trip is active, and its PWM ceiling is nonzero.
-- Pump 2: `ON` caches `pump2 = True` only while `water_crit` is false (`water_adc > out_stop_thr`, `350`), no leak trip is active, and its PWM ceiling is nonzero.
+- Heater: `ON` caches `heater = True` only while `water_crit` is false (`water_adc > out_stop_thr`, `400`) and no leak trip is active.
+- Pump 1: `ON` caches `pump1 = True` while no leak trip is active and its PWM ceiling is nonzero (debug `FORCE ON` ignores `water_full`; the master still honours `MODE_OFF`/leak).
+- Pump 2: `ON` caches `pump2 = True` while no leak trip is active and its PWM ceiling is nonzero (debug `FORCE ON` ignores `water_crit`; the master still honours `MODE_OFF`/leak).
 
 ---
-Content generated by `google/gemini-4-argon` in `antigravity`.
+Content generated by `openrouter/stealth/crouton-alpha` in `OpenCode`.

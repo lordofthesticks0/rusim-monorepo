@@ -39,8 +39,33 @@ SLAVE_STALE_SECONDS = 12.0
 MASTER_SILENCE_RECONNECT_SECONDS = 10.0
 VALID_BOTTLE_IDS = (1, 2, 3, 4)
 REQUIRED_BOTTLE_KEYS = ('id', 'temp', 'ph', 'methane', 'co2', 'press')
-OUT_PUMP_STOP_ADC = 350
-IN_PUMP_STOP_ADC = 500
+# Water-level thresholds. The Pi is the source of truth: it sends these to
+# the master via THRESH:... on serial connect (and again if the master's
+# reported thresholds drift). The master keeps them in RAM only, so it
+# forgets them on reboot and falls back to these same defaults.
+# To tweak: edit these values and restart Flask, or POST them live (see
+# /control action "thresholds"). No reflash needed.
+OUT_PUMP_STOP_ADC = 400
+OUT_PUMP_RECOVER_ADC = 440
+WATER_DRY_THRESHOLD = 460
+WATER_DRY_RECOVER_ADC = 500
+IN_PUMP_STOP_ADC = 550
+IN_PUMP_RECOVER_ADC = 480
+LEAK_THRESHOLD = 200
+
+# Volatile runtime copy of the thresholds. Initialised from the file
+# constants above; POST /control action "thresholds" updates this dict
+# and re-sends THRESH:... immediately. Lost on Flask restart (falls back
+# to the file constants).
+thresholds = {
+    'out_stop': OUT_PUMP_STOP_ADC,
+    'out_recover': OUT_PUMP_RECOVER_ADC,
+    'dry': WATER_DRY_THRESHOLD,
+    'dry_recover': WATER_DRY_RECOVER_ADC,
+    'in_stop': IN_PUMP_STOP_ADC,
+    'in_recover': IN_PUMP_RECOVER_ADC,
+    'leak': LEAK_THRESHOLD,
+}
 
 HOTSPOT_CON_NAME = "invitro-hotspot"
 HOTSPOT_SSID = "InVitro-Hotspot"
@@ -71,6 +96,10 @@ last_serial_rx_mono = -1000.0
 # the master is off even when it was flashed with AUTO boot defaults.
 BOOT_DEFAULT_COMMANDS = ("HEATER_OFF", "PUMP1_OFF", "PUMP2_OFF", "STIR:0:10:30")
 boot_defaults_applied = False
+# Thresholds are re-sent on every serial reconnect (master forgets on reboot)
+# and re-sent if the master's reported values drift from the constants above.
+thresholds_sent = False
+last_thresh_send_mono = -1000.0
 
 packet_stats = {
     'total': 0,
@@ -111,9 +140,12 @@ current_data = {
     'water_crit': False,
     'water_full': False,
     'water_adc': -1,
-    'water_thr': 450,
-    'out_stop_thr': 350,
-    'in_stop_thr': 500,
+    'water_thr': 460,
+    'out_stop_thr': 400,
+    'out_recover_thr': 440,
+    'dry_recover_thr': 500,
+    'in_stop_thr': 550,
+    'in_recover_thr': 480,
     'leak_enabled': False,
     'pump_leak': False,
     'leak_adc': -1,
@@ -214,6 +246,45 @@ def send_serial_cmd(cmd_str):
         except Exception:
             close_serial_conn()
     return False
+
+def threshold_command():
+    """Build the THRESH:... line from the live `thresholds` dict."""
+    t = thresholds
+    return (
+        f"THRESH:{t['out_stop']}:{t['out_recover']}:"
+        f"{t['dry']}:{t['dry_recover']}:"
+        f"{t['in_stop']}:{t['in_recover']}:{t['leak']}"
+    )
+
+def thresholds_match_current():
+    """True when the last reported master thresholds match `thresholds`."""
+    t = thresholds
+    try:
+        return (
+            int(current_data.get('out_stop_thr', t['out_stop'])) == t['out_stop']
+            and int(current_data.get('out_recover_thr', t['out_recover'])) == t['out_recover']
+            and int(current_data.get('water_thr', t['dry'])) == t['dry']
+            and int(current_data.get('dry_recover_thr', t['dry_recover'])) == t['dry_recover']
+            and int(current_data.get('in_stop_thr', t['in_stop'])) == t['in_stop']
+            and int(current_data.get('in_recover_thr', t['in_recover'])) == t['in_recover']
+            and int(current_data.get('leak_thr', t['leak'])) == t['leak']
+        )
+    except (TypeError, ValueError):
+        return False
+
+def validate_thresholds(new):
+    """Check ADC ranges and hysteresis deadbands (mirrors the master)."""
+    try:
+        vals = [int(new[k]) for k in
+                ('out_stop', 'out_recover', 'dry', 'dry_recover',
+                 'in_stop', 'in_recover', 'leak')]
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not all(0 <= v <= 1023 for v in vals):
+        return False
+    return (new['out_recover'] > new['out_stop']
+            and new['dry_recover'] > new['dry']
+            and new['in_recover'] < new['in_stop'])
 
 def make_qr_data_uri(payload_text):
     if not QR_AVAILABLE:
@@ -701,11 +772,17 @@ def serial_worker():
                         if 'water_adc' in payload:
                             current_data['water_adc'] = int(payload.get('water_adc', -1))
                         if 'water_thr' in payload:
-                            current_data['water_thr'] = int(payload.get('water_thr', 450))
+                            current_data['water_thr'] = int(payload.get('water_thr', WATER_DRY_THRESHOLD))
                         if 'out_stop_thr' in payload:
                             current_data['out_stop_thr'] = int(payload.get('out_stop_thr', OUT_PUMP_STOP_ADC))
+                        if 'out_recover_thr' in payload:
+                            current_data['out_recover_thr'] = int(payload.get('out_recover_thr', OUT_PUMP_RECOVER_ADC))
+                        if 'dry_recover_thr' in payload:
+                            current_data['dry_recover_thr'] = int(payload.get('dry_recover_thr', WATER_DRY_RECOVER_ADC))
                         if 'in_stop_thr' in payload:
                             current_data['in_stop_thr'] = int(payload.get('in_stop_thr', IN_PUMP_STOP_ADC))
+                        if 'in_recover_thr' in payload:
+                            current_data['in_recover_thr'] = int(payload.get('in_recover_thr', IN_PUMP_RECOVER_ADC))
                         leak_enabled = bool(payload.get('leak_enabled', 0))
                         current_data['leak_enabled'] = leak_enabled
                         if leak_enabled:
@@ -716,7 +793,7 @@ def serial_worker():
                             current_data['pump_leak'] = False
                             current_data['leak_adc'] = -1
                         if 'leak_thr' in payload:
-                            current_data['leak_thr'] = int(payload.get('leak_thr', 200))
+                            current_data['leak_thr'] = int(payload.get('leak_thr', LEAK_THRESHOLD))
                         current_data['system_mode'] = payload.get('system_mode', current_data['system_mode'])
 
                     elif isinstance(payload, dict):
@@ -736,7 +813,7 @@ def serial_worker():
 
 # --- BACKGROUND WORKER 2: POLLING & LOGGING ---
 def polling_worker():
-    global boot_defaults_applied
+    global boot_defaults_applied, thresholds_sent, last_thresh_send_mono
     while True:
         if serial_conn:
             if not boot_defaults_applied:
@@ -755,10 +832,29 @@ def polling_worker():
                     current_data['pump2'] = False
                     current_data['stirrer'] = False
                     print("Boot defaults applied: heater OFF, pump OFF, stirrer OFF")
+            if not thresholds_sent:
+                # Master keeps thresholds in RAM only, so re-send on every
+                # (re)connect. The master validates the deadbands itself and
+                # ignores a malformed line.
+                if send_serial_cmd(threshold_command()):
+                    thresholds_sent = True
+                    last_thresh_send_mono = time.monotonic()
+                    print(f"Thresholds sent: {threshold_command()}")
+            elif not thresholds_match_current():
+                # Master rebooted silently while the Pi stayed connected:
+                # its RAM thresholds fell back to defaults. Re-send (debounced
+                # so a plain mismatch does not spam at 1 Hz).
+                now_mono = time.monotonic()
+                if (now_mono - last_thresh_send_mono) >= 2.0:
+                    if send_serial_cmd(threshold_command()):
+                        last_thresh_send_mono = now_mono
             send_serial_cmd("STATUS")
-        elif logging_active:
-            packet_stats['outgoing'] += 1
-            update_packet_metrics()
+        else:
+            # Serial dropped; force a THRESH resend on the next connect.
+            thresholds_sent = False
+            if logging_active:
+                packet_stats['outgoing'] += 1
+                update_packet_metrics()
 
         if logging_active:
             log_data_to_csv()
@@ -989,11 +1085,8 @@ def control_api():
     in_stop_thr = int(current_data.get('in_stop_thr', IN_PUMP_STOP_ADC))
     # Heater shares the OUT pump's debounced critical-dry cutoff.
     heater_water_low = bool(current_data.get('water_crit')) or (0 <= water_adc <= out_stop_thr)
-    inlet_water_full = bool(current_data.get('water_full')) or (water_adc >= in_stop_thr)
     leak_trip = bool(current_data.get('leak_enabled') and current_data.get('pump_leak'))
     heater_safety_trip = bool(heater_water_low or leak_trip)
-    inlet_level_ok = not inlet_water_full
-    outlet_level_ok = not heater_water_low
 
     if action == 'heater':
         mode = body.get('mode', 'AUTO')
@@ -1009,22 +1102,25 @@ def control_api():
     elif action in ('pump', 'pump1', 'pump2'):
         mode = body.get('mode', 'AUTO')
         if mode in ('AUTO', 'ON', 'OFF'):
+            # FORCE ON is debug-only in the master: naively on/off, ignoring
+            # water-level interlocks (MODE_OFF/leak still cut it there).
+            # Mirror that here optimistically; STATUS telemetry confirms.
             if action == 'pump1':
                 send_serial_cmd(f"PUMP1_{mode}")
                 current_data['pump1_mode'] = mode
                 current_data['pump_mode'] = mode
-                current_data['pump1'] = (mode == 'ON') and not leak_trip and inlet_level_ok and current_data.get('pwm_d3', 255) > 0
+                current_data['pump1'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d3', 255) > 0
             elif action == 'pump2':
                 send_serial_cmd(f"PUMP2_{mode}")
                 current_data['pump2_mode'] = mode
-                current_data['pump2'] = (mode == 'ON') and not leak_trip and outlet_level_ok and current_data.get('pwm_d7', 255) > 0
+                current_data['pump2'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d7', 255) > 0
             else:
                 send_serial_cmd(f"PUMP_{mode}")
                 current_data['pump_mode'] = mode
                 current_data['pump1_mode'] = mode
                 current_data['pump2_mode'] = mode
-                current_data['pump1'] = (mode == 'ON') and not leak_trip and inlet_level_ok and current_data.get('pwm_d3', 255) > 0
-                current_data['pump2'] = (mode == 'ON') and not leak_trip and outlet_level_ok and current_data.get('pwm_d7', 255) > 0
+                current_data['pump1'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d3', 255) > 0
+                current_data['pump2'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d7', 255) > 0
             current_data['pump'] = bool(current_data.get('pump1') or current_data.get('pump2'))
             return jsonify({'status': 'success'})
 
@@ -1063,6 +1159,43 @@ def control_api():
         current_data['target_temp'] = target
         current_data['hysteresis'] = hyst
         return jsonify({'status': 'success'})
+
+    elif action == 'thresholds':
+        # POST {"action": "thresholds", "out_stop": .., "out_recover": ..,
+        #       "dry": .., "dry_recover": .., "in_stop": ..,
+        #       "in_recover": .., "leak": ..}
+        # Volatile: updates the live dict and re-sends THRESH:... now.
+        # Lost on Flask restart (falls back to the file constants).
+        global thresholds
+        try:
+            new = {
+                'out_stop': int(body.get('out_stop')),
+                'out_recover': int(body.get('out_recover')),
+                'dry': int(body.get('dry')),
+                'dry_recover': int(body.get('dry_recover')),
+                'in_stop': int(body.get('in_stop')),
+                'in_recover': int(body.get('in_recover')),
+                'leak': int(body.get('leak')),
+            }
+        except (TypeError, ValueError):
+            return jsonify({'status': 'error',
+                            'message': 'All seven thresholds are required ints'}), 400
+        if not validate_thresholds(new):
+            return jsonify({'status': 'error',
+                            'message': 'Invalid thresholds: need 0..1023 and '
+                                       'out_recover>out_stop, dry_recover>dry, '
+                                       'in_recover<in_stop'}), 400
+        thresholds = new
+        send_serial_cmd(threshold_command())
+        current_data['out_stop_thr'] = new['out_stop']
+        current_data['out_recover_thr'] = new['out_recover']
+        current_data['water_thr'] = new['dry']
+        current_data['dry_recover_thr'] = new['dry_recover']
+        current_data['in_stop_thr'] = new['in_stop']
+        current_data['in_recover_thr'] = new['in_recover']
+        current_data['leak_thr'] = new['leak']
+        return jsonify({'status': 'success', 'thresholds': new,
+                        'command': threshold_command()})
 
     return jsonify({'status': 'error', 'message': 'Invalid control action'}), 400
 

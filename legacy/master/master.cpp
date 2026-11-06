@@ -14,8 +14,8 @@
 #define HEATER_PIN        5     // 300W Heater SSR (Active-HIGH trigger, 0V = OFF)
 #define SYSTEM_SWITCH_PIN 6     // Physical AUTO / OFF toggle
 #define PUMP2_PIN         7     // Circulation Pump 2 MOSFET (Active-HIGH, PWM Timer 4 OC4B, Pumps OUT of reservoir)
-#define WATER_SENSOR_PIN  A9    // Analog water bath level probe (dry at or below WATER_DRY_THRESHOLD)
-#define LEAK_SENSOR_PIN   A8    // Analog pump leak detection probe (Wet fault when >= 200)
+#define WATER_SENSOR_PIN  A9    // Analog water bath level probe (dry at or below waterDryThreshold)
+#define LEAK_SENSOR_PIN   A8    // Analog pump leak detection probe (Wet fault when >= leakThreshold)
 
 // ==========================================
 // CONTROL PARAMETERS & DYNAMIC TARGETS
@@ -23,14 +23,16 @@
 float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
 float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define MAX_WATER_BATH_TEMP    50.0   // Hard safety bath ceiling clamp (°C)
-#define OUT_PUMP_STOP_ADC      400    // Trip critical dry cutoff (Heater & Pump 2 OFF) at or below this ADC
-#define OUT_PUMP_RECOVER_ADC   440    // Clear critical dry cutoff only at or above this ADC
-#define WATER_DRY_THRESHOLD    460    // Trip low-water Pump 2 throttle at or below this ADC
-#define WATER_DRY_RECOVER_ADC  500    // Clear low-water Pump 2 throttle only at or above this ADC
-#define IN_PUMP_STOP_ADC       550    // Trip high-water cutoff (Pump 1 OFF) at or above this ADC
-#define IN_PUMP_RECOVER_ADC    480    // Clear high-water cutoff only at or below this ADC
+// Water thresholds are RAM-only variables so the Pi can change them at
+// runtime via THRESH:... — they revert to these defaults on reboot.
+int outPumpStopAdc    = 400;  // Trip critical dry cutoff (Heater & Pump 2 OFF) at or below this ADC
+int outPumpRecoverAdc = 440;  // Clear critical dry cutoff only at or above this ADC
+int waterDryThreshold = 460;  // Trip low-water Pump 2 throttle at or below this ADC
+int waterDryRecoverAdc = 500; // Clear low-water Pump 2 throttle only at or above this ADC
+int inPumpStopAdc     = 550;  // Trip high-water cutoff (Pump 1 OFF) at or above this ADC
+int inPumpRecoverAdc  = 480;  // Clear high-water cutoff only at or below this ADC
 #define ENABLE_LEAK_SENSOR     0      // 0 = disabled (only A9 water presence sensor installed); 1 = enable A8 leak probe
-#define LEAK_THRESHOLD         200    // Pump leak wet-detection ADC threshold
+int leakThreshold     = 200;  // Pump leak wet-detection ADC threshold
 #define WATER_CHECK_MS         250UL  // Time-gated water & leak sampling interval (250ms = 4 Hz)
 #define WATER_TRIP_LIMIT       4      // 4 checks (1.0s) to trip safety cutoff
 #define WATER_RECOVER_LIMIT    20     // 20 uninterrupted checks (5.0s) past hysteresis band to recover
@@ -86,11 +88,11 @@ bool bottleTelemetryValid = false;
 
 int waterRaw = 0;
 uint8_t waterFaultCounter = 0;
-bool waterDepleted = false;       // Debounced low-water throttle state (trips <= 450, clears >= 480)
+bool waterDepleted = false;       // Debounced low-water throttle state (see waterDryThreshold / waterDryRecoverAdc)
 uint8_t waterCritCounter = 0;
-bool waterCriticalLow = false;    // Debounced critical-dry cutoff for Heater & Pump 2 (trips <= 350, clears >= 420)
+bool waterCriticalLow = false;    // Debounced critical-dry cutoff for Heater & Pump 2 (see outPumpStopAdc / outPumpRecoverAdc)
 uint8_t inletFullCounter = 0;
-bool inletWaterFull = false;      // Debounced high-water cutoff for Pump 1 (trips >= 500, clears <= 460)
+bool inletWaterFull = false;      // Debounced high-water cutoff for Pump 1 (see inPumpStopAdc / inPumpRecoverAdc)
 
 int leakRaw = -1;
 int leakFaultCounter = 0;
@@ -429,16 +431,16 @@ void setup() {
   stirCycleStart = bootNow;
 
   waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
-  waterDepleted = (waterRaw <= WATER_DRY_THRESHOLD);
+  waterDepleted = (waterRaw <= waterDryThreshold);
   waterFaultCounter = waterDepleted ? WATER_RECOVER_LIMIT : 0;
-  waterCriticalLow = (waterRaw <= OUT_PUMP_STOP_ADC);
+  waterCriticalLow = (waterRaw <= outPumpStopAdc);
   waterCritCounter = waterCriticalLow ? WATER_RECOVER_LIMIT : 0;
-  inletWaterFull = (waterRaw >= IN_PUMP_STOP_ADC);
+  inletWaterFull = (waterRaw >= inPumpStopAdc);
   inletFullCounter = inletWaterFull ? WATER_RECOVER_LIMIT : 0;
 
 #if ENABLE_LEAK_SENSOR
   leakRaw = readAdcAveraged(LEAK_SENSOR_PIN);
-  pumpLeakDetected = (leakRaw >= LEAK_THRESHOLD);
+  pumpLeakDetected = (leakRaw >= leakThreshold);
   leakFaultCounter = pumpLeakDetected ? WATER_FAULT_LIMIT : 0;
 #else
   leakRaw = -1;
@@ -491,15 +493,15 @@ void loop() {
   if (now - lastWaterCheck >= WATER_CHECK_MS) {
     // 5a. Bath Water Level Probe (A9: asymmetric fast-trip / slow-recovery with hysteresis deadbands)
     waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
-    updateLowTripFlag(waterCriticalLow, waterCritCounter, waterRaw, OUT_PUMP_STOP_ADC, OUT_PUMP_RECOVER_ADC);
-    updateLowTripFlag(waterDepleted, waterFaultCounter, waterRaw, WATER_DRY_THRESHOLD, WATER_DRY_RECOVER_ADC);
-    updateHighTripFlag(inletWaterFull, inletFullCounter, waterRaw, IN_PUMP_STOP_ADC, IN_PUMP_RECOVER_ADC);
+    updateLowTripFlag(waterCriticalLow, waterCritCounter, waterRaw, outPumpStopAdc, outPumpRecoverAdc);
+    updateLowTripFlag(waterDepleted, waterFaultCounter, waterRaw, waterDryThreshold, waterDryRecoverAdc);
+    updateHighTripFlag(inletWaterFull, inletFullCounter, waterRaw, inPumpStopAdc, inPumpRecoverAdc);
 
-    // 5b. Pump Leak Detection Sensor (A8: wet fault when ADC >= LEAK_THRESHOLD, disabled when ENABLE_LEAK_SENSOR == 0)
+    // 5b. Pump Leak Detection Sensor (A8: wet fault when ADC >= leakThreshold, disabled when ENABLE_LEAK_SENSOR == 0)
 #if ENABLE_LEAK_SENSOR
     leakRaw = readAdcAveraged(LEAK_SENSOR_PIN);
     if (!pumpLeakDetected) {
-      if (leakRaw >= LEAK_THRESHOLD) {
+      if (leakRaw >= leakThreshold) {
         leakFaultCounter++;
         if (leakFaultCounter >= WATER_FAULT_LIMIT) {
           leakFaultCounter = WATER_FAULT_LIMIT;
@@ -509,7 +511,7 @@ void loop() {
         leakFaultCounter = 0;
       }
     } else {
-      if (leakRaw < LEAK_THRESHOLD) {
+      if (leakRaw < leakThreshold) {
         if (leakFaultCounter > 0) leakFaultCounter--;
         if (leakFaultCounter == 0) {
           pumpLeakDetected = false;
@@ -532,33 +534,38 @@ void loop() {
   bool slaveActive = ((now - lastSlavePacketTime) < SLAVE_TIMEOUT_MS);
 
   // 6. Master Mode, Safety Cutoffs (Bath Low or Pump Leak), Overrides & Hysteresis Control
+  // MODE_OFF and leak remain master kills inside this branch (see below);
+  // the pump FORCE ON overrides in this block ignore water levels (debug-only).
   if (currentMode == MODE_OFF || pumpLeakDetected) {
     forceAllOff();
   } else {
     bool inletLevelOk = !inletWaterFull;
     bool outletLevelOk = !waterCriticalLow;
-    // The heater shares the OUT pump's debounced critical-dry cutoff (trips <= 350, clears >= 420).
-    // The 450-level waterDepleted flag only throttles Pump 2; it does not cut the heater.
+    // The heater shares the OUT pump's debounced critical-dry cutoff (uses
+    // outPumpStopAdc / outPumpRecoverAdc). The waterDepleted flag only
+    // throttles Pump 2; it does not cut the heater.
     bool heaterWaterLow = waterCriticalLow;
 
     // --- PUMP 1 LOGIC (Pin D3: Inlet to reservoir) ---
-    if (!inletLevelOk) {
-      resetMosfetOff(pump1Mosfet);
+    // FORCE ON is debug-only: naively on/off, ignores water-level interlocks.
+    if (pump1Override == 2) {
+      slewMosfet(pump1Mosfet, false, now);
     } else if (pump1Override == 1) {
       slewMosfet(pump1Mosfet, true, now);
-    } else if (pump1Override == 2) {
-      slewMosfet(pump1Mosfet, false, now);
+    } else if (!inletLevelOk) {
+      resetMosfetOff(pump1Mosfet);
     } else {
       slewMosfet(pump1Mosfet, true, now, AUTO_PUMP_PWM_LIMIT);
     }
 
     // --- PUMP 2 LOGIC (Pin D7: Outlet from reservoir) ---
-    if (!outletLevelOk) {
-      resetMosfetOff(pump2Mosfet);
+    // FORCE ON is debug-only: naively on/off, ignores critical/dry interlocks.
+    if (pump2Override == 2) {
+      slewMosfet(pump2Mosfet, false, now);
     } else if (pump2Override == 1) {
       slewMosfet(pump2Mosfet, true, now);
-    } else if (pump2Override == 2) {
-      slewMosfet(pump2Mosfet, false, now);
+    } else if (!outletLevelOk) {
+      resetMosfetOff(pump2Mosfet);
     } else {
       // Water movement depends on the level only. Bath and bottle temperature
       // gate the heater, never the circulation pumps.
@@ -679,6 +686,46 @@ void handleUsbCommand(String &cmd, unsigned long now) {
       if (h >= 0.1 && h <= 5.0)   bottleHysteresis = h;
     }
   }
+  else if (cmd.startsWith("THRESH:")) {
+    // Format: THRESH:<out_stop>:<out_recover>:<dry>:<dry_recover>:<in_stop>:<in_recover>:<leak>
+    int p1 = cmd.indexOf(':');
+    int p2 = (p1 > 0) ? cmd.indexOf(':', p1 + 1) : -1;
+    int p3 = (p2 > 0) ? cmd.indexOf(':', p2 + 1) : -1;
+    int p4 = (p3 > 0) ? cmd.indexOf(':', p3 + 1) : -1;
+    int p5 = (p4 > 0) ? cmd.indexOf(':', p4 + 1) : -1;
+    int p6 = (p5 > 0) ? cmd.indexOf(':', p5 + 1) : -1;
+    int p7 = (p6 > 0) ? cmd.indexOf(':', p6 + 1) : -1;
+    if (p1 > 0 && p2 > p1 && p3 > p2 && p4 > p3 && p5 > p4 && p6 > p5 && p7 > p6) {
+      int vOutStop = cmd.substring(p1 + 1, p2).toInt();
+      int vOutRec = cmd.substring(p2 + 1, p3).toInt();
+      int vDry = cmd.substring(p3 + 1, p4).toInt();
+      int vDryRec = cmd.substring(p4 + 1, p5).toInt();
+      int vInStop = cmd.substring(p5 + 1, p6).toInt();
+      int vInRec = cmd.substring(p6 + 1, p7).toInt();
+      int vLeak = cmd.substring(p7 + 1).toInt();
+      bool rangeOk = (vOutStop >= 0 && vOutStop <= 1023 &&
+                      vOutRec >= 0 && vOutRec <= 1023 &&
+                      vDry >= 0 && vDry <= 1023 &&
+                      vDryRec >= 0 && vDryRec <= 1023 &&
+                      vInStop >= 0 && vInStop <= 1023 &&
+                      vInRec >= 0 && vInRec <= 1023 &&
+                      vLeak >= 0 && vLeak <= 1023);
+      // Hysteresis deadbands must straddle the trip points, or the debounced
+      // flags can never trip or can never recover.
+      bool orderOk = (vOutRec > vOutStop &&
+                      vDryRec > vDry &&
+                      vInRec < vInStop);
+      if (rangeOk && orderOk) {
+        outPumpStopAdc = vOutStop;
+        outPumpRecoverAdc = vOutRec;
+        waterDryThreshold = vDry;
+        waterDryRecoverAdc = vDryRec;
+        inPumpStopAdc = vInStop;
+        inPumpRecoverAdc = vInRec;
+        leakThreshold = vLeak;
+      }
+    }
+  }
 }
 
 void sendTelemetryStatus(unsigned long now) {
@@ -724,13 +771,16 @@ void sendTelemetryStatus(unsigned long now) {
   doc["water_crit"] = waterCriticalLow ? 1 : 0;
   doc["water_full"] = inletWaterFull ? 1 : 0;
   doc["water_adc"] = waterRaw;
-  doc["water_thr"] = WATER_DRY_THRESHOLD;
-  doc["out_stop_thr"] = OUT_PUMP_STOP_ADC;
-  doc["in_stop_thr"] = IN_PUMP_STOP_ADC;
+  doc["water_thr"] = waterDryThreshold;
+  doc["out_stop_thr"] = outPumpStopAdc;
+  doc["out_recover_thr"] = outPumpRecoverAdc;
+  doc["dry_recover_thr"] = waterDryRecoverAdc;
+  doc["in_stop_thr"] = inPumpStopAdc;
+  doc["in_recover_thr"] = inPumpRecoverAdc;
   doc["leak_enabled"] = ENABLE_LEAK_SENSOR;
   doc["pump_leak"] = pumpLeakDetected ? 1 : 0;
   doc["leak_adc"] = leakRaw;
-  doc["leak_thr"] = LEAK_THRESHOLD;
+  doc["leak_thr"] = leakThreshold;
   doc["system_mode"] = (currentMode == MODE_AUTO) ? "AUTO" : "OFF";
 
   serializeJson(doc, Serial);
