@@ -2009,10 +2009,13 @@
                     });
             }
 
-            function fmtMetric(v, u, sentinel) {
+            function fmtMetric(v, u, sentinel, maxLimit) {
                 const n = Number(v);
-                if (v === undefined || v === null || !Number.isFinite(n) || n === sentinel) {
+                if (v === undefined || v === null || !Number.isFinite(n)) {
                     return `<span class="error-text">Unavailable</span>`;
+                }
+                if (n === sentinel || (maxLimit !== undefined && n >= maxLimit)) {
+                    return `<span class="error-text">Over Limit</span>`;
                 }
                 return `<span class="val">${Number.isInteger(n) ? n : n.toFixed(2)}<span class="unit">${u}</span></span>`;
             }
@@ -2189,16 +2192,14 @@
                             validBottleTempSum += bTemp;
                             validBottleTempCount++;
                         }
-                        if (activeTab === "bottles") {
-                            setText(document.getElementById(`bTitle_${idx}`), `BOTTLE ${bId}`);
-                            setHTMLIfChanged(`bTemp_${idx}`, fmtMetric(b.temp, "°C", -999));
-                            setHTMLIfChanged(`bPh_${idx}`, fmtMetric(b.ph, "", -1));
-                            setHTMLIfChanged(`bCh4_${idx}`, fmtMetric(b.methane, "ppm", -1));
-                            setHTMLIfChanged(`bCh4Vol_${idx}`, fmtMetric(b.ch4_ml, "mL", -1));
-                            setHTMLIfChanged(`bCo2_${idx}`, fmtMetric(b.co2, "ppm", -1));
-                            setHTMLIfChanged(`bCo2Vol_${idx}`, fmtMetric(b.co2_ml, "mL", -1));
-                            setHTMLIfChanged(`bPress_${idx}`, fmtMetric(b.press, "hPa", -1));
-                        }
+                        setText(document.getElementById(`bTitle_${idx}`), `BOTTLE ${bId}`);
+                        setHTMLIfChanged(`bTemp_${idx}`, fmtMetric(b.temp, "°C", -999));
+                        setHTMLIfChanged(`bPh_${idx}`, fmtMetric(b.ph, "", -1));
+                        setHTMLIfChanged(`bCh4_${idx}`, fmtMetric(b.methane, "ppm", -1, 10000));
+                        setHTMLIfChanged(`bCh4Vol_${idx}`, fmtMetric(b.ch4_ml, "mL", -1));
+                        setHTMLIfChanged(`bCo2_${idx}`, fmtMetric(b.co2, "ppm", -1, 5000));
+                        setHTMLIfChanged(`bCo2Vol_${idx}`, fmtMetric(b.co2_ml, "mL", -1));
+                        setHTMLIfChanged(`bPress_${idx}`, fmtMetric(b.press, "hPa", -1));
                     });
                 } else {
                     for (let i = 1; i <= 4; i++) setText(DOM["homeBTemp" + i], "--°C");
