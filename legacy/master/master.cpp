@@ -23,12 +23,12 @@
 float targetBottleTemp  = 39.0; // Adjustable target bottle average temp (°C)
 float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 #define MAX_WATER_BATH_TEMP    50.0   // Hard safety bath ceiling clamp (°C)
-#define OUT_PUMP_STOP_ADC      350    // Trip critical dry cutoff (Heater & Pump 2 OFF) at or below this ADC
-#define OUT_PUMP_RECOVER_ADC   420    // Clear critical dry cutoff only at or above this ADC
-#define WATER_DRY_THRESHOLD    450    // Trip low-water Pump 2 throttle at or below this ADC
-#define WATER_DRY_RECOVER_ADC  480    // Clear low-water Pump 2 throttle only at or above this ADC
-#define IN_PUMP_STOP_ADC       500    // Trip high-water cutoff (Pump 1 OFF) at or above this ADC
-#define IN_PUMP_RECOVER_ADC    460    // Clear high-water cutoff only at or below this ADC
+#define OUT_PUMP_STOP_ADC      400    // Trip critical dry cutoff (Heater & Pump 2 OFF) at or below this ADC
+#define OUT_PUMP_RECOVER_ADC   440    // Clear critical dry cutoff only at or above this ADC
+#define WATER_DRY_THRESHOLD    460    // Trip low-water Pump 2 throttle at or below this ADC
+#define WATER_DRY_RECOVER_ADC  500    // Clear low-water Pump 2 throttle only at or above this ADC
+#define IN_PUMP_STOP_ADC       550    // Trip high-water cutoff (Pump 1 OFF) at or above this ADC
+#define IN_PUMP_RECOVER_ADC    480    // Clear high-water cutoff only at or below this ADC
 #define ENABLE_LEAK_SENSOR     0      // 0 = disabled (only A9 water presence sensor installed); 1 = enable A8 leak probe
 #define LEAK_THRESHOLD         200    // Pump leak wet-detection ADC threshold
 #define WATER_CHECK_MS         250UL  // Time-gated water & leak sampling interval (250ms = 4 Hz)
@@ -361,11 +361,11 @@ void updateStirrer(unsigned long now) {
   if (stirMode == 0) {
     // Manual OFF (3s soft-stop ramp down to 0)
     slewMosfet(stirMosfet, false, now);
-  } 
+  }
   else if (stirMode == 1) {
     // CONSTANT ON (3s soft-start ramp up to stirMosfet.maxPwm)
     slewMosfet(stirMosfet, true, now);
-  } 
+  }
   else if (stirMode == 2) {
     // PULSE INTERVAL (run for stirPulseSec every stirIntervalMin with 3s soft-start + 3s soft-stop)
     unsigned long periodMs = stirIntervalMin * 60000UL;
@@ -378,7 +378,7 @@ void updateStirrer(unsigned long now) {
                                     ? (onWindowMs - STIR_RAMP_MS)
                                     : (onWindowMs / 2);
     slewMosfet(stirMosfet, elapsed < activeDriveMs, now);
-  } 
+  }
   else if (stirMode == 3) {
     // TIMED RUN (run continuously for stirTimedMin with 3s soft-start + 3s soft-stop, then switch to OFF)
     unsigned long durationMs = stirTimedMin * 60000UL;
@@ -609,13 +609,13 @@ void loop() {
 void handleUsbCommand(String &cmd, unsigned long now) {
   if (cmd == "STATUS") {
     sendTelemetryStatus(now);
-  } 
+  }
   else if (cmd == "MODE_AUTO") {
     if (currentMode == MODE_OFF) {
       stirCycleStart = now;
     }
     currentMode = MODE_AUTO;
-  } 
+  }
   else if (cmd == "MODE_OFF") {
     currentMode = MODE_OFF;
     forceAllOff();
