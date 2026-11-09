@@ -2120,22 +2120,26 @@
                 const outD4 = Number(data.out_d4 ?? 0);
 
                 setText(DOM.homeHeaterLabel, `HEATER (D5 · ${hMode === "AUTO" ? targ + "°C" : hMode})`);
-                setText(DOM.heater, heatStop ? heatStopLabel : data.heater ? "HEATING" : "IDLE");
-                setClass(DOM.heater, data.heater && !heatStop ? "on" : (heatStop ? "warning" : ""));
+                const hStopActive = hMode !== "OFF" && heatStop;
+                setText(DOM.heater, hMode === "OFF" ? "OFF" : hStopActive ? heatStopLabel : data.heater ? "HEATING" : "IDLE");
+                setClass(DOM.heater, data.heater && !hStopActive && hMode !== "OFF" ? "on" : (hStopActive ? "warning" : ""));
 
-                const p1Running = Boolean(data.pump1 ?? data.pump) && !pump1LevelStop;
+                const p1StopActive = p1Mode !== "OFF" && (driveStop || (p1Mode === "AUTO" && pump1LevelStop));
+                const p1Running = p1Mode !== "OFF" && Boolean(data.pump1 ?? data.pump) && !p1StopActive;
                 setText(DOM.homePump1Label, `PUMP 1 (D3 · ${p1Mode})`);
-                setText(DOM.pump1, driveStop ? driveStopLabel : pump1LevelStop ? pump1StopLabel : p1Running ? `RUNNING (${outD3})` : "IDLE");
-                setClass(DOM.pump1, p1Running && !driveStop ? "on" : (driveStop || pump1LevelStop ? "warning" : ""));
+                setText(DOM.pump1, p1Mode === "OFF" ? "OFF" : driveStop ? driveStopLabel : (p1Mode === "AUTO" && pump1LevelStop) ? pump1StopLabel : p1Running ? `RUNNING (${outD3})` : "IDLE");
+                setClass(DOM.pump1, p1Running ? "on" : (p1StopActive ? "warning" : ""));
 
-                const p2Running = Boolean(data.pump2) && !pump2LevelStop;
+                const p2StopActive = p2Mode !== "OFF" && (driveStop || (p2Mode === "AUTO" && pump2LevelStop));
+                const p2Running = p2Mode !== "OFF" && Boolean(data.pump2) && !p2StopActive;
                 setText(DOM.homePump2Label, `PUMP 2 (D7 · ${p2Mode})`);
-                setText(DOM.pump2, driveStop ? driveStopLabel : pump2LevelStop ? pump2StopLabel : p2Running ? `RUNNING (${outD7})` : "IDLE");
-                setClass(DOM.pump2, p2Running && !driveStop ? "on" : (driveStop || pump2LevelStop ? "warning" : ""));
+                setText(DOM.pump2, p2Mode === "OFF" ? "OFF" : driveStop ? driveStopLabel : (p2Mode === "AUTO" && pump2LevelStop) ? pump2StopLabel : p2Running ? `RUNNING (${outD7})` : "IDLE");
+                setClass(DOM.pump2, p2Running ? "on" : (p2StopActive ? "warning" : ""));
 
+                const sStopActive = sMode !== "OFF" && driveStop;
                 setText(DOM.homeStirLabel, `STIRRER (D4 · ${sMode})`);
-                setText(DOM.stirrer, driveStop ? driveStopLabel : data.stirrer ? `RUNNING (${outD4})` : "IDLE");
-                setClass(DOM.stirrer, data.stirrer && !driveStop ? "on" : (driveStop ? "warning" : ""));
+                setText(DOM.stirrer, sStopActive ? driveStopLabel : data.stirrer ? `RUNNING (${outD4})` : sMode === "OFF" ? "OFF" : "IDLE");
+                setClass(DOM.stirrer, data.stirrer && !sStopActive ? "on" : (sStopActive ? "warning" : ""));
 
                 setText(DOM.livePwmD3, `Out: ${outD3}`);
                 setText(DOM.livePwmD7, `Out: ${outD7}`);
@@ -2151,13 +2155,14 @@
                 setText(DOM.stirLiveBadge, stirStatusText);
                 setClass(DOM.stirLiveBadge, "perf-badge " + (data.stirrer ? "on" : ""));
 
+                updateActuatorButtons("heater", hMode);
+                updateActuatorButtons("pump1", p1Mode);
+                updateActuatorButtons("pump2", p2Mode);
+
                 if (!ctrlState.syncedOnce && data.target_temp !== undefined) {
                     ctrlState.targetTemp = Number(data.target_temp);
                     ctrlState.hysteresis = Number(data.hysteresis || 0.3);
                     renderHystSummary();
-                    updateActuatorButtons("heater", hMode);
-                    updateActuatorButtons("pump1", p1Mode);
-                    updateActuatorButtons("pump2", p2Mode);
                     if (data.pwm_d3 !== undefined) previewMosfetPwm("D3", data.pwm_d3);
                     if (data.pwm_d7 !== undefined) previewMosfetPwm("D7", data.pwm_d7);
                     if (data.pwm_d4 !== undefined) previewMosfetPwm("D4", data.pwm_d4);

@@ -147,6 +147,10 @@ void slewMosfet(MosfetChannel &ch, bool wantOn, unsigned long now,
   }
 
   unsigned long elapsed = now - ch.rampOriginMs;
+  if (elapsed >= STIR_RAMP_MS) {
+    driveMosfetPwm(ch, ch.targetPwm);
+    return;
+  }
   unsigned long delta = (elapsed * (unsigned long)refSpan) / STIR_RAMP_MS;
 
   uint8_t nextPwm = 0;
@@ -494,6 +498,24 @@ void loop() {
     updateLowTripFlag(waterCriticalLow, waterCritCounter, waterRaw, outPumpStopAdc);
     updateLowTripFlag(waterDepleted, waterFaultCounter, waterRaw, waterDryThreshold);
     updateHighTripFlag(inletWaterFull, inletFullCounter, waterRaw, inPumpStopAdc);
+
+    // Opposite-extreme mutual exclusion: prevent simultaneous IN/OUT pump lockouts
+    // when rapid level swings cross from high-stop to dry/critical-low (or vice versa)
+    // faster than the 5-second recovery window (WATER_RECOVER_LIMIT).
+    if ((waterCriticalLow || waterDepleted) && inPumpStopAdc > waterDryThreshold) {
+      inletWaterFull = false;
+      inletFullCounter = 0;
+    }
+    if (inletWaterFull) {
+      if (inPumpStopAdc > outPumpStopAdc) {
+        waterCriticalLow = false;
+        waterCritCounter = 0;
+      }
+      if (inPumpStopAdc > waterDryThreshold) {
+        waterDepleted = false;
+        waterFaultCounter = 0;
+      }
+    }
 
     // 5b. Pump Leak Detection Sensor (A8: wet fault when ADC >= leakThreshold, disabled when ENABLE_LEAK_SENSOR == 0)
 #if ENABLE_LEAK_SENSOR

@@ -94,6 +94,26 @@ boot_defaults_applied = False
 # and re-sent if the master's reported values drift from the constants above.
 thresholds_sent = False
 last_thresh_send_mono = -1000.0
+state_sent = False
+last_state_send_mono = -1000.0
+last_user_cmd_mono = -1000.0
+
+desired_state = {
+    'system_mode': 'AUTO',
+    'heater_mode': 'OFF',
+    'pump1_mode': 'OFF',
+    'pump2_mode': 'OFF',
+    'pwm_d3': 255,
+    'pwm_d7': 255,
+    'pwm_d4': 255,
+    'stir_mode': 'OFF',
+    'stir_int_min': 10,
+    'stir_pulse_sec': 30,
+    'stir_timed_min': 15,
+    'stir_started_mono': -1000.0,
+    'target_temp': 39.0,
+    'hysteresis': 0.3,
+}
 
 packet_stats = {
     'total': 0,
@@ -237,6 +257,72 @@ def send_serial_cmd(cmd_str):
         except Exception:
             close_serial_conn()
     return False
+
+STIR_MODE_MAP = {'OFF': 0, 'ON': 1, 'PULSE': 2, 'TIMED': 3}
+
+def stir_command():
+    """Build the STIR:... line from `desired_state`."""
+    s_mode = desired_state['stir_mode']
+    m_int = STIR_MODE_MAP.get(s_mode, 0)
+    if s_mode == 'TIMED':
+        elapsed_sec = max(0.0, time.monotonic() - desired_state['stir_started_mono'])
+        rem_sec = max(60.0, (desired_state['stir_timed_min'] * 60.0) - elapsed_sec)
+        mins = max(1, int(round(rem_sec / 60.0)))
+    else:
+        mins = desired_state['stir_int_min']
+    secs = desired_state['stir_pulse_sec']
+    return f"STIR:{m_int}:{mins}:{secs}"
+
+def desired_state_commands():
+    """Build the full list of serial commands to restore `desired_state` on the Master."""
+    return [
+        f"MODE_{desired_state['system_mode']}",
+        f"HEATER_{desired_state['heater_mode']}",
+        f"PUMP1_{desired_state['pump1_mode']}",
+        f"PUMP2_{desired_state['pump2_mode']}",
+        f"PWM:D3:{desired_state['pwm_d3']}",
+        f"PWM:D7:{desired_state['pwm_d7']}",
+        f"PWM:D4:{desired_state['pwm_d4']}",
+        stir_command(),
+        f"TEMP:{desired_state['target_temp']:.1f}:{desired_state['hysteresis']:.1f}",
+    ]
+
+def state_mismatch_commands():
+    """Return serial commands for any Master settings that drifted from `desired_state`."""
+    cmds = []
+    if current_data.get('system_mode') != desired_state['system_mode']:
+        cmds.append(f"MODE_{desired_state['system_mode']}")
+    if current_data.get('heater_mode') != desired_state['heater_mode']:
+        cmds.append(f"HEATER_{desired_state['heater_mode']}")
+    if current_data.get('pump1_mode') != desired_state['pump1_mode']:
+        cmds.append(f"PUMP1_{desired_state['pump1_mode']}")
+    if current_data.get('pump2_mode') != desired_state['pump2_mode']:
+        cmds.append(f"PUMP2_{desired_state['pump2_mode']}")
+    if int(current_data.get('pwm_d3', 255)) != desired_state['pwm_d3']:
+        cmds.append(f"PWM:D3:{desired_state['pwm_d3']}")
+    if int(current_data.get('pwm_d7', 255)) != desired_state['pwm_d7']:
+        cmds.append(f"PWM:D7:{desired_state['pwm_d7']}")
+    if int(current_data.get('pwm_d4', 255)) != desired_state['pwm_d4']:
+        cmds.append(f"PWM:D4:{desired_state['pwm_d4']}")
+
+    s_mode = desired_state['stir_mode']
+    if current_data.get('stir_mode') != s_mode:
+        cmds.append(stir_command())
+    elif s_mode == 'PULSE' and (
+        int(current_data.get('stir_int_min', 10)) != desired_state['stir_int_min']
+        or int(current_data.get('stir_pulse_sec', 30)) != desired_state['stir_pulse_sec']
+    ):
+        cmds.append(stir_command())
+
+    try:
+        t_diff = abs(float(current_data.get('target_temp', 39.0)) - desired_state['target_temp'])
+        h_diff = abs(float(current_data.get('hysteresis', 0.3)) - desired_state['hysteresis'])
+        if t_diff > 0.05 or h_diff > 0.05:
+            cmds.append(f"TEMP:{desired_state['target_temp']:.1f}:{desired_state['hysteresis']:.1f}")
+    except (TypeError, ValueError):
+        cmds.append(f"TEMP:{desired_state['target_temp']:.1f}:{desired_state['hysteresis']:.1f}")
+
+    return cmds
 
 def threshold_command():
     """Build the THRESH:... line from the live `thresholds` dict."""
@@ -740,6 +826,13 @@ def serial_worker():
                         current_data['stir_pulse_sec'] = int(payload.get('stir_pulse_sec', current_data['stir_pulse_sec']))
                         current_data['stir_timed_min'] = int(payload.get('stir_timed_min', current_data['stir_timed_min']))
                         current_data['stir_rem_sec'] = int(payload.get('stir_rem_sec', 0))
+                        if (
+                            desired_state['stir_mode'] == 'TIMED'
+                            and payload.get('stir_mode') == 'OFF'
+                            and current_data['stir_rem_sec'] == 0
+                            and (now_mono - desired_state['stir_started_mono']) >= (desired_state['stir_timed_min'] * 60.0) - 2.0
+                        ):
+                            desired_state['stir_mode'] = 'OFF'
                         current_data['target_temp'] = float(payload.get('target_temp', current_data['target_temp']))
                         current_data['hysteresis'] = float(payload.get('hysteresis', current_data['hysteresis']))
                         current_data['water_low'] = bool(payload.get('water_low', 0))
@@ -766,7 +859,26 @@ def serial_worker():
                             current_data['leak_adc'] = -1
                         if 'leak_thr' in payload:
                             current_data['leak_thr'] = int(payload.get('leak_thr', LEAK_THRESHOLD))
-                        current_data['system_mode'] = payload.get('system_mode', current_data['system_mode'])
+                        if (now_mono - last_user_cmd_mono) < 1.2:
+                            # Hold optimistic mode/setpoint values while an operator
+                            # command is still in flight so a pre-command STATUS
+                            # frame does not briefly revert the UI.
+                            current_data['heater_mode'] = desired_state['heater_mode']
+                            current_data['pump1_mode'] = desired_state['pump1_mode']
+                            current_data['pump_mode'] = desired_state['pump1_mode']
+                            current_data['pump2_mode'] = desired_state['pump2_mode']
+                            current_data['pwm_d3'] = desired_state['pwm_d3']
+                            current_data['pwm_d7'] = desired_state['pwm_d7']
+                            current_data['pwm_d4'] = desired_state['pwm_d4']
+                            current_data['stir_mode'] = desired_state['stir_mode']
+                            current_data['stir_int_min'] = desired_state['stir_int_min']
+                            current_data['stir_pulse_sec'] = desired_state['stir_pulse_sec']
+                            current_data['stir_timed_min'] = desired_state['stir_timed_min']
+                            current_data['target_temp'] = desired_state['target_temp']
+                            current_data['hysteresis'] = desired_state['hysteresis']
+                            current_data['system_mode'] = desired_state['system_mode']
+                        else:
+                            current_data['system_mode'] = payload.get('system_mode', current_data['system_mode'])
 
                     elif isinstance(payload, dict):
                         packet_stats['rx_master'] += 1
@@ -785,7 +897,7 @@ def serial_worker():
 
 # --- BACKGROUND WORKER 2: POLLING & LOGGING ---
 def polling_worker():
-    global boot_defaults_applied, thresholds_sent, last_thresh_send_mono
+    global boot_defaults_applied, state_sent, last_state_send_mono, thresholds_sent, last_thresh_send_mono
     while True:
         if serial_conn:
             if not boot_defaults_applied:
@@ -804,6 +916,23 @@ def polling_worker():
                     current_data['pump2'] = False
                     current_data['stirrer'] = False
                     print("Boot defaults applied: heater OFF, pump OFF, stirrer OFF")
+            if not state_sent:
+                # Master keeps actuator modes, PWM limits, and setpoints in RAM
+                # only, so restore the operator's desired state on every serial
+                # (re)connect.
+                cmds = desired_state_commands()
+                if all(send_serial_cmd(c) for c in cmds):
+                    state_sent = True
+                    last_state_send_mono = time.monotonic()
+                    print(f"Desired state synced: {', '.join(cmds)}")
+            else:
+                mismatched = state_mismatch_commands()
+                if mismatched:
+                    now_mono = time.monotonic()
+                    if (now_mono - last_state_send_mono) >= 2.0 and (now_mono - last_user_cmd_mono) >= 1.5:
+                        if all(send_serial_cmd(c) for c in mismatched):
+                            last_state_send_mono = now_mono
+                            print(f"Re-synced drifted Master state: {', '.join(mismatched)}")
             if not thresholds_sent:
                 # Master keeps thresholds in RAM only, so re-send on every
                 # (re)connect. The master validates the deadbands itself and
@@ -822,7 +951,8 @@ def polling_worker():
                         last_thresh_send_mono = now_mono
             send_serial_cmd("STATUS")
         else:
-            # Serial dropped; force a THRESH resend on the next connect.
+            # Serial dropped; force state and THRESH resend on the next connect.
+            state_sent = False
             thresholds_sent = False
             if logging_active:
                 packet_stats['outgoing'] += 1
@@ -1045,6 +1175,7 @@ def raw():
 @app.route('/control', methods=['POST'])
 def control_api():
     """Handles Heater, Pump, Stirrer, and Hysteresis Target updates from the Controls tab."""
+    global thresholds, last_user_cmd_mono
     body = request.json or {}
     action = body.get('action')
 
@@ -1063,6 +1194,8 @@ def control_api():
     if action == 'heater':
         mode = body.get('mode', 'AUTO')
         if mode in ('AUTO', 'ON', 'OFF'):
+            desired_state['heater_mode'] = mode
+            last_user_cmd_mono = time.monotonic()
             send_serial_cmd(f"HEATER_{mode}")
             current_data['heater_mode'] = mode
             if mode == 'ON' and not heater_safety_trip:
@@ -1078,15 +1211,22 @@ def control_api():
             # water-level interlocks (MODE_OFF/leak still cut it there).
             # Mirror that here optimistically; STATUS telemetry confirms.
             if action == 'pump1':
+                desired_state['pump1_mode'] = mode
+                last_user_cmd_mono = time.monotonic()
                 send_serial_cmd(f"PUMP1_{mode}")
                 current_data['pump1_mode'] = mode
                 current_data['pump_mode'] = mode
                 current_data['pump1'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d3', 255) > 0
             elif action == 'pump2':
+                desired_state['pump2_mode'] = mode
+                last_user_cmd_mono = time.monotonic()
                 send_serial_cmd(f"PUMP2_{mode}")
                 current_data['pump2_mode'] = mode
                 current_data['pump2'] = (mode == 'ON') and not leak_trip and current_data.get('pwm_d7', 255) > 0
             else:
+                desired_state['pump1_mode'] = mode
+                desired_state['pump2_mode'] = mode
+                last_user_cmd_mono = time.monotonic()
                 send_serial_cmd(f"PUMP_{mode}")
                 current_data['pump_mode'] = mode
                 current_data['pump1_mode'] = mode
@@ -1103,6 +1243,8 @@ def control_api():
                 pwm_val = max(0, min(255, int(body.get('pwm', 255))))
             except (TypeError, ValueError):
                 return jsonify({'status': 'error', 'message': 'Invalid PWM value'}), 400
+            desired_state[f"pwm_{pin.lower()}"] = pwm_val
+            last_user_cmd_mono = time.monotonic()
             send_serial_cmd(f"PWM:{pin}:{pwm_val}")
             current_data[f"pwm_{pin.lower()}"] = pwm_val
             return jsonify({'status': 'success', 'pin': pin, 'pwm': pwm_val})
@@ -1111,8 +1253,20 @@ def control_api():
         mode_str = body.get('mode', 'OFF')
         mode_map = {'OFF': 0, 'ON': 1, 'PULSE': 2, 'TIMED': 3}
         m_int = mode_map.get(mode_str, 0)
-        mins = int(body.get('minutes', 10))
-        secs = int(body.get('seconds', 30))
+
+
+        mins = max(1, int(body.get('minutes', 10)))
+        secs = max(1, int(body.get('seconds', 30)))
+        if mode_str not in mode_map:
+            mode_str = 'OFF'
+        desired_state['stir_mode'] = mode_str
+        if mode_str == 'PULSE':
+            desired_state['stir_int_min'] = mins
+            desired_state['stir_pulse_sec'] = secs
+        elif mode_str == 'TIMED':
+            desired_state['stir_timed_min'] = mins
+            desired_state['stir_started_mono'] = time.monotonic()
+        last_user_cmd_mono = time.monotonic()
         send_serial_cmd(f"STIR:{m_int}:{mins}:{secs}")
         current_data['stir_mode'] = mode_str
         if mode_str == 'PULSE':
@@ -1127,6 +1281,11 @@ def control_api():
     elif action == 'temp_target':
         target = round(float(body.get('target', 39.0)), 1)
         hyst = round(float(body.get('hysteresis', 0.3)), 1)
+        target = max(20.0, min(50.0, target))
+        hyst = max(0.1, min(5.0, hyst))
+        desired_state['target_temp'] = target
+        desired_state['hysteresis'] = hyst
+        last_user_cmd_mono = time.monotonic()
         send_serial_cmd(f"TEMP:{target:.1f}:{hyst:.1f}")
         current_data['target_temp'] = target
         current_data['hysteresis'] = hyst
@@ -1138,7 +1297,7 @@ def control_api():
         # Volatile: updates the live dict and re-sends THRESH:... now.
         # Lost on Flask restart (falls back to the file constants).
         # Trip-only: no recover deadbands.
-        global thresholds
+        # Trip-only: no recover deadbands.
         try:
             new = {
                 'out_stop': int(body.get('out_stop')),
@@ -1225,6 +1384,9 @@ def mobile_download_portal(filename):
 def set_mode():
     mode = request.json.get('mode')
     if mode in ['AUTO', 'OFF']:
+        global last_user_cmd_mono
+        desired_state['system_mode'] = mode
+        last_user_cmd_mono = time.monotonic()
         send_serial_cmd(f"MODE_{mode}")
         current_data['system_mode'] = mode
         return jsonify({'status': 'success', 'system_mode': mode})

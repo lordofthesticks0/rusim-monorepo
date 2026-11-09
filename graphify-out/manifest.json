@@ -354,9 +354,9 @@
     "semantic_hash": ""
   },
   "legacy/master/master.cpp": {
-    "mtime": 1793954622.7160237,
-    "seen": 1793955578.048385,
-    "ast_hash": "470b049e29b1f726531c01d5200263fc",
+    "mtime": 1794213988.7879963,
+    "seen": 1794214513.402481,
+    "ast_hash": "8419fdb05a05822c87295516e07ef57e",
     "semantic_hash": ""
   },
   "legacy/pi/captive-portal-login.sh": {
@@ -372,9 +372,9 @@
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/web_control.py": {
-    "mtime": 1793954622.719378,
-    "seen": 1793955578.048385,
-    "ast_hash": "b2c58ea5cbe9ac25e8b167765e349a27",
+    "mtime": 1794214306.438842,
+    "seen": 1794214513.4034815,
+    "ast_hash": "295a92fb5a0792eb3d2d715baadb3d36",
     "semantic_hash": ""
   },
   "legacy/slave/new-slave.cpp": {
@@ -595,9 +595,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/legacy-master.md": {
-    "mtime": 1793954622.683168,
-    "seen": 1793955578.048385,
-    "ast_hash": "e4e2dd2b352c5dd93798c8c020abf57e",
+    "mtime": 1794214452.392244,
+    "seen": 1794214513.411484,
+    "ast_hash": "37b7024f7d986150aa9f645bed8a4cd9",
     "semantic_hash": ""
   },
   "docs/llm-generated/legacy-pi-remote-monitor.md": {
@@ -703,21 +703,21 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/raspi-docs/04-backend-web-control.md": {
-    "mtime": 1793954622.6851683,
-    "seen": 1793955578.048385,
-    "ast_hash": "0101c593eba9d1317bb742dad514e2ea",
+    "mtime": 1794214489.4911027,
+    "seen": 1794214513.4154851,
+    "ast_hash": "a1875df99f658255b5d4426d8bed8005",
     "semantic_hash": ""
   },
   "docs/llm-generated/raspi-docs/05-frontend-ui.md": {
-    "mtime": 1793955556.6864128,
-    "seen": 1793955578.048385,
-    "ast_hash": "56ba9d02fc76d20d0fc8cbd1ae2068d7",
+    "mtime": 1794214493.3813665,
+    "seen": 1794214513.4154851,
+    "ast_hash": "96866cf2a28e50fa90410f56064decd3",
     "semantic_hash": ""
   },
   "docs/llm-generated/raspi-docs/06-master-firmware.md": {
-    "mtime": 1793866889.495046,
-    "seen": 1793955578.048385,
-    "ast_hash": "21a0da2a9afa0fa4b549bfff2909df42",
+    "mtime": 1794214459.9863703,
+    "seen": 1794214513.4154851,
+    "ast_hash": "f94e64d97b8aecc18602fe1ea2053529",
     "semantic_hash": ""
   },
   "docs/llm-generated/raspi-docs/07-data-and-logging.md": {
@@ -799,9 +799,9 @@
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/templates/index.html": {
-    "mtime": 1793955524.6810963,
-    "seen": 1793955578.048385,
-    "ast_hash": "f3b299e70a0823832c94bc50e22e5e47",
+    "mtime": 1794214373.897909,
+    "seen": 1794214513.4184856,
+    "ast_hash": "3183199342bb8892b9ad6ac0e3aa855e",
     "semantic_hash": ""
   },
   "reusable-prompts/backlog-filling.md": {
