@@ -114,27 +114,27 @@
     "semantic_hash": ""
   },
   "firmware/display-v9/fake_data.cpp": {
-    "mtime": 1792035797.3466575,
-    "seen": 1794285266.7458818,
-    "ast_hash": "7b7fab6799af1f1c1b8c16bfa4b37263",
+    "mtime": 1794288169.0474436,
+    "seen": 1794288321.1266465,
+    "ast_hash": "79e313cd2cfa9501b30055f1c01fd2ca",
     "semantic_hash": ""
   },
   "firmware/display-v9/fake_data.h": {
-    "mtime": 1792822717.5892107,
-    "seen": 1794285266.7458837,
-    "ast_hash": "f14c9ee0c5cb8b694c3d98806a29fa5e",
+    "mtime": 1794288152.0934181,
+    "seen": 1794288321.1266484,
+    "ast_hash": "9147354413d3015cf29a201b3e1fa247",
     "semantic_hash": ""
   },
   "firmware/display-v9/link_serial.cpp": {
-    "mtime": 1794285194.7994435,
-    "seen": 1794285266.7458851,
-    "ast_hash": "47f60b6b9528a94d36a6ac2810769066",
+    "mtime": 1794288094.6463318,
+    "seen": 1794288321.1266494,
+    "ast_hash": "3aee5860f27567e28699319c8e48ff20",
     "semantic_hash": ""
   },
   "firmware/display-v9/link_serial.h": {
-    "mtime": 1794285194.2724411,
-    "seen": 1794285266.7458868,
-    "ast_hash": "561d715633de6839c7d9e14e3c658391",
+    "mtime": 1794288094.6443317,
+    "seen": 1794288321.1266503,
+    "ast_hash": "81ce300836f0f74b914e0f429f741013",
     "semantic_hash": ""
   },
   "firmware/display-v9/lv_conf.h": {
@@ -252,9 +252,9 @@
     "semantic_hash": ""
   },
   "firmware/display-v9/sim/link_provision_stub.cpp": {
-    "mtime": 1794285195.3224459,
-    "seen": 1794285266.745919,
-    "ast_hash": "fafd6ddf5d54b3ec072af3b00167dcf4",
+    "mtime": 1794288176.7784553,
+    "seen": 1794288321.126945,
+    "ast_hash": "5fc2de9565c7c9f5a3afd2cf22eaee26",
     "semantic_hash": ""
   },
   "firmware/display-v9/sim/lv_conf.h": {
@@ -276,9 +276,9 @@
     "semantic_hash": "ab0b9cfefa55119ca907b4f6ada89d8a"
   },
   "firmware/display-v9/ui_config.h": {
-    "mtime": 1792035783.8666587,
-    "seen": 1794285266.7459264,
-    "ast_hash": "e688392f94acb9c51e661006565b0c1a",
+    "mtime": 1794288152.0894182,
+    "seen": 1794288321.1269956,
+    "ast_hash": "10db370d6f6136b1c5d479d254215fcc",
     "semantic_hash": ""
   },
   "firmware/display-v9/ui_hold_button.cpp": {
@@ -294,9 +294,9 @@
     "semantic_hash": ""
   },
   "firmware/display-v9/ui_shell.cpp": {
-    "mtime": 1794284606.7744234,
-    "seen": 1794285266.7459307,
-    "ast_hash": "01398873f167d78738e26059e3d6591b",
+    "mtime": 1794288176.7854552,
+    "seen": 1794288321.1270359,
+    "ast_hash": "9a52987170ec1be72677fa1ddbeae333",
     "semantic_hash": ""
   },
   "firmware/display-v9/ui_shell.h": {
@@ -318,9 +318,9 @@
     "semantic_hash": ""
   },
   "firmware/network-master/main.cpp": {
-    "mtime": 1794285183.326392,
-    "seen": 1794285266.7459402,
-    "ast_hash": "fdaa3955502668132296768b15556eec",
+    "mtime": 1794288144.9434073,
+    "seen": 1794288321.1270988,
+    "ast_hash": "7c8bb06f8f3310919f580603b527409f",
     "semantic_hash": ""
   },
   "firmware/network-master/supabase_ca.h": {
@@ -535,15 +535,15 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/display-debug-flag.md": {
-    "mtime": 1792823210.4974751,
-    "seen": 1794285266.7460213,
-    "ast_hash": "a57ca0a257e9a51caf9876d7c8343fd3",
+    "mtime": 1794285990.2778904,
+    "seen": 1794288321.127768,
+    "ast_hash": "a84ee2f520d606102106133b773eec44",
     "semantic_hash": ""
   },
   "docs/llm-generated/display-docs.md": {
-    "mtime": 1794285243.9645786,
-    "seen": 1794285266.746023,
-    "ast_hash": "2cba98b1bfe199f19bf3b076995a1c9d",
+    "mtime": 1794288294.3576322,
+    "seen": 1794288321.127769,
+    "ast_hash": "98b26657a401283629680437b275ec50",
     "semantic_hash": ""
   },
   "docs/llm-generated/display-info-reboot.md": {
@@ -619,15 +619,15 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/link-serial-protocol.md": {
-    "mtime": 1794285239.898573,
-    "seen": 1794285266.74605,
-    "ast_hash": "0b672e74908040f59c527dbe6c0d21eb",
+    "mtime": 1794288263.790586,
+    "seen": 1794288321.127992,
+    "ast_hash": "37b8dafbce7e3415c7861416b3d632b2",
     "semantic_hash": ""
   },
   "docs/llm-generated/lvgl-redesign.md": {
-    "mtime": 1791966810.681192,
-    "seen": 1794285266.7460513,
-    "ast_hash": "d278bcfe3d0679286499bbba57a1ea23",
+    "mtime": 1794288302.5446444,
+    "seen": 1794288321.1279926,
+    "ast_hash": "11d95fa1ae0bb7dca6d0d5ef1a84c689",
     "semantic_hash": ""
   },
   "docs/llm-generated/memory-safety-hardening.md": {
@@ -649,9 +649,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/network-master.md": {
-    "mtime": 1794285239.3735723,
-    "seen": 1794285266.7460601,
-    "ast_hash": "bd616fdd3aa7f28ed71355d67f535250",
+    "mtime": 1794288272.383599,
+    "seen": 1794288321.1280594,
+    "ast_hash": "7d34a68986bf4fb55f06fb8d5d6266a0",
     "semantic_hash": ""
   },
   "docs/llm-generated/pi-kiosk-font-scale.md": {

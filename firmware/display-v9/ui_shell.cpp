@@ -108,13 +108,13 @@ static void on_bell_clicked(lv_event_t *e) {
   }
   int total = fake_null_count();
   if (total == 0) {
-    snprintf(body, sizeof(body), "All fields valid this cycle (fake).");
+    snprintf(body, sizeof(body), "All fields valid this cycle.");
   } else if (total > shown) {
     char more[48];
-    snprintf(more, sizeof(more), "... +%d more (fake)", total - shown);
+    snprintf(more, sizeof(more), "... +%d more", total - shown);
     strncat(body, more, sizeof(body) - strlen(body) - 1);
   }
-  ui_modal_show("Invalid fields (live, fake)", body, "Close", nullptr);
+  ui_modal_show("Invalid fields", body, "Close", nullptr);
 }
 
 static void on_tab_clicked(lv_event_t *e) {
@@ -432,9 +432,9 @@ void ui_eval_overheat() {
   if (t >= UI_OVERHEAT_TRIP_C) {
     if (!s_trip45Shown) {
       s_trip45Shown = true;
-      g.stirrerOn = false;  // fake: breaker cut everything (display stays for demo)
-      ui_modal_show("45C BREAKER TRIP (fake)",
-                    "Chamber >= 45C.\nAll power cut (fake).\nStirrer forced OFF.\nSet TEMP < 45 via serial to re-arm.",
+      g.stirrerOn = false;  // breaker cut: the stirrer drops out, the display stays up
+      ui_modal_show("45C BREAKER TRIP",
+                    "Chamber >= 45C.\nHeater power is not cut by the display.\nStirrer switched OFF.\nSet TEMP < 45 via serial to re-arm.",
                     "Acknowledge", on_trip45_ack);
       ui_refresh_current();
     }
@@ -444,8 +444,8 @@ void ui_eval_overheat() {
   if (t >= UI_OVERHEAT_WARN_C) {
     if (!s_warn41Shown) {
       s_warn41Shown = true;
-      ui_modal_show("41C WARNING (fake)",
-                    "Chamber >= 41C.\nHeater keeps running (fake).\nSet TEMP < 41 via serial to re-arm.",
+      ui_modal_show("41C WARNING",
+                    "Chamber >= 41C.\nHeater keeps running.\nSet TEMP < 41 via serial to re-arm.",
                     "Acknowledge", on_warn41_ack);
     }
     return;
@@ -476,16 +476,19 @@ void ui_experiment_toggle() {
     // /control warning covers reusing an id that already has readings.
   }
   link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
-  Serial.printf("[FAKE->WT32] RUN %s\n", g.experimentRunning ? "ON" : "OFF");
+  Serial.printf("[RUN] requested %s exp=%d\n", g.experimentRunning ? "ON" : "OFF", g.expNum);
   ui_update_bell();
 }
 
 // --- init ---
 
-static void on_push_timer(lv_timer_t *t) {
+
+// Copies new real SENS frames into the model on their own cadence and refreshes
+// the screen. Runs even while no real data exists: the call returns fast and
+// keeps the staleness watcher armed for when the WT32 starts sending.
+static void on_sens_timer(lv_timer_t *t) {
   (void)t;
-  fake_wt32_push();
-  ui_shell_on_data();
+  if (sens_apply_real()) ui_shell_on_data();
 }
 
 void ui_init() {
@@ -508,5 +511,8 @@ void ui_init() {
   ui_update_bell();
   ui_update_nav();
   ui_update_clock();
-  lv_timer_create(on_push_timer, UI_PUSH_PERIOD_MS, nullptr);
+
+  // Real SENS frames from the WT32: ~30 s wire cadence, applied here every 5 s,
+  // which is also fast enough to catch the >90 s staleness gate.
+  lv_timer_create(on_sens_timer, UI_SENS_APPLY_MS, nullptr);
 }

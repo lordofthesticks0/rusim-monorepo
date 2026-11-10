@@ -34,6 +34,7 @@ document is the source of truth for anything measured on real hardware.
 | [`firmware/methane-calibrate/`](../firmware/methane-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §4 |
 | [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate/) | ATmega328 Uno | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §3 |
 | [`firmware/tests/water-level/`](../firmware/tests/water-level/) | Arduino Uno | [water-level-test.md](llm-generated/water-level-test.md) |
+| [`firmware/tests/display-sensors/`](../firmware/tests/display-sensors/) | Native host (no hardware) | [display-docs.md §8](llm-generated/display-docs.md#8-verify-without-hardware-signals): real model/parser and USB command regression tests |
 | [`firmware/temp-probe/`](../firmware/temp-probe/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §5 |
 | [`firmware/co2-calibrate/`](../firmware/co2-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §2 |
 
@@ -43,7 +44,7 @@ document is the source of truth for anything measured on real hardware.
 |---|---|
 | [platformio-environments.md](llm-generated/platformio-environments.md) | `platformio.ini`: environment table, source filters, display build flags, commands, fixed defects |
 | [compile-commands.md](llm-generated/compile-commands.md) | `compile_commands.json` and `gen-compile-db.sh`: the clangd compilation database, regeneration, and which errors it cannot remove |
-| [display-docs.md](llm-generated/display-docs.md) | The `display-v9` UI: screen tree, file map, fake-data serial protocol, hold-to-confirm |
+| [display-docs.md](llm-generated/display-docs.md) | The `display-v9` UI: real WT32 sensor model, unavailable-data semantics, USB controls, host regression tests, hold-to-confirm |
 | [lvgl-redesign.md](llm-generated/lvgl-redesign.md) | `display-v9` UI redesign working document: as-built layout and behaviour per state and tab, empty redesign tables |
 | [migration-notes.md](llm-generated/migration-notes.md) | LVGL v8 to v9 changes and the required code edits |
 | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) | The four sensor calibration programs |
@@ -150,6 +151,11 @@ These describe boards rather than this project's code.
 |---|---|
 | [`docs/hardware.md`](../docs/hardware.md) | PCB documentation: module pinouts, the full Mega pin map, sensors, MAX485 |
 | [`docs/calibration.md`](../docs/calibration.md) | Recorded calibration values and dates, per sensor |
+
+## 5a. Agent lessons
+
+- [Learned mistakes](llm-summary/learned-mistakes.md): corrections and lessons,
+  recorded at the path required by the project rules.
 
 ## 6. Where new work belongs
 

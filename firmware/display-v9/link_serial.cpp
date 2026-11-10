@@ -63,6 +63,15 @@ static uint32_t s_dbAckAge0 = 0;
 static uint32_t s_dbStampMs = 0;
 static char s_dbState[12] = "none";
 
+// Real sensor frame from the WT32's legacy-slave poll (SENS lines). seq bumps
+// on every accepted line so the UI can tell a new frame from a re-parse of
+// the same values; the copy-out getter still returns the full frame, so the
+// UI never indexes behind our back.
+static LinkSensFrame s_sens = {};
+static bool s_sensSeen = false;
+static uint32_t s_sensSeq = 0;
+static uint32_t s_sensMs = 0;
+
 static bool s_passthrough = false;
 
 // --- small bounded helpers -------------------------------------------------
@@ -196,6 +205,8 @@ static void handle_hello() {
   s_dbReadSeen = false;
   s_dbAckSeen = false;
   snprintf(s_dbState, sizeof(s_dbState), "none");
+  s_sensSeen = false;
+  s_sens = {};
   Serial.println("[LINK] WT32 HELLO, link up (pair kept for re-push)");
 }
 
@@ -328,6 +339,69 @@ static void handle_db(const char *args) {
   (void)parse_age(args, "ack", s_dbAckSeen, s_dbAckAge0);
 }
 
+// Parses one SENS line's arguments: "b<i>" switches the active bottle and the
+// following "<key>=<float>" tokens fill it. Keys repeat per bottle, so
+// arg_lookup (first match wins) cannot be used here. An unparseable token is
+// skipped, not fatal: the frame ends complete for every field that did parse.
+// Accepts "nan" and "inf" literally; the UI stores them and isfinite() keeps
+// the NULL marker.
+//
+// A line whose tail is missing (or a master-side bug) reads the missing
+// bottles as absent, which the UI renders as NULL — the same view as a poll
+// failure. The next 30 s round overwrites everything, so no half-fed frame
+// outlives its poll.
+static void handle_sens(char *args) {
+  LinkSensFrame f = {};
+  for (int b = 0; b < LINK_SENS_BOTTLES; b++) {
+    for (int s = 0; s < LINK_SENS_VALS; s++) f.value[b][s] = NAN;
+  }
+  bool anyBottle = false;
+  int cur = -1;  // active 0-based bottle slot; fields before any bN are dropped
+  const char delim[] = " \t";
+  for (char *tok = strtok(args, delim); tok != nullptr;
+       tok = strtok(nullptr, delim)) {
+    if (tok[0] == 'b' && tok[1] >= '1' &&
+        tok[1] <= (char)('0' + LINK_SENS_BOTTLES) && tok[2] == '\0') {
+      cur = tok[1] - '1';
+      f.present[cur] = true;
+      anyBottle = true;
+      continue;
+    }
+    char *eq = strchr(tok, '=');
+    if (eq == nullptr || cur < 0) continue;
+    *eq = '\0';
+    const char *val = eq + 1;
+    char *stop = nullptr;
+    float v = strtof(val, &stop);
+    if (stop == val || *stop != '\0') continue;
+    int col = -1;
+    if (strcmp(tok, "co2") == 0) col = LINK_SENS_CO2;
+    else if (strcmp(tok, "ch4") == 0) col = LINK_SENS_CH4;
+    else if (strcmp(tok, "p") == 0) col = LINK_SENS_PRESS;
+    else if (strcmp(tok, "ph") == 0) col = LINK_SENS_PH;
+    else if (strcmp(tok, "t") == 0) col = LINK_SENS_TEMP;
+    if (col < 0) continue;
+    f.value[cur][col] = v;
+  }
+  if (!anyBottle) return;  // no bottle token: nothing to commit
+
+  s_sensSeq++;
+  f.seq = s_sensSeq;
+  s_sensMs = millis();
+  s_sens = f;
+  s_sensSeen = true;
+  Serial.printf("[LINK] SENS frame seq=%lu\n", (unsigned long)s_sensSeq);
+}
+
+// Copy-out snapshot. The copy happens before the age math so a caller combining
+// frame and age can never see a torn pair; the link and LVGL run in the same
+// task anyway, but the copy keeps the calling order irrelevant.
+int32_t link_serial_get_sens(LinkSensFrame *out) {
+  if (out != nullptr) *out = s_sens;
+  if (!s_sensSeen) return -1;
+  return (int32_t)(millis() - s_sensMs);
+}
+
 // LOG payloads are verbatim text and must never become a printf format.
 static void handle_log(const char *payload) {
   Serial.print("[W32] ");
@@ -355,6 +429,8 @@ static void handle_line(char *line) {
     handle_net(args);
   } else if (strcmp(line, "DB") == 0 && args != nullptr) {
     handle_db(args);
+  } else if (strcmp(line, "SENS") == 0 && args != nullptr) {
+    handle_sens(args);
   }
   // Everything else (display-direction words, boot ROM text, noise) is ignored.
 }

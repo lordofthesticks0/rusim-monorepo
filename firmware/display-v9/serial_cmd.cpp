@@ -70,10 +70,9 @@ static void pt_byte(char ch) {
 }
 
 static void print_help() {
-  Serial.println("CMDS: TEMP <f> | SETPOINT <f> | DURATION <1-99> | STIRRER ON|OFF |");
-  Serial.println("      POST ON|OFF | RUN ON|OFF | EXP <n> | NODE <0-5> ON|OFF |");
-  Serial.println("      NULL <c> <b> <s> | UNNULL <c> <b> <s> | PUSH | STATUS | LINK | MEM | HELP");
-  Serial.println("      (s = 0 CO2,1 CH4,2 Press,3 pH,4 Temp)");
+  Serial.println("CMDS: SETPOINT <f> | DURATION <1-99> | STIRRER ON|OFF |");
+  Serial.println("      POST ON|OFF | RUN ON|OFF | EXP <n> | PUSH | STATUS | LINK | MEM | HELP");
+  Serial.println("PUSH                  request the WT32 snapshot (no synthetic readings)");
   Serial.println("CREDS <user> <pass>   stage portal credentials for the WT32");
   Serial.println("AP                    toggle the cloaked SoftAP credential form");
   Serial.println("MEM                   heap/PSRAM counters (O(1); never walks the heap)");
@@ -224,17 +223,10 @@ static void handle_line(char *line) {
   } else if (strcmp(cmd, "MEM") == 0) {
     print_mem();
   } else if (strcmp(cmd, "PUSH") == 0) {
-    fake_wt32_push();
-    mutated = true;
-  } else if (strcmp(cmd, "TEMP") == 0) {
-    char *a = strtok(nullptr, " \t");
-    if (a != nullptr) {
-      g.chamberTempC = atof(a);
-      Serial.printf("chamber=%.1f\n", g.chamberTempC);
-      mutated = true;
-    } else {
-      Serial.println("usage: TEMP 38.3");
-    }
+    if (link_serial_send_raw("HELLO")) Serial.println("[LINK] WT32 snapshot requested");
+  } else if (strcmp(cmd, "TEMP") == 0 || strcmp(cmd, "NODE") == 0 ||
+             strcmp(cmd, "NULL") == 0 || strcmp(cmd, "UNNULL") == 0) {
+    Serial.println("Synthetic sensor commands disabled; readings come from WT32 SENS");
   } else if (strcmp(cmd, "SETPOINT") == 0) {
     char *a = strtok(nullptr, " \t");
     if (a != nullptr) {
@@ -280,12 +272,11 @@ static void handle_line(char *line) {
     char *a = strtok(nullptr, " \t");
     bool v = false;
     if (a != nullptr && parse_onoff(a, v)) {
-      // Each transition from stopped to running is a new experiment number.
-      if (v && !g.experimentRunning) g.expNum++;
-      g.experimentRunning = v;
-      link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
-      Serial.printf("[FAKE->WT32] RUN %s exp=%d\n", v ? "ON" : "OFF", g.expNum);
-      mutated = true;
+      // Use the same DB-ready gate and selected experiment as the touchscreen.
+      if (v != g.experimentRunning) {
+        ui_experiment_toggle();
+        mutated = (g.experimentRunning == v);
+      }
     } else {
       Serial.println("usage: RUN ON|OFF");
     }
@@ -307,43 +298,6 @@ static void handle_line(char *line) {
       mutated = true;
     } else {
       Serial.println("usage: POST ON|OFF");
-    }
-  } else if (strcmp(cmd, "NODE") == 0) {
-    char *a = strtok(nullptr, " \t");
-    char *b = strtok(nullptr, " \t");
-    bool v = false;
-    int c = a != nullptr ? atoi(a) : -1;
-    if (c >= 0 && c < UI_CLUSTERS && b != nullptr && parse_onoff(b, v)) {
-      g.cluster[c].online = v;
-      if (!v) {
-        for (int bi = 0; bi < UI_BOTTLES_PER_CLUSTER; bi++)
-          for (int s = 0; s < S_COUNT; s++) g.cluster[c].bottle[bi].sensorNull[s] = true;
-      } else {
-        for (int bi = 0; bi < UI_BOTTLES_PER_CLUSTER; bi++)
-          for (int s = 0; s < S_COUNT; s++)
-            g.cluster[c].bottle[bi].sensorNull[s] = false;
-      }
-      Serial.printf("node %d %s\n", c, v ? "ONLINE" : "OFFLINE");
-      mutated = true;
-    } else {
-      Serial.println("usage: NODE <0-5> ON|OFF");
-    }
-  } else if (strcmp(cmd, "NULL") == 0 || strcmp(cmd, "UNNULL") == 0) {
-    bool setNull = (strcmp(cmd, "NULL") == 0);
-    char *a = strtok(nullptr, " \t");
-    char *b = strtok(nullptr, " \t");
-    char *s = strtok(nullptr, " \t");
-    int c = a != nullptr ? atoi(a) : -1;
-    int bi = b != nullptr ? atoi(b) : -1;
-    int si = s != nullptr ? atoi(s) : -1;
-    if (c >= 0 && c < UI_CLUSTERS && bi >= 0 && bi < UI_BOTTLES_PER_CLUSTER && si >= 0 &&
-        si < S_COUNT) {
-      g.cluster[c].bottle[bi].sensorNull[si] = setNull;
-      Serial.printf("C%d/B%d/%s %s\n", c, bi, SENSOR_NAMES[si],
-                    setNull ? "NULL" : "valid");
-      mutated = true;
-    } else {
-      Serial.println("usage: NULL <c> <b> <s>  (s=0..4)");
     }
   } else {
     Serial.println("unknown cmd; send HELP");

@@ -25,7 +25,7 @@ bool ui_is_control();
 // SoftAP as /setup, so the teardown in screen_setup_poll() consults this.
 bool ui_is_info();
 
-// Re-render the current route in place (called after fake pushes / serial).
+// Re-render the current route in place (called after real frames / USB edits).
 void ui_refresh_current();
 // Recompute bell state from NULL fields and repaint the status bar.
 void ui_update_bell();
@@ -35,7 +35,7 @@ void ui_update_nav();
 void ui_update_clock();
 // Called after any data mutation: bell + content refresh.
 void ui_shell_on_data();
-// Flip experiment running state (shared by /home and /control run buttons).
+// Flip experiment running state (shared by /home, /control, and USB RUN).
 void ui_experiment_toggle();
 // 41C warn / 45C trip evaluation against g.chamberTempC.
 void ui_eval_overheat();

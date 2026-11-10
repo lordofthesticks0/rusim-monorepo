@@ -1,16 +1,16 @@
-# Display UI — LLM Documentation (`display-v9`, fake-data pass)
+# Display UI — LLM Documentation (`display-v9`, WT32 sensor feed)
 
 ## 1. Overview
 
 `firmware/display-v9/` is the Display MCU firmware: Sunton 800×480 ST7262
 (RGB565) + GT911 touch, ESP32-S3, LVGL v9.6.0, Arduino_GFX flush path.
 
-This pass implements the screen tree from the Display UI scribble notes
-**with fake sensor data**: no sensor chain is attached. The WT32 is real for
-login, network status, DB state and experiment state over the serial link
-(`link-serial-protocol.md`); a local `AppState` still supplies the bottle
-readings, and a USB-serial line protocol lets a human mutate it. All open
-questions from the notes are parked; each stub carries a `TODO(WT32|HW)`.
+The WT32 supplies login, network status, database state, experiment state,
+and bottle readings over `rusim-line` (`link-serial-protocol.md`). Sensor
+values start unavailable and change only when a real `SENS` frame arrives;
+there is no fake seed, random jitter, or simulated sensor fallback. The
+legacy filenames/types `fake_data` and `BottleFake` remain for compatibility.
+Setpoint, stirrer and POST controls still lack real hardware transport.
 
 Locked decisions honoured: no staleness UI, no PIN on Control,
 hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
@@ -34,18 +34,18 @@ hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
 |---|---|
 | `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_serial_init()` + `ui_init()`; `loop()` = USB serial poll → link poll → setup/home/control/info polls → clock → SoftAP poll → sleep tick → `lv_timer_handler()`, with all LVGL work suspended while the `PASSTH` tunnel is open |
 | `lv_conf.h` | Enables vs stock: `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART, BUTTONMATRIX, QRCODE (+CANVAS, required by qrcode)` = 1; fonts +12/+20/+28. `KEYBOARD` is now 0 (credential entry moved to QR, §12). **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
-| `link_serial.h/.cpp` | `rusim-line` v1 peer on `Serial1` (RX 18 / TX 17, 115200 8N1). Line parser, 5 s heartbeats, all inbound/outbound words, log forwarding, `PASSTH` tunnel. `Serial` stays USB debug only. Full wire spec in §10 and `link-serial-protocol.md` |
+| `link_serial.h/.cpp` | `rusim-line` v1 peer on `Serial1` (RX 18 / TX 17, 115200 8N1). Line parser, 5 s heartbeats, all inbound/outbound words, log forwarding, `SENS` real sensor frames, `PASSTH` tunnel. `Serial` stays USB debug only. Full wire spec in §10 and `link-serial-protocol.md` |
 | `screen_setup.h/.cpp` | `/setup` first-class route (route 6): 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + Start/Stop button. `ui_init()` opens it first; WT32 `LOGINREQ` re-raises it; `RESULT OK` routes home. No keyboard (§12); duration/exp number/run live on `/control`. The SoftAP stays up while either `/setup` or `/info` is showing (§13). `RESULT FAIL` puts the wrong-password text on the panel, and the phone sees the same verdict (§12) |
 | `touch.h` | Unchanged GT911 glue |
-| `ui_config.h` | Counts (6 clusters × 4 bottles, 2 online), ranges, 2000 ms / 60 s / 5 min timings, thresholds, pins, light palette (§13), `FW_VERSION`, `IS_DEBUG` debug gate (§14) |
-| `fake_data.h/.cpp` | `AppState g`: experiment, setpoint, stirrer, POST, chamber temp, 6×4 bottles × 5 sensors + NULL flags + temp trend ring; `fake_init()` seeds 2 online / 4 offline; `fake_wt32_push()` jitters online values every 5 min (lv_timer) |
+| `ui_config.h` | Capacity (6 clusters × 4 bottles; all offline until reported), ranges, 2000 ms / 60 s timings, 5 s sensor apply / 90 s expiry, thresholds, pins, palette, `FW_VERSION`, `IS_DEBUG` |
+| `fake_data.h/.cpp` | `AppState g`: controls and real bottle values; `fake_init()` starts all nodes offline, bottles absent, readings/history unavailable; `sens_apply_real()` applies WT32 frames to node 0 and clears missing/expired data. Bottle presence is independent of database capacity |
 | `serial_cmd.h/.cpp` | Human-typeable debug protocol over USB serial (see §5). Display-local only. Also `CREDS` and `AP` (§12) |
 | `provision_ap.h/.cpp` | SoftAP + web credential form on the display, staging into the same link pair as the `CREDS` serial command (§12). `/status` leads with a `waiting`/`success`/`fail` token and a reject gets the error page with a retry link |
 | `ui_shell.h/.cpp` | Status bar, content router, single blocking-modal primitive, bell logic, overheat eval, `ui_mk_*` styled helpers (no LVGL theme is enabled, so all styling is explicit) |
 | `screen_home.h/.cpp` | `/home`: DATA / CONTROL / INFO nav + run summary + serial hint |
-| `screen_data.h/.cpp` | `/data` picker (6 clusters, offline greyed), `/data/X` 2×2 bottle grid ("node offline" inline), `/data/X/bottle_Y` 5 sensor rows + `lv_chart` temp trend (values ×10, range 300–450) |
+| `screen_data.h/.cpp` | `/data` picker (6 clusters, offline greyed); `/data/X` node page = one 180×180 square per bottle, laid out like the `/info` tiles (bottle temperature on top, `Bottle n` caption below), greyed card when the node is offline, red value when the WT32 reported that temperature as NULL, and the square itself opens the chamber; `/data/X/bottle_Y` 5 sensor rows + `lv_chart` temp trend (values ×10, range 300–450) |
 | `screen_control.h/.cpp` | `/control`: setpoint −/+ 0.1 °C (35.0–40.0, logs `[FAKE->WT32]`), duration/experiment-number steppers, and stirrer + run switches built from `ui_hold_button` (2000 ms hold, progress ring), plus a button that sends one immediate `EXPERIMENT` line for bench testing |
-| `screen_info.h/.cpp` | `/info`: rebuilt on every open; fake storage/IP/HTTP/FW rows + real heap/PSRAM rows + fetch timestamp + a 180 px network QR with its own Start/Stop (§13). `screen_info_poll()` keeps the QR in step each loop |
+| `screen_info.h/.cpp` | `/info`: real link/database/configuration/queue tiles, firmware version, LVGL UI-thread load; storage usage shows `--` because the protocol supplies no measurement |
 | `screen_sleep.h/.cpp` | Idle timer on last-touch millis; backlight off after 30 s, on at next touch tick |
 
 ## 4. Screen tree / state machine (as built)
@@ -59,7 +59,7 @@ hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
                      chamber>=45 -> trip modal (stirrer fake-OFF; re-arms <45)
 [any]  30 s no touch -> backlight off -> touch -> back on
 [status bar] bell red iff any NULL field -> tap -> live NULL list modal
-5-min lv_timer -> fake_wt32_push() -> bell + content refresh
+5-s lv_timer -> sens_apply_real() -> bell + content refresh when data changes
 ```
 
 There is no boot gate. `ui_init()` calls `ui_show_setup()` and that route
@@ -69,22 +69,20 @@ screen. `ui_refresh_current()` re-runs the current route builder after
 pushes/serial edits; the modal overlay is a sibling of the content container
 so refreshes never dismiss it.
 
-## 5. Fake-data serial protocol
+## 5. USB control and diagnostic protocol
 
 USB serial, 115200, newline-terminated, case-insensitive command word:
 
 ```
-HELP | STATUS | PUSH | LINK
-TEMP 38.3            chamber temp (drives 41/45 UI; TRY: TEMP 41.5, TEMP 45.2, TEMP 37.0)
+HELP | STATUS | LINK
+PUSH                 request the real WT32 snapshot (HELLO); no generated values
 SETPOINT 37.5        35.0-40.0, mirrors the /control stepper
 DURATION 24          1-99 whole hours; pushes EXPERIMENT to the WT32
-RUN ON|OFF           start/stop the experiment; each start increments EXP
+RUN ON|OFF           use the touchscreen DB-ready gate; keep the selected EXP
 EXP 3                set the experiment number
 STIRRER ON|OFF       also logs [FAKE->WT32] like the on-screen toggle
 POST ON|OFF
-NODE <0-5> ON|OFF    OFF nulls the whole node; ON clears its NULLs
-NULL <c> <b> <s>     set one field NULL   (s: 0 CO2,1 CH4,2 Press,3 pH,4 Temp)
-UNNULL <c> <b> <s>   clear one field NULL
+
 CREDS <user> <pass>  stage a portal pair (bench path; echoed scrollback)
 AP                   toggle the credential SoftAP, print both QR payloads
 MEM                  heap/PSRAM free, low-water and largest block
@@ -92,23 +90,29 @@ PASSTH ON|OFF        raw USB <-> IO17/IO18 tunnel (§10)
 W32CMD <line>        send one arbitrary line to the WT32 (IS_DEBUG builds)
 ```
 
-There are deliberately **no on-screen debug buttons/modals for faking** —
-all injection goes through this port. `STATUS` prints run state + node list.
+`TEMP`, `NODE`, `NULL`, and `UNNULL` are rejected: measured values are
+read-only and cannot be replaced by synthetic USB commands.
+`STATUS` prints run state + node list.
 `LINK` prints the link state (`req/pair/result/user/exp`, `ip/ping/up/age`,
 `db`, passthrough). `PASSTH ON|OFF` opens the raw USB <-> IO17/IO18 tunnel
 used to flash or watch the WT32 (§10). `W32CMD <line>` forwards one arbitrary
 line and exists only in `IS_DEBUG=1` builds.
 
-> Display→WT32 login, network status, DB state and experiment state are real
-> over the serial link (see §10); the remaining fake part is the sensor-data
-> push, still via `fake_wt32_push()`.
+`PUSH` only requests a snapshot; if the WT32 has no current sensor frame,
+readings remain unavailable. It does not poll the Mega directly or force a
+database read.
 
-## 6. Bell / NULL semantics (fake)
+## 6. Bell / NULL semantics
 
-`bellRed = fake_null_count() > 0`. At boot this is **red by design**: nodes
-2–5 are "not connected", i.e. 80 NULL fields. Tapping the bell shows up to 10
-live `C/B/sensor` lines plus a "+N more" tail. Offline clusters render inline
-"node offline" labels — never blank, never stale badges.
+`bellRed = fake_null_count() > 0`. At boot all 24 bottle slots are absent and
+all 120 sensor fields are NULL. Only bottles reported by live WT32 frames
+count as online. Tapping the bell lists unavailable fields. Missing/invalid
+sensors show `-- NULL`; absent or expired bottles show no live data. Charts
+use gaps for missing samples and never manufacture historical points.
+
+The separate chamber temperature is `-- C`: `SENS` contains bottle readings,
+not a chamber sensor. No bottle temperature is silently substituted into the
+chamber overheat logic. That logic is not a working hardware safety system.
 
 ## 7. Hold-to-confirm implementation
 
@@ -122,20 +126,29 @@ commit callback.
 ## 8. Verify without hardware signals
 
 ```sh
-pio run -e display-v9   # compile only; board need not be connected
+python3 firmware/tests/display-sensors/run_tests.py
+pio run -e display-v9 -e display-sim   # build only; no board required
 ```
 
-On device (USB serial 115200): confirm the gate at 24 h → walk
-Home → Data → Cluster 0 → Bottle → back; open Cluster 4 (offline); tap bell;
-`/control` step setpoint, hold a toggle; `/info` twice (timestamps differ);
-`TEMP 41.5` → warn modal → ack; `TEMP 45.2` → trip modal; `TEMP 37` → re-arm;
-`NODE 2 ON` → bell count drops; wait 60 s → backlight off → touch → on.
+The host suite compiles the actual model, link parser, and USB command
+sources against a buffered serial/clock shim. It covers unavailable startup,
+partial/malformed/nonfinite fields, successive frame sequences, observed-only
+trends, missing bottles, expiry/recovery, HELLO invalidation, wire command
+format/clamps/heartbeat, credential encoding/redaction, and USB command routing.
+Its UI spy verifies that USB RUN delegates to the shared gate; it does not
+execute LVGL or exercise the real gate itself.
+
+On device: before sensor frames arrive, confirm zero online bottles and NULL
+readings. After a real Mega reply, check node 0 values and subsequent updates;
+after 90 s without a fresh frame, check NULL/offline and empty charts. Verify
+the experiment number stays selected across start/stop. Builds and host tests
+do not replace this hardware check.
 
 ## 9. Known gaps / next pass
 
-- Real WT32 sensor-data push over the serial link (login, network, DB and
-  experiment state are already real; `fake_wt32_push()` still jitters local
-  values).
+- The current real sensor transport covers only the Mega's four bottles on
+  node 0; other nodes remain offline. Database capacity does not imply a
+  sensor is connected. A separate chamber-temperature source is not wired.
 - Real `→WT32` transport for setpoint, stirrer and POST (experiment state is
   real; the rest still only prints `[FAKE->WT32] …`).
 - Backlight GPIO45 conflict resolution with EE.
@@ -167,6 +180,7 @@ Received from the WT32:
 | `RESULT OK` / `RESULT FAIL` | login verdict: route home / stay on setup with retry text |
 | `NET ip= up= [ping=]` | `/info` IP, link and latency store |
 | `DB latest= time= bottles= drops= ready= aexp= adur= asrc= pexp= pdur= cfgmax= queued= reads= ack= state=` | `/info` DB, run-configuration and queue stores; `/control` start gate, source label and next-id hint. `-` = unknown, `latest=0` = no rows |
+| `SENS b<i> ph=|nan ch4=|nan t=|nan co2=|nan p=|nan ...` | real node-0 bottle values from the Mega poll; `nan` = invalid sensor, absent `b<i>` = absent bottle (wire spec §3.1.1) |
 | `LOG <text>` | print `[W32] <text>` on the display USB console, verbatim |
 
 Sent to the WT32:
@@ -204,8 +218,21 @@ ages of the last successful configuration read and acknowledged upload).
 Every outbound command is echoed locally as one `[LINK>] <word> [args]` line.
 `CREDS` echoes the word only, never the payload. A WT32 `HELLO` clears the
 local verdict and re-pushes the kept pair, so the rebooted master can log in
-without retyping. A display `HELLO` makes the WT32 re-send `NET`/`DB` and
-`RESULT OK` if it is running.
+without retyping. A display `HELLO` makes the WT32 re-send `NET`/`DB`, `SENS`
+(a frame fresh enough to be called current) and `RESULT OK` if it is running.
+
+**Real sensor values.** `link_serial` stores each accepted `SENS` line as one
+`LinkSensFrame` with a `seq` counter. A 5 s lv_timer (`on_sens_timer`,
+`UI_SENS_APPLY_MS`) calls `sens_apply_real()`, which copies new frames into
+node 0 (`UI_REAL_CLUSTER`) bottle slots 0..3 — columns match `SensorId` order,
+absent bottles and `nan` become NULL flags, and the temp trend ring gains one
+point per applied frame. Each stored frame receives the incremented sequence
+number; otherwise later frames would be mistaken for duplicates and ignored.
+Missing fields start as NAN, not zero, and numeric suffixes are rejected.
+All nodes start offline; only node 0 currently receives real frames. A frame
+older than 90 s (`UI_SENS_STALE_MS`) clears values, bottle presence, and trends
+until the poll recovers. WT32 HELLO also invalidates its old cached frame.
+There is never a fake fallback.
 
 `PASSTH ON` suspends both parsers and turns the display into a raw USB <->
 IO17/IO18 tunnel: use it to watch unprefixed WT32 ROM output or to flash the
@@ -219,7 +246,7 @@ open the port itself (`link-serial-protocol.md` §7).
 ## 11. Setup route
 
 `/setup` is a normal content route, not an overlay. `ui_refresh_current()`
-skips route 6, so the 5-minute fake push never disturbs it.
+skips route 6, so sensor refreshes never disturb it.
 
 The route was originally a two-textarea form with an `lv_keyboard`. That is
 gone; §12 describes what replaced it. What survives: the route is raised by
@@ -332,8 +359,7 @@ whether for safety (skipping auth, forcing outputs) or any other reason.
 Branch on the existing flag instead of adding a new one, mark debug UI
 with a `DEBUG:` prefix, and never enable it in a production flash.
 
----
-Content generated by `codebuff/deepseek-v4.1-flash` in `freebuff`.
+### Earlier documentation updates
 
 Update by `opencode/glm-5.3-flash-free` in `opencode`: LVGL version references corrected
 v9.3.0 -> v9.6.0, matching `platformio.ini` (`lvgl/lvgl@9.6.0`) and the 9.6 port.
@@ -341,3 +367,10 @@ v9.3.0 -> v9.6.0, matching `platformio.ini` (`lvgl/lvgl@9.6.0`) and the 9.6 port
 Update by `opencode/deepseek-v4.1-flash-free` in `opencode`: Modbus RTU slave section replaced by the `rusim-line` v1 peer (`link-serial-protocol.md`); file map, serial commands (`LINK`, `PASSTH`, `W32CMD`) and known gaps updated.
 
 Update by `codebuff/deepseek-v4.1-flash` in `freebuff`: §10 `PASSTH` note added on the CH340 auto-reset when the port is opened and on the line-start requirement for the exit word.
+
+Update by `opencode/glm-5.3-flash-free` in `OpenCode`: §10 gained the `SENS` real-sensor word (node 0 feed, 5 s apply timer, 90 s staleness gate, fake-feed retirement) and the file map rows for `link_serial` and `fake_data` were updated.
+
+Update by `LLM` in `Freebuff`: the `/data/X` node page was rebuilt as a row of 180×180 temperature squares that copies the `/info` tile layout (value font `montserrat_28_compressed` on top, `Bottle n` caption in font 14), and the chamber title lost its `(WT32)`/`(no live data)`/`(fake)` source tag.
+
+---
+Content generated by `LLM` in `Freebuff`.

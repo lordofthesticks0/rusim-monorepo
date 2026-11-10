@@ -25,7 +25,10 @@ static uint32_t s_lastPollMs = 0;
 static int bottles_online() {
   int n = 0;
   for (int c = 0; c < UI_CLUSTERS; c++) {
-    if (g.cluster[c].online) n += UI_BOTTLES_PER_CLUSTER;
+    if (!g.cluster[c].online) continue;
+    for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) {
+      if (g.cluster[c].bottle[b].present) n++;
+    }
   }
   return n;
 }
@@ -41,7 +44,8 @@ static int nodes_online() {
 static void home_render_status() {
   if (s_curTemp != nullptr) {
     char t[32];
-    snprintf(t, sizeof(t), "%.1f C", g.chamberTempC);
+    if (isfinite(g.chamberTempC)) snprintf(t, sizeof(t), "%.1f C", g.chamberTempC);
+    else snprintf(t, sizeof(t), "-- C");
     lv_label_set_text(s_curTemp, t);
   }
   if (s_target != nullptr) {

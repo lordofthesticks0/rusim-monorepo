@@ -23,7 +23,9 @@
 // - Polls the legacy Mega slave on Serial1 (IO5 RX / IO17 TX, 9600 8N1) once
 //   per 30 s with "#1:PING*", logs the four-bottle JSON reply as one
 //   "LOG [SENS]" line, and enqueues the present bottles while an experiment
-//   run is active. See docs/llm-generated/migration-plan.md.
+//   run is active. Each accepted round is forwarded to the display as one
+//   SENS line, so the data screens show real bottles (node 0). See
+//   docs/llm-generated/migration-plan.md and link-serial-protocol.md.
 // - Pulls devices/experiments/device_config from Supabase every 30 s and
 //   freezes a run configuration snapshot at each run start. Uploads go to the
 //   push_readings RPC only while a run is active. See
@@ -67,17 +69,12 @@ static const char* kDataUrl = "https://unison.boidu.dev/lyrics?v=dQw4w9WgXcQ";
 static const char* kCaptiveProbeUrl = "http://connectivitycheck.gstatic.com/generate_204";
 
 // --- Supabase real-data fetch (backlog #1) + NTP (backlog #12) ---
-// Supplied as build flags, never committed:
-//   -DSUPABASE_URL="https://xyz.supabase.co" -DSUPABASE_ANON_KEY="..." -DDEVICE_TOKEN="..." 
-#ifndef SUPABASE_URL
-#define SUPABASE_URL ""
-#endif
-#ifndef SUPABASE_ANON_KEY
-#define SUPABASE_ANON_KEY ""
-#endif
-#ifndef DEVICE_TOKEN
-#define DEVICE_TOKEN ""
-#endif
+// Hardcoded development configuration; no credential build flags required.
+// The publishable key is public. Anyone with the device token can use its
+// server-granted permissions; reserve this token for development device 0.
+#define SUPABASE_URL "https://mdjpqjkduyexrlimepmb.supabase.co"
+#define SUPABASE_ANON_KEY "sb_publishable_oBhy37ygaFxOOhO69c-lww_5R8FcEwB"
+#define DEVICE_TOKEN "RUSIM_DEVEL_TOKEN"
 #ifndef RUSIM_DEVICE_ID
 #define RUSIM_DEVICE_ID 0
 #endif
@@ -247,6 +244,9 @@ static const uint32_t kSensPollMs = 30000;  // one round per 30 s
 static const uint32_t kSensReplyMs = 1500;  // 50 ms capture + ~310 ms line time
 static const size_t kSensFrameCap = 513;    // 512-byte frame + NUL
 static const size_t kSensBottles = 4;
+// A round older than three poll ages is never forwarded to the display, so
+// values frozen by a dead slave cannot be presented as current.
+static const uint32_t kSensMaxWireAgeMs = 90000;
 
 // nullMask bits, matching PushRow below.
 static const uint8_t kSensNullAll = 0x1F;
@@ -434,9 +434,66 @@ static void link_emit_truth() {
 
 // Answer to a display HELLO: the same truth, plus RESULT OK when logged in so
 // a display that rebooted mid-run can leave the login gate.
+// --- rusim-line SENS forwarding ---------------------------------------------
+// One accepted poll round leaves the sens subsystem as one "SENS" line on the
+// display link, so the data screens render the real bottles (node 0) instead
+// of fake data. The display parses the same values this file logs as
+// "[SENS]"; the wire adds nothing new. `s_sensLast` keeps the last accepted
+// round so the HELLO snapshot re-sends values to a late-booting display;
+// otherwise a display that boots between 30 s polls would wait for the next
+// round with a blank data screen.
+//
+// Wire: "SENS b<i> ph=<f> ch4=<f> t=<f> co2=<f> p=<f> b<next> ...". A sensor
+// the slave marked invalid goes out as "nan" (IEEE); a bottle the slave did
+// not report is not emitted at all, so the display treats the whole slot as
+// NULL. Staleness is the display's affair: the line carries no timestamp
+// because the frame has none to copy.
+
+static dbc::BottleSample s_sensLast[kSensBottles];
+static bool s_sensLastSeen[kSensBottles];
+static uint32_t s_sensLastMs = 0;  // millis() of the last accepted round
+
+static void link_emit_sens() {
+  if (s_sensLastMs == 0) return;  // no accepted round since boot
+  if (sensReplySeen && millis() - sensLastReplyMs > kSensMaxWireAgeMs) {
+    // The kept frame is real, but the slave has gone quiet since. Sending it
+    // would brand five-minute-old numbers as current, so send nothing: the
+    // display keeps whatever it already applied or stays blank until the
+    // slave answers again.
+    return;
+  }
+  char line[512];  // worst case is ~340 bytes for four bottles
+  int used = snprintf(line, sizeof(line), "SENS");
+  if (used < 0) return;
+  size_t pos = (size_t)used < sizeof(line) ? (size_t)used : sizeof(line) - 1;
+  for (size_t i = 0; i < kSensBottles; i++) {
+    if (!s_sensLastSeen[i]) continue;
+    const dbc::BottleSample& r = s_sensLast[i];
+    // An invalid sensor prints nan; the display maps nan back to its NULL
+    // marker, so lost truth stays visible end to end.
+    double ph = (r.nullMask & kSensNullPh) ? (double)NAN : (double)r.ph;
+    double ch4 = (r.nullMask & kSensNullCh4) ? (double)NAN : (double)r.ch4;
+    double tc = (r.nullMask & kSensNullTemp) ? (double)NAN : (double)r.tempC;
+    double co2 = (r.nullMask & kSensNullCo2) ? (double)NAN : (double)r.co2;
+    double pr =
+        (r.nullMask & kSensNullPressure) ? (double)NAN : (double)r.pressure;
+    int w = snprintf(line + pos, sizeof(line) - pos,
+                     " b%u ph=%.4g ch4=%.4g t=%.4g co2=%.4g p=%.4g",
+                     (unsigned)(i + 1), ph, ch4, tc, co2, pr);
+    if (w <= 0) break;
+    if ((size_t)w >= sizeof(line) - pos) {
+      pos = sizeof(line) - 1;  // tail bottles dropped, never out of bounds
+      break;
+    }
+    pos += (size_t)w;
+  }
+  Serial.printf("%s\n", line);
+}
+
 static void link_send_snapshot() {
   link_emit_net();
   link_emit_db();
+  link_emit_sens();
   if (stage == STAGE_NEED_CREDS) link_emit_loginreq();
   if (stage == STAGE_RUN) link_emit_result(true);
 }
@@ -1276,6 +1333,20 @@ static void sens_report_round() {
     sens_log_failure("reply has no bottle objects");
     return;
   }
+
+  // Keep the accepted frame for the display feed (link_emit_sens). It is
+  // stored regardless of run state: the data screen shows real bottles while
+  // idle, the push queue is the only run-gated consumer.
+  for (size_t i = 0; i < kSensBottles; i++) {
+    s_sensLast[i] = readings[i];
+    s_sensLastSeen[i] = seen[i];
+  }
+  s_sensLastMs = millis();
+  // Forward the round now, not only from the HELLO snapshot: the display sends
+  // HELLO once at boot (its 5 s heartbeat carries EXPERIMENT), so a snapshot-
+  // only feed gave the data screens one frame per display reboot and let them
+  // go stale after UI_SENS_STALE_MS.
+  link_emit_sens();
 
   // Queue the round only for an accepted frame collected during an active run.
   // Idle rounds stay log-only: no experiment-0 samples and no uploads. A

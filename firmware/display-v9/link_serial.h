@@ -11,7 +11,7 @@
 // '\n' terminated, 1024 bytes maximum. See
 // docs/llm-generated/link-serial-protocol.md for the wire specification.
 //
-// Inbound words handled here: HELLO, LOGINREQ, RESULT, NET, DB, LOG.
+// Inbound words handled here: HELLO, LOGINREQ, RESULT, NET, DB, LOG, SENS.
 // Outbound words: HELLO, EXPERIMENT, CREDS (DUMP via W32CMD in debug builds).
 // Unknown or wrong-direction lines are ignored.
 
@@ -97,6 +97,36 @@ const char *link_serial_db_state();  // none|net|auth|payload|schema|clock|ident
 // 0 means it has not happened yet.
 uint32_t link_serial_get_db_read_age_ms();
 uint32_t link_serial_get_db_ack_age_ms();
+
+// --- Real bottle readings (rusim-line "SENS" word) --------------------------
+// The WT32 forwards one parsed legacy-Mega-slave poll as a SENS line: up to
+// LINK_SENS_BOTTLES bottles of valid floats, one line per accepted 30 s round
+// (id ordering, database bottle_id 0..3). docs/llm-generated/
+// link-serial-protocol.md §3.1.1 is the wire contract.
+#define LINK_SENS_BOTTLES 4
+#define LINK_SENS_VALS 5
+// Value columns deliberately mirror SensorId in fake_data.h (CO2, CH4, Press,
+// pH, Temp) so the UI model can copy columns without a mapping table. If that
+// enum ever changes, both files must change together.
+#define LINK_SENS_CO2 0x00
+#define LINK_SENS_CH4 0x01
+#define LINK_SENS_PRESS 0x02
+#define LINK_SENS_PH 0x03
+#define LINK_SENS_TEMP 0x04
+
+// One accepted SENS line. A bottle the slave did not report has present=false
+// and must not be read. Invalid sensors arrive as IEEE "nan" and are stored
+// as such; the UI turns nan into its NULL marker.
+typedef struct LinkSensFrame {
+  bool present[LINK_SENS_BOTTLES];
+  float value[LINK_SENS_BOTTLES][LINK_SENS_VALS];
+  uint32_t seq;  // increments once per accepted line; 0 = never received
+} LinkSensFrame;
+
+// Copies the newest frame into *out (when non-null; a cleared seq=0 frame when
+// none has ever arrived) and returns the age in ms. Returns -1 when no SENS
+// line has ever arrived; treat *out as not-present when so.
+int32_t link_serial_get_sens(LinkSensFrame *out);
 
 // Debug over USB Serial.
 void link_serial_debug_print();

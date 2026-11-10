@@ -73,10 +73,6 @@ static lv_obj_t *mk_gauge(lv_obj_t *parent, const char *caption, lv_obj_t **cent
   return card;
 }
 
-static int info_storage_pct() {
-  // No real value yet: unknown reads as full (red) until the WT32 sends one.
-  return 100;
-}
 
 static void gauge_set(lv_obj_t *arc, lv_obj_t *centre, int pct, const char *centreText) {
   if (arc != nullptr) {
@@ -175,12 +171,8 @@ static void info_render() {
     lv_label_set_text(s_valQueue, t);
   }
 
-  // Storage gauge (unknown -> full).
-  {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "100%%");
-    gauge_set(s_gaugeStorage, s_ctrStorage, info_storage_pct(), buf);
-  }
+  // Storage usage is not provided by the WT32 protocol.
+  gauge_set(s_gaugeStorage, s_ctrStorage, 0, "--");
 
   // CPU gauge. lv_timer_get_idle() is LVGL's own busy measurement (render +
   // input + timers), maintained as O(1) counters inside lv_timer_handler():

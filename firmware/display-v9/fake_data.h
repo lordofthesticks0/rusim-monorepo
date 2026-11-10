@@ -1,9 +1,7 @@
 #pragma once
 
-// Fake in-memory model of what the WT32 will push over UART every 5 minutes.
-// Single cycle only, no history (PSRAM is spent on frame buffers).
-// Every value here is settable at runtime over the USB serial line protocol
-// (see serial_cmd.h). There is no real UART/WiFi traffic in this pass.
+// Display model fed by real WT32 SENS frames. Legacy file/type names are kept
+// for callers; no sensor readings or history are generated locally.
 
 #include <Arduino.h>
 
@@ -22,9 +20,10 @@ extern const char *const SENSOR_NAMES[S_COUNT];
 extern const char *const SENSOR_UNITS[S_COUNT];
 
 struct BottleFake {
+  bool present;  // reported in the latest live sensor frame
   float sensor[S_COUNT];
   bool sensorNull[S_COUNT];  // true = WT32 failed to fetch this field this cycle
-  float trend[UI_TREND_PTS];  // fake chamber-temp ring for the bottle chart
+  float trend[UI_TREND_PTS];  // measured bottle temperatures; NAN = no point
 };
 
 struct ClusterFake {
@@ -41,7 +40,7 @@ struct AppState {
   float tempSetpointC;
   bool stirrerOn;
   bool postEnabled;
-  float chamberTempC;  // drives the 41/45 overheat UI; settable via serial
+  float chamberTempC;  // NAN until a separate chamber measurement is available
   ClusterFake cluster[UI_CLUSTERS];
   char ipAddr[24];
   char lastHttp[72];
@@ -50,8 +49,13 @@ struct AppState {
 
 extern AppState g;
 
-void fake_init();
-void fake_wt32_push();  // jitter online values, shift trends (5-min timer + PUSH cmd)
+void fake_init();  // initializes controls; all measured values start unavailable
+// Applies new SENS frames to node 0. Missing/invalid values and frames older
+// than 90 s are unavailable, never replaced with synthetic values.
+// Returns true when labels should refresh.
+bool sens_apply_real();
+// True while the applied WT32 sensor feed is live.
+bool sens_real_active();
 int fake_null_count();
 bool fake_any_null();
 const char *fake_sensor_text(int c, int b, int s, char *out, size_t n);

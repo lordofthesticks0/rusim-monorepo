@@ -1,28 +1,73 @@
 #include "fake_data.h"
 
+#include "link_serial.h"
+
 AppState g;
 
 const char *const SENSOR_NAMES[S_COUNT] = {"CO2", "CH4", "Press", "pH", "Temp"};
 const char *const SENSOR_UNITS[S_COUNT] = {"ppm", "ppm", "kPa", "", "C"};
 
-static float frand(float lo, float hi) {
-  return lo + (hi - lo) * (random(0, 1000) / 1000.0f);
+static void clear_bottle(BottleFake &b) {
+  b.present = false;
+  for (int s = 0; s < S_COUNT; s++) {
+    b.sensor[s] = NAN;
+    b.sensorNull[s] = true;
+  }
+  for (int i = 0; i < UI_TREND_PTS; i++) b.trend[i] = NAN;
 }
 
-static void fake_bottle_seed(BottleFake &b, float tempBase) {
-  b.sensor[S_CO2] = frand(800.0f, 1200.0f);
-  b.sensor[S_CH4] = frand(1.8f, 2.4f);
-  b.sensor[S_PRESS] = frand(-2.0f, 2.0f);
-  b.sensor[S_PH] = frand(6.8f, 7.4f);
-  b.sensor[S_TEMP] = tempBase + frand(-0.6f, 0.6f);
-  for (int i = 0; i < S_COUNT; i++) b.sensorNull[i] = false;
-  for (int i = 0; i < UI_TREND_PTS; i++) {
-    b.trend[i] = tempBase + sinf(i * 0.5f) * 0.4f + frand(-0.1f, 0.1f);
+// The legacy Mega rig reports four bottles on node 0. All other slots stay
+// unavailable; the configured database bottle count is not sensor presence.
+static bool s_realSeen = false;
+static bool s_staleShown = true;
+static uint32_t s_lastSeq = 0;
+
+bool sens_apply_real() {
+  LinkSensFrame f;
+  int32_t ageMs = link_serial_get_sens(&f);
+  ClusterFake &cl = g.cluster[UI_REAL_CLUSTER];
+
+  if (ageMs < 0 || (uint32_t)ageMs > UI_SENS_STALE_MS) {
+    if (s_staleShown) return false;
+    s_staleShown = true;
+    cl.online = false;
+    for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) clear_bottle(cl.bottle[b]);
+    Serial.println("[SENS] unavailable: node 0 values cleared");
+    return true;
   }
+
+  if (!s_staleShown && s_realSeen && s_lastSeq == f.seq) return false;
+  s_staleShown = false;
+  s_lastSeq = f.seq;
+
+  bool anyPresent = false;
+  for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) {
+    BottleFake &bt = cl.bottle[b];
+    if (b >= LINK_SENS_BOTTLES || !f.present[b]) {
+      clear_bottle(bt);
+      continue;
+    }
+    bt.present = true;
+    anyPresent = true;
+    for (int s = 0; s < S_COUNT; s++) {
+      float v = f.value[b][s];
+      bt.sensorNull[s] = !isfinite(v);
+      bt.sensor[s] = bt.sensorNull[s] ? NAN : v;
+    }
+    // Keep only observed poll points. Missing temperatures leave a chart gap.
+    for (int i = 0; i < UI_TREND_PTS - 1; i++) bt.trend[i] = bt.trend[i + 1];
+    bt.trend[UI_TREND_PTS - 1] = bt.sensor[S_TEMP];
+  }
+  cl.online = anyPresent;
+  if (!s_realSeen) Serial.println("[SENS] real WT32 feed active");
+  s_realSeen = true;
+  return true;
 }
 
 void fake_init() {
-  randomSeed(analogRead(0) + millis());
+  s_realSeen = false;
+  s_staleShown = true;
+  s_lastSeq = 0;
   g.loggedIn = false;
   g.experimentRunning = false;
   g.experimentStartMs = 0;
@@ -31,43 +76,20 @@ void fake_init() {
   g.tempSetpointC = UI_TEMP_DEFAULT_C;
   g.stirrerOn = false;
   g.postEnabled = true;
-  g.chamberTempC = 37.0f;
-  snprintf(g.ipAddr, sizeof(g.ipAddr), "192.168.1.50 (fake)");
-  snprintf(g.lastHttp, sizeof(g.lastHttp), "200 OK /api/push (fake)");
-  snprintf(g.storageNote, sizeof(g.storageNote), "No local log; dashboard only (fake)");
+  // SENS contains bottle temperatures, not a separate chamber measurement.
+  g.chamberTempC = NAN;
+  snprintf(g.ipAddr, sizeof(g.ipAddr), "--");
+  snprintf(g.lastHttp, sizeof(g.lastHttp), "No upload acknowledged");
+  snprintf(g.storageNote, sizeof(g.storageNote), "No local log; dashboard only");
 
   for (int c = 0; c < UI_CLUSTERS; c++) {
     ClusterFake &cl = g.cluster[c];
-    cl.online = (c < UI_ONLINE_CLUSTERS);
-    for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) {
-      fake_bottle_seed(cl.bottle[b], 37.0f + c * 0.2f);
-      if (!cl.online) {
-        // Not connected: every field reads NULL, shown as "node offline".
-        for (int s = 0; s < S_COUNT; s++) cl.bottle[b].sensorNull[s] = true;
-      }
-    }
+    cl.online = false;
+    for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) clear_bottle(cl.bottle[b]);
   }
 }
 
-void fake_wt32_push() {
-  // Pretends a WT32 UART push just arrived: jitter online nodes, shift trends.
-  for (int c = 0; c < UI_CLUSTERS; c++) {
-    ClusterFake &cl = g.cluster[c];
-    if (!cl.online) continue;
-    for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) {
-      BottleFake &bt = cl.bottle[b];
-      if (!bt.sensorNull[S_CO2]) bt.sensor[S_CO2] *= frand(0.98f, 1.02f);
-      if (!bt.sensorNull[S_CH4]) bt.sensor[S_CH4] *= frand(0.98f, 1.02f);
-      if (!bt.sensorNull[S_PRESS]) bt.sensor[S_PRESS] += frand(-0.1f, 0.1f);
-      if (!bt.sensorNull[S_PH]) bt.sensor[S_PH] += frand(-0.05f, 0.05f);
-      if (!bt.sensorNull[S_TEMP]) bt.sensor[S_TEMP] += frand(-0.15f, 0.15f);
-      // Shift temp trend ring left, append newest temp.
-      for (int i = 0; i < UI_TREND_PTS - 1; i++) bt.trend[i] = bt.trend[i + 1];
-      bt.trend[UI_TREND_PTS - 1] = bt.sensor[S_TEMP];
-    }
-  }
-  Serial.println("[FAKE WT32 push] values updated");
-}
+bool sens_real_active() { return s_realSeen && !s_staleShown; }
 
 int fake_null_count() {
   int n = 0;

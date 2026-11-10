@@ -1,13 +1,13 @@
 #pragma once
 
-// Display UI compile-time constants (fake-data pass).
+// Display UI compile-time constants.
 // Screen: Sunton 800x480, ST7262, RGB565, LVGL v9.6.
 
-// Topology: 6 cluster nodes x 4 bottles = 24 bottles.
-// Only the first 2 nodes are online; the rest are "not connected" (fake).
+// Capacity: 6 cluster nodes x 4 bottles = 24 bottles.
+// Nodes and bottles become online only when reported by the WT32.
 #define UI_CLUSTERS 6
 #define UI_BOTTLES_PER_CLUSTER 4
-#define UI_ONLINE_CLUSTERS 2
+
 #define UI_SENSORS_PER_BOTTLE 5
 #define UI_TREND_PTS 24
 
@@ -38,10 +38,17 @@
 #define UI_BL_PIN 2
 #define UI_SLEEP_MS 60000
 
-// Fake WT32 push cadence (5 min). Fires an lv_timer that jitters fake values.
-#define UI_PUSH_PERIOD_MS (5UL * 60UL * 1000UL)
 
-// Overheat thresholds (fake chamber temp, settable over serial).
+// Real SENS frames land at their own ~30 s cadence; this apply timer copies
+// new frames into the model and refreshes labels. It also doubles as the
+// staleness watcher: a frame older than UI_SENS_STALE_MS has the whole node
+// shown as NULL/offline until the slave answers again.
+#define UI_SENS_APPLY_MS 5000
+#define UI_SENS_STALE_MS (3UL * 30000UL)
+// Cluster that receives the legacy Mega rig's four real bottles.
+#define UI_REAL_CLUSTER 0
+
+// Overheat thresholds; inactive until a real chamber measurement is available.
 #define UI_OVERHEAT_WARN_C 41.0f
 #define UI_OVERHEAT_TRIP_C 45.0f
 

@@ -1,9 +1,8 @@
 #pragma once
 
-// Human-typeable USB-serial protocol for driving the fake-data pass.
-// Examples:  TEMP 38.3 | SETPOINT 37.5 | DURATION 24 | STIRRER ON |
-//            POST OFF | NODE 2 ON | NULL 0 1 4 | UNNULL 0 1 4 | PUSH |
-//            STATUS | LINK | HELP
+// Human-typeable USB controls and diagnostics; measured values are read-only.
+// Examples: SETPOINT 37.5 | DURATION 24 | STIRRER ON | POST OFF |
+//           RUN ON | EXP 3 | PUSH (WT32 snapshot) | STATUS | LINK | HELP
 //
 // NOTE: this line protocol is display-local debug on USB Serial only.
 // The WT32 link is rusim-line v1 on Serial1 (IO18 RX / IO17 TX, 115200 8N1);

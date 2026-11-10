@@ -68,6 +68,13 @@ int link_serial_get_db_queued() { return 0; }
 const char *link_serial_db_state() { return "none"; }
 uint32_t link_serial_get_db_read_age_ms() { return 0; }
 uint32_t link_serial_get_db_ack_age_ms() { return 0; }
+
+// Sim: no WT32 link, so sensor values remain unavailable, as on hardware
+// before the first real SENS frame.
+int32_t link_serial_get_sens(LinkSensFrame *out) {
+  if (out != nullptr) memset(out, 0, sizeof(*out));
+  return -1;
+}
 void link_serial_debug_print() {
   Serial.printf("[LINK] sim stub: creds_ready=%d result=%d run=%d exp=%d dur=%d\n",
                 s_credsReady ? 1 : 0, s_result, s_expRunning ? 1 : 0, s_expNum,

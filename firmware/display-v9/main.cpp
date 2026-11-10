@@ -1,7 +1,7 @@
 
 /*******************************************************************************
- * Display UI (LVGL v9.6, fake-data pass)
- * Sunton 800x480 ST7262 + GT911 touch. See docs/llm-summary/display-docs.md.
+ * Display UI (LVGL v9.6, real WT32 sensor feed)
+ * Sunton 800x480 ST7262 + GT911 touch. See docs/llm-generated/display-docs.md.
  *
  * LVGL v9.6 uses firmware/display-v9/lv_conf.h. Rendering and the display
  * flush callback are configured explicitly for RGB565 below.
@@ -108,7 +108,7 @@ static void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data) {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Display UI v9 (fake-data pass). Send HELP for serial cmds.");
+  Serial.println("Display UI v9 (WT32 sensor feed). Send HELP for serial cmds.");
   link_serial_init();
 
 #if defined(DISPLAY_DEV_KIT)
@@ -197,7 +197,7 @@ void setup() {
 }
 
 void loop() {
-  serial_cmd_poll(); /* human-typeable fake-data protocol; see serial_cmd.h */
+  serial_cmd_poll(); /* USB control/diagnostics; see serial_cmd.h */
   link_serial_poll(); /* rusim-line peer on Serial1; raises setup */
 
   // Keep the USB <-> WT32 tunnel responsive by suspending all LVGL work and
