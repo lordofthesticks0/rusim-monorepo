@@ -458,9 +458,22 @@ void ui_experiment_toggle() {
     g.experimentRunning = false;
     g.experimentStartMs = 0;
   } else {
+    // Decision 2026-11-10: a run may not start until the WT32 has completed at
+    // least one successful configuration pull since boot. Cached or local
+    // configuration is not substituted, so the operator sees this block and
+    // can retry once the link is live.
+    if (!link_serial_db_ready()) {
+      Serial.println("[RUN] blocked: no successful DB configuration pull yet");
+      ui_modal_show("DB configuration not loaded",
+                    "The WT32 has not completed a database \nconfiguration pull since it booted.\n\nCheck the network/DB status on /info,\nthen start the experiment again.",
+                    "Close", nullptr);
+      return;
+    }
     g.experimentRunning = true;
     g.experimentStartMs = millis();
-    g.expNum++;
+    // The operator selects the experiment number. Starting no longer bumps it:
+    // the frozen run takes the configuration for the displayed id, and the
+    // /control warning covers reusing an id that already has readings.
   }
   link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
   Serial.printf("[FAKE->WT32] RUN %s\n", g.experimentRunning ? "ON" : "OFF");

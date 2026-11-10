@@ -57,6 +57,17 @@ int link_serial_get_db_latest() { return -2; }
 bool link_serial_time_ok() { return false; }
 int link_serial_get_db_bottles() { return -1; }
 int link_serial_get_push_drops() { return 0; }
+bool link_serial_db_ready() { return false; }
+int link_serial_get_db_active_exp() { return -1; }
+int link_serial_get_db_active_dur() { return -1; }
+int link_serial_get_db_active_src() { return 0; }
+int link_serial_get_db_pending_exp() { return -1; }
+int link_serial_get_db_pending_dur() { return -1; }
+int link_serial_get_db_cfg_max() { return -1; }
+int link_serial_get_db_queued() { return 0; }
+const char *link_serial_db_state() { return "none"; }
+uint32_t link_serial_get_db_read_age_ms() { return 0; }
+uint32_t link_serial_get_db_ack_age_ms() { return 0; }
 void link_serial_debug_print() {
   Serial.printf("[LINK] sim stub: creds_ready=%d result=%d run=%d exp=%d dur=%d\n",
                 s_credsReady ? 1 : 0, s_result, s_expRunning ? 1 : 0, s_expNum,

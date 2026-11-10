@@ -13,6 +13,10 @@ static lv_obj_t *s_tileFw = nullptr;
 static lv_obj_t *s_valFw = nullptr;
 static lv_obj_t *s_tileDb = nullptr;
 static lv_obj_t *s_valDb = nullptr;
+static lv_obj_t *s_tileCfg = nullptr;
+static lv_obj_t *s_valCfg = nullptr;
+static lv_obj_t *s_tileQueue = nullptr;
+static lv_obj_t *s_valQueue = nullptr;
 
 static lv_obj_t *s_gaugeStorage = nullptr;
 static lv_obj_t *s_ctrStorage = nullptr;
@@ -130,6 +134,47 @@ static void info_render() {
     }
   }
 
+  // Run configuration tile: the FROZEN snapshot while running (experiment,
+  // duration, source), otherwise whether a start is allowed yet. Pending edits
+  // on /control are not shown here until they are frozen by the next start.
+  if (s_valCfg != nullptr) {
+    const int aexp = link_serial_get_db_active_exp();
+    if (aexp < 0) {
+      const bool ready = link_serial_db_ready();
+      lv_label_set_text(s_valCfg, ready ? "ready" : "waiting");
+      lv_obj_set_style_text_color(
+          s_valCfg, lv_color_hex(ready ? UI_COL_OK : UI_COL_ALARM), LV_PART_MAIN);
+    } else {
+      char t[32];
+      snprintf(t, sizeof(t), "%d/%ldh/%s", aexp, (long)link_serial_get_db_active_dur(),
+               link_serial_get_db_active_src() == 1 ? "db" : "loc");
+      lv_label_set_text(s_valCfg, t);
+      lv_obj_set_style_text_color(s_valCfg, lv_color_hex(UI_COL_TEXT), LV_PART_MAIN);
+    }
+  }
+
+  // Queue tile: rows waiting on the WT32 plus the age of the last successful
+  // configuration read and acknowledged upload. "--" means never.
+  if (s_valQueue != nullptr) {
+    char rb[12];
+    char ab[12];
+    const uint32_t readAge = link_serial_get_db_read_age_ms();
+    const uint32_t ackAge = link_serial_get_db_ack_age_ms();
+    if (readAge == 0) {
+      snprintf(rb, sizeof(rb), "--");
+    } else {
+      snprintf(rb, sizeof(rb), "%lus", (unsigned long)(readAge / 1000));
+    }
+    if (ackAge == 0) {
+      snprintf(ab, sizeof(ab), "--");
+    } else {
+      snprintf(ab, sizeof(ab), "%lus", (unsigned long)(ackAge / 1000));
+    }
+    char t[40];
+    snprintf(t, sizeof(t), "%d\n%s/%s", link_serial_get_db_queued(), rb, ab);
+    lv_label_set_text(s_valQueue, t);
+  }
+
   // Storage gauge (unknown -> full).
   {
     char buf[16];
@@ -180,6 +225,8 @@ void screen_info_show(lv_obj_t *parent) {
   s_tileNet = mk_tile(cont, "Network", &s_valNet);
   s_tileFw = mk_tile(cont, "Firmware", &s_valFw);
   s_tileDb = mk_tile(cont, "DB experiment", &s_valDb);
+  s_tileCfg = mk_tile(cont, "Run config", &s_valCfg);
+  s_tileQueue = mk_tile(cont, "Queue: rows, read/ack", &s_valQueue);
 
   {
     lv_obj_t *card = mk_gauge(cont, "Storage", &s_ctrStorage, &s_gaugeStorage);

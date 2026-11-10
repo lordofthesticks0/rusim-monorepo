@@ -471,7 +471,11 @@ Nulls are excluded rather than treated as zero, and it returns `null` — render
 
 `src/csv.ts` produces RFC 4180 output.
 
-**Columns:** `bottle_id, timestamp, pH, Temp (°C), CO2 (ppm), CH4 (ppm), Pressure (kPa)`.
+**Columns:** `bottle_id, timestamp, pH, Temp (°C), CO2 (ppm), CH4 (ppm), Pressure (Pa)`.
+
+Pressure is stored and exported in pascals: `legacy/slave/new-slave.cpp`
+produces `press` as `sensorValue * PA_PER_UNIT`. The dashboard does not rescale
+it (the earlier `kPa` label was wrong).
 
 The CSV keeps the historical `bottle_id` header, but exports the user-facing chamber number (`bottle_id + 1`). The Supabase row remains unchanged.
 
@@ -670,7 +674,7 @@ Open items:
 | Temp | `temp` | `°C` | 2 |
 | CO2 | `co2` | `ppm` | 1 |
 | CH4 | `ch4` | `ppm` | 2 |
-| Pressure | `pressure` | `kPa` | 2 |
+| Pressure | `pressure` | `Pa` | 2 |
 
 `PARAMETER_NAMES` is the single source of truth. It drives the metric cards, the chart parameter picker, the statistics panel, the CSV columns, and `getParameterValue`'s switch.
 

@@ -8,6 +8,7 @@
 #include <cstdarg>
 #include <cstring>
 
+#include "db_contract.h"
 #include "supabase_ca.h"
 
 // network-master: production WT32-ETH01 firmware.
@@ -20,9 +21,13 @@
 //   Serial is therefore both the link and the log sink: every log line is
 //   emitted as "LOG <text>" and the display re-prints it on its own USB.
 // - Polls the legacy Mega slave on Serial1 (IO5 RX / IO17 TX, 9600 8N1) once
-//   per 30 s with "#1:PING*" and logs the four-bottle JSON reply as one
-//   "LOG [SENS]" line. Log only: the reply is not enqueued yet, so the push
-//   queue below stays dormant. See docs/llm-generated/migration-plan.md.
+//   per 30 s with "#1:PING*", logs the four-bottle JSON reply as one
+//   "LOG [SENS]" line, and enqueues the present bottles while an experiment
+//   run is active. See docs/llm-generated/migration-plan.md.
+// - Pulls devices/experiments/device_config from Supabase every 30 s and
+//   freezes a run configuration snapshot at each run start. Uploads go to the
+//   push_readings RPC only while a run is active. See
+//   docs/llm-generated/network-master-database-plan.md.
 // - Gets the captive portal username/password from the display instead of
 //   the serial console. Both ends declare their state every 5 s and push
 //   changes immediately; there is no master and no polling.
@@ -79,15 +84,89 @@ static const char* kCaptiveProbeUrl = "http://connectivitycheck.gstatic.com/gene
 static const char* kNtp1 = "pool.ntp.org";
 static const char* kNtp2 = "time.google.com";
 static bool ntpSynced = false;
-static String dbSession;
 static int dbLatest = -2;  // -2 unknown, -1 none yet, >=0 latest experiment_id
-static int dbBottleCount = -1;  // -1 unknown, else bottle_count from authenticate()
-// Owner contact from authenticate(), kept for logs/info only. Bounded
+static int dbBottleCount = -1;  // -1 unknown, else bottle_count from devices
+// Owner contact from the device/config pull, logs and /info only. Bounded
 // char arrays, never heap Strings: truncated at 63 chars + NUL.
 static char dbOwnerName[64] = {0};
 static char dbOwnerEmail[64] = {0};
 static uint32_t lastDbPollMs = 0;
 static const uint32_t kDbPollMs = 30000;
+
+// --- Database contract state (network-master-database-plan.md) -------------
+// All DB responses are bounded; nothing here grows with server data. The
+// session lives in RAM only and is compared against the queue's provisioning
+// identity before every upload.
+enum DbFault : uint8_t {
+  DB_FAULT_NONE = 0,
+  DB_FAULT_NET,       // timeout, TLS, 429 or 5xx; retry with backoff
+  DB_FAULT_AUTH,      // rejected/missing session, bad token
+  DB_FAULT_PAYLOAD,   // our body or a queued row was rejected (22023)
+  DB_FAULT_SCHEMA,    // function/schema/permission problem; do not loosen TLS or grants
+  DB_FAULT_CLOCK,     // NTP unsynced or an implausible timestamp
+  DB_FAULT_IDENTITY,  // queue was collected under a different device identity
+};
+
+static DbFault dbFault = DB_FAULT_NONE;
+static bool dbSessionValid = false;
+static char dbSession[65] = {0};  // 64 hex + NUL, never logged
+static int32_t dbSessionDevice = -1;
+static uint32_t dbSessionExpiryUnix = 0;  // from authenticate()'s expires_at
+// -1 = unbound; a successful authentication binds it to the returned
+// device_id (or to RUSIM_DEVICE_ID when provisioning pins one).
+static int32_t dbQueueDeviceId = RUSIM_DEVICE_ID > 0 ? RUSIM_DEVICE_ID : -1;
+static bool dbConfigReady = false;      // >=1 successful full pull since boot
+static uint32_t dbConfigReadOkMs = 0;   // millis of last successful pull, 0 = never
+static uint32_t dbUploadAckMs = 0;      // millis of last acknowledged upload, 0 = never
+static uint32_t dbBackoffMs = 0;        // upload backoff, capped
+static uint32_t dbNextPushMs = 0;       // millis gate for the next upload attempt
+static const size_t kDbBodyCap = 4096;  // one bounded DB response
+static const uint32_t kDbRenewMarginS = 300;   // renew 5 min before expiry
+static const uint32_t kDbRetryBaseMs = 2000;
+static const uint32_t kDbRetryMaxMs = 60000;
+static const uint32_t kDbMaxFutureSkewS = 600;  // mirrors the server backstop
+
+// Cooperative DB pass state: at most one HTTPS operation per loop iteration.
+enum DbPass : uint8_t {
+  DB_PASS_IDLE = 0,
+  DB_PASS_AUTH,
+  DB_PASS_DEVICES,
+  DB_PASS_CONFIG,
+  DB_PASS_EXPERIMENTS,
+  DB_PASS_LATEST,
+  DB_PASS_PUSH,
+  DB_PASS_REPORT,
+};
+static DbPass dbPass = DB_PASS_IDLE;
+static uint8_t dbPassAuthRetried = 0;      // one reauth attempt per pass
+static uint8_t dbPushRoundsThisPass = 0;   // kPushFlushRounds budget
+
+// Run snapshot. Frozen when a run starts; DB updates during the run only
+// change the pending configuration, never these values.
+static bool runActive = false;
+static int32_t runExperimentId = -1;
+static int32_t runDurationH = -1;
+static int32_t runSampleIntervalS = -1;
+static bool runConfigFromDb = false;
+static uint32_t runStartUnix = 0;
+static bool runStartRefused = false;
+
+// Display-selected (pending) configuration: the operator's experiment number
+// and duration. Applied at the NEXT run start, never to a run in progress.
+static int32_t dbPendingExp = -1;
+
+// Bounded experiment history pulled from device_data.experiments, newest
+// first. 16 rows keeps the response inside kDbBodyCap; the plan calls for a
+// documented local history limit rather than an unlimited allocation.
+static const size_t kDbExpHistory = 16;
+struct DbExperiment {
+  int32_t id;
+  int32_t durationH;        // -1 when the column is null
+  int32_t sampleIntervalS;  // -1 when the column is null
+  char setpoints[96];       // raw JSON text, logged only (never actuated)
+};
+static DbExperiment dbExperiments[kDbExpHistory];
+static size_t dbExperimentCount = 0;
 
 static const size_t kMaxBody = 4096;
 // Push body is sized separately from the portal's kMaxBody: one round of up
@@ -98,8 +177,16 @@ static const size_t kPushBodyCap = 6144;
 // ~40 bytes/row (~48 KB). Well under the 100-150 KB ceiling; a dropped row
 // is better than an overrun, and drops are counted, not silent.
 static const size_t kPushQueueRows = 1200;
-// Rounds flushed per syncDbLatest cycle: bounds worst-case blocking (each
-// POST has its own 10 s timeout) while draining gradually after an outage.
+// Diagnostic counters. They are separate from queue overflow because a skipped
+// idle round or a clock-rejected frame is not a memory loss.
+static uint32_t s_pushIdleRounds = 0;    // rounds collected while not running
+static uint32_t s_pushClockRejects = 0;  // rounds with an untrustworthy timestamp
+static uint32_t s_pushDupRejects = 0;    // timestamp reuse after a clock change
+static uint32_t s_pushBadValues = 0;     // non-finite fields converted to null
+static uint32_t s_pushAckRounds = 0;     // rounds acknowledged by the server
+static uint32_t s_lastQueuedUnix = 0;
+// Upload rounds per DB pass: bounds how much one pass spends on POSTs (each
+// has its own 10 s timeout) while still draining faster than collection.
 static const int kPushFlushRounds = 2;
 // Sample-time floor, mirroring the server backstop (2025-01-01). Rows older
 // than this are rejected at enqueue so a 1970 clock can never enter the queue.
@@ -253,6 +340,22 @@ static void link_emit_net() {
   }
 }
 
+static const char* dbFaultName(DbFault f) {
+  switch (f) {
+    case DB_FAULT_NONE: return "none";
+    case DB_FAULT_NET: return "net";
+    case DB_FAULT_AUTH: return "auth";
+    case DB_FAULT_PAYLOAD: return "payload";
+    case DB_FAULT_SCHEMA: return "schema";
+    case DB_FAULT_CLOCK: return "clock";
+    case DB_FAULT_IDENTITY: return "identity";
+  }
+  return "unknown";
+}
+
+static const DbExperiment* dbFindExperiment(int32_t id);
+static void dbApplyRunState();
+
 static void link_emit_db() {
   char latest[16];
   if (dbLatest >= 0) {
@@ -268,8 +371,56 @@ static void link_emit_db() {
   } else {
     snprintf(bottles, sizeof(bottles), "-");
   }
-  Serial.printf("DB latest=%s time=%d bottles=%s drops=%u\n", latest,
-                ntpSynced ? 1 : 0, bottles, (unsigned)s_pushDrops);
+  // Age fields are stamp-based, never refreshed by re-sending cached values.
+  char reads[16];
+  if (dbConfigReadOkMs != 0) {
+    snprintf(reads, sizeof(reads), "%u", (unsigned)(millis() - dbConfigReadOkMs));
+  } else {
+    snprintf(reads, sizeof(reads), "-");
+  }
+  char ack[16];
+  if (dbUploadAckMs != 0) {
+    snprintf(ack, sizeof(ack), "%u", (unsigned)(millis() - dbUploadAckMs));
+  } else {
+    snprintf(ack, sizeof(ack), "-");
+  }
+  char aexp[16];
+  char adur[16];
+  const char* asrc = "-";
+  if (runActive) {
+    snprintf(aexp, sizeof(aexp), "%ld", (long)runExperimentId);
+    asrc = runConfigFromDb ? "db" : "local";
+    if (runDurationH > 0) {
+      snprintf(adur, sizeof(adur), "%ld", (long)runDurationH);
+    } else {
+      snprintf(adur, sizeof(adur), "-");
+    }
+  } else {
+    snprintf(aexp, sizeof(aexp), "-");
+    snprintf(adur, sizeof(adur), "-");
+  }
+  // Per-sensor limitation: the Mega frame carries no per-sensor timestamp, so
+  // these rows are stamped with WT32 collection time, which is a proxy.
+  char pdur[16];
+  const DbExperiment* pending = dbFindExperiment(dbPendingExp);
+  if (pending != nullptr && pending->durationH > 0) {
+    snprintf(pdur, sizeof(pdur), "%ld", (long)pending->durationH);
+  } else {
+    snprintf(pdur, sizeof(pdur), "-");
+  }
+  // Highest CONFIGURED experiment, which may be higher than the highest one
+  // with readings. The display uses it for its "next id" hint so a reserved
+  // configuration is not silently reused.
+  int32_t cfgMax = -1;
+  for (size_t i = 0; i < dbExperimentCount; i++) {
+    if (dbExperiments[i].id > cfgMax) cfgMax = dbExperiments[i].id;
+  }
+  Serial.printf(
+      "DB latest=%s time=%d bottles=%s drops=%u ready=%d aexp=%s adur=%s "
+      "asrc=%s pexp=%ld pdur=%s cfgmax=%ld queued=%u reads=%s ack=%s state=%s\n",
+      latest, ntpSynced ? 1 : 0, bottles, (unsigned)s_pushDrops,
+      dbConfigReady ? 1 : 0, aexp, adur, asrc, (long)dbPendingExp, pdur,
+      (long)cfgMax, (unsigned)s_pushCount, reads, ack, dbFaultName(dbFault));
 }
 
 // Full current truth, sent once per heartbeat. RESULT is deliberately not
@@ -374,6 +525,7 @@ static void handle_experiment(const char* args) {
   expRunning = (run != 0);
   expNum = (int)n;
   durationH = (int)d;
+  dbPendingExp = expNum;  // selects the DB row shown as `pdur` on the DB line
   if (durationH != lastDurH || expNum != lastExpNum ||
       (int)expRunning != lastExpRunning) {
     logf("[LINK] exp state: run=%d exp=%d dur=%dh", expRunning ? 1 : 0, expNum,
@@ -382,6 +534,10 @@ static void handle_experiment(const char* args) {
     lastExpNum = expNum;
     lastExpRunning = expRunning ? 1 : 0;
   }
+  // A false -> true edge freezes the run snapshot; stopping pauses uploads but
+  // keeps queued active-run rows. Changes during a run only affect the
+  // pending configuration for the next run.
+  dbApplyRunState();
 }
 
 // New pair -> stage LOGIN. Identical in-flight pair -> ignore (the display
@@ -444,12 +600,21 @@ static void link_log_dump() {
   char ip[24];
   snprintf(ip, sizeof(ip), "%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
   logf("[DUMP] stage=%d eth=%d ip=%s exp=%d run=%d dur=%d dbLatest=%d ntp=%d "
-       "bottles=%d queued=%u drops=%u verdict=%d sensOk=%u sensFail=%u sensAge=%d",
+       "bottles=%d queued=%u drops=%u verdict=%d sensOk=%u sensFail=%u sensAge=%d "
+       "ready=%d runActive=%d aexp=%ld adur=%ld asrc=%s ack=%ld reads=%ld "
+       "idle=%u clock=%u dup=%u bad=%u acks=%u state=%s",
        (int)stage, eth_connected ? 1 : 0, ip, expNum, expRunning ? 1 : 0, durationH,
        dbLatest, ntpSynced ? 1 : 0, dbBottleCount, (unsigned)s_pushCount,
        (unsigned)s_pushDrops, haveVerdict ? (lastVerdict ? 1 : 2) : 0,
        (unsigned)sensRoundsOk, (unsigned)sensRoundsFail,
-       sensReplySeen ? (int)(millis() - sensLastReplyMs) : -1);
+       sensReplySeen ? (int)(millis() - sensLastReplyMs) : -1,
+       dbConfigReady ? 1 : 0, runActive ? 1 : 0, (long)runExperimentId,
+       (long)runDurationH, runActive ? (runConfigFromDb ? "db" : "local") : "-",
+       dbUploadAckMs != 0 ? (long)(millis() - dbUploadAckMs) : -1L,
+       dbConfigReadOkMs != 0 ? (long)(millis() - dbConfigReadOkMs) : -1L,
+       (unsigned)s_pushIdleRounds, (unsigned)s_pushClockRejects,
+       (unsigned)s_pushDupRejects, (unsigned)s_pushBadValues,
+       (unsigned)s_pushAckRounds, dbFaultName(dbFault));
 }
 
 static void handle_line(char* line) {
@@ -923,117 +1088,68 @@ static void ensureNtpSync() {
 // the hole.
 static void sbApplyTls(WiFiClientSecure& client) { client.setCACert(kSupabaseCaPem); }
 
-// Parses one integer field out of a flat JSON object reply. Bounded: no
-// allocation, works on the caller's NUL-terminated buffer. Returns false
-// when the key is absent or not a number; the caller keeps its default.
-static bool sbParseIntField(const char* resp, const char* key, int& out) {
-  if (resp == nullptr || key == nullptr) return false;
-  char needle[48];
-  snprintf(needle, sizeof(needle), "\"%s\":", key);
-  const char* at = strstr(resp, needle);
-  if (at == nullptr) return false;
-  at += strlen(needle);
-  while (*at == ' ' || *at == '\t') at++;
-  if ((*at < '0' || *at > '9') && *at != '-') return false;
-  out = atoi(at);
-  return true;
-}
-
-// Parses one string-or-null field. Absent key -> false (caller keeps its
-// default); explicit null -> true with empty output; otherwise a bounded,
-// NUL-terminated copy truncated at cap - 1.
-static bool sbParseStrField(const char* resp, const char* key, char* out, size_t cap) {
-  if (resp == nullptr || key == nullptr || out == nullptr || cap == 0) return false;
-  char needle[48];
-  snprintf(needle, sizeof(needle), "\"%s\":", key);
-  const char* at = strstr(resp, needle);
-  if (at == nullptr) return false;
-  at += strlen(needle);
-  while (*at == ' ' || *at == '\t') at++;
-  if (strncmp(at, "null", 4) == 0) {
-    out[0] = '\0';
-    return true;
-  }
-  if (*at != '"') return false;
-  at++;
-  size_t pos = 0;
-  while (*at != '\0' && *at != '"' && pos + 1 < cap) {
-    if (*at == '\\' && *(at + 1) != '\0') at++;  // keep the escaped char raw
-    out[pos++] = *at++;
-  }
-  out[pos] = '\0';
-  return true;
-}
-
-// Keeps bottle_count + owner contact from authenticate() instead of
-// discarding them. bottle_count feeds the DB line; owner fields are log only.
-static void sbParseAuthMeta(const String& resp) {
-  const char* c = resp.c_str();
-  int bottles = -1;
-  if (sbParseIntField(c, "bottle_count", bottles) && bottles > 0 && bottles <= 99) {
-    dbBottleCount = bottles;
-  }
-  sbParseStrField(c, "owner_name", dbOwnerName, sizeof(dbOwnerName));
-  sbParseStrField(c, "owner_email", dbOwnerEmail, sizeof(dbOwnerEmail));
-}
-
 // --- Sample push queue: fixed ring, oldest-drop (memory-safety skill:
 // bounded buffer, no heap in the hot path) ---
 //
 // One row per bottle that reported. An absent bottle (disconnected) is
 // simply not enqueued, which is distinct from a present-but-null sensor
-// (nullMask bit set). Rows carry sample time, never flush time.
-struct PushRow {
-  uint8_t bottleId;
-  int32_t experimentId;  // <0 = omit, server applies the active experiment
-  int64_t sampleUnix;    // seconds since epoch at sampling
-  float ph;
-  float pressure;
-  float tempC;
-  float co2;
-  float ch4;
-  uint8_t nullMask;  // bit0 ph, 1 pressure, 2 temp, 3 co2, 4 ch4
-};
-
-// One bottle as handed over by the future sensor poller (dormant until the
-// deferred sensor chain lands; index in the array is the bottle id).
-struct BottleReading {
-  float ph;
-  float pressure;
-  float tempC;
-  float co2;
-  float ch4;
-  uint8_t nullMask;
-};
+// (nullMask bit set). Rows carry sample time, never flush time. The structs
+// and the JSON envelope live in db_contract.h so the native contract test
+// compiles exactly the code that ships.
+using dbc::BottleSample;
+using dbc::PushRow;
+typedef BottleSample BottleReading;
 
 static PushRow s_pushQueue[kPushQueueRows];
 static size_t s_pushHead = 0;   // oldest row
 static size_t s_pushTail = 0;   // next write slot
 static char s_pushBody[kPushBodyCap];
 
-// Queues one sample round (up to 24 bottles). Rejects while NTP is unsynced
-// and any sample older than kMinSampleUnix, so no 1970 row can ever enter.
-// Full queue drops the oldest row, never the newest, and counts it.
+// Queues one sample round (up to 24 bottles). `readings` holds only bottles
+// that were present in the frame, with explicit 0-based DB ids, so a sparse
+// round (bottles 1 and 3 only) yields ids 0 and 2 and never renumbers. Rejects
+// while NTP is unsynced, while no run is active, and any timestamp that is not
+// plausible UTC for this moment. Full queue drops the oldest row, never the
+// newest, and counts it.
 static bool pushEnqueueRound(time_t sampleUnix, int experimentId,
-                             const BottleReading* readings, size_t n) {
+                             BottleSample* readings, size_t n) {
   if (!ntpSynced) {
+    s_pushClockRejects++;
     logf("[PUSH] refused: NTP unsynced (time=0)");
     return false;
   }
+  if (!runActive) {
+    s_pushIdleRounds++;
+    return false;
+  }
   if (readings == nullptr || n == 0 || n > 24) return false;
-  if (sampleUnix < (time_t)kMinSampleUnix) {
-    logf("[PUSH] refused: sample time predates 2025-01-01");
+  time_t now = time(nullptr);
+  if (sampleUnix < (time_t)kMinSampleUnix ||
+      sampleUnix > now + (time_t)kDbMaxFutureSkewS) {
+    s_pushClockRejects++;
+    logf("[PUSH] refused: sample time %ld outside 2025-01-01..now+10m",
+         (long)sampleUnix);
+    return false;
+  }
+  // Second-resolution primary keys mean two rounds stamped the same second
+  // would collide server-side, and ON CONFLICT DO NOTHING would hide it. The
+  // clock can step backwards after an NTP correction, so detect the reuse
+  // locally and keep the queue immutable instead of guessing.
+  if (s_lastQueuedUnix != 0 && (uint32_t)sampleUnix <= s_lastQueuedUnix) {
+    s_pushDupRejects++;
+    logf("[PUSH] refused: timestamp reuse (%ld <= %lu)", (long)sampleUnix,
+         (unsigned long)s_lastQueuedUnix);
     return false;
   }
   for (size_t i = 0; i < n; i++) {
-    if (i > 255) break;  // bottleId is uint8_t; rounds never exceed 24
+    s_pushBadValues += dbc::sanitizeNonFinite(readings[i]);
     if (s_pushCount == kPushQueueRows) {
       s_pushHead = (s_pushHead + 1) % kPushQueueRows;
       s_pushCount--;
       if (s_pushDrops < 0xFFFFFFFFu) s_pushDrops++;
     }
     PushRow& r = s_pushQueue[s_pushTail];
-    r.bottleId = (uint8_t)i;
+    r.bottleId = readings[i].bottleId;
     r.experimentId = (int32_t)experimentId;
     r.sampleUnix = (int64_t)sampleUnix;
     r.ph = readings[i].ph;
@@ -1045,6 +1161,7 @@ static bool pushEnqueueRound(time_t sampleUnix, int experimentId,
     s_pushTail = (s_pushTail + 1) % kPushQueueRows;
     s_pushCount++;
   }
+  s_lastQueuedUnix = (uint32_t)sampleUnix;
   return true;
 }
 
@@ -1053,8 +1170,9 @@ static bool pushEnqueueRound(time_t sampleUnix, int experimentId,
 // Direct TTL on Serial1: Mega D18 TX -> IO5 RX, Mega D19 RX <- IO17 TX,
 // 9600 8N1, common GND. Request "#1:PING*" (8 bytes, no checksum); the slave
 // answers on the port the request arrived on with one JSON line of four
-// bottle objects. Logging only: nothing is enqueued, so the push queue above
-// stays dormant until the deferred step in migration-plan.md §6.
+// bottle objects. Each accepted frame is logged and, while a run is active,
+// copied into the push queue with explicit bottle ids. The slave frame has no
+// measurement timestamp, so the WT32 collection time is a proxy.
 
 static const uint8_t kSensRequest[] = {'#', '1', ':', 'P', 'I', 'N', 'G', '*'};
 
@@ -1117,6 +1235,9 @@ static void sens_report_round() {
   bool seen[kSensBottles] = {false, false, false, false};
   for (size_t i = 0; i < kSensBottles; i++) {
     readings[i] = BottleReading();
+    // Mega bottle 1..4 -> database bottle_id 0..3. The id travels with the
+    // sample, so a missing bottle leaves a hole instead of renumbering.
+    readings[i].bottleId = (uint8_t)i;
     readings[i].nullMask = kSensNullAll;
   }
 
@@ -1154,6 +1275,24 @@ static void sens_report_round() {
   if (present == 0) {
     sens_log_failure("reply has no bottle objects");
     return;
+  }
+
+  // Queue the round only for an accepted frame collected during an active run.
+  // Idle rounds stay log-only: no experiment-0 samples and no uploads. A
+  // requested run that could not start (DB configuration never pulled) is
+  // counted but not queued, so nothing is mislabelled later.
+  if (runActive) {
+    BottleSample batch[kSensBottles];
+    size_t nb = 0;
+    for (size_t i = 0; i < kSensBottles; i++) {
+      if (seen[i]) batch[nb++] = readings[i];
+    }
+    (void)pushEnqueueRound(time(nullptr), runExperimentId, batch, nb);
+  } else if (expRunning) {
+    runStartRefused = true;
+    s_pushIdleRounds++;
+  } else {
+    s_pushIdleRounds++;
   }
 
   // Worst case is ~73 characters per bottle at %.4g, so 384 holds four
@@ -1235,100 +1374,509 @@ static void sens_poll() {
   sens_report_round();
 }
 
-// --- Supabase real-data fetch (backlog #1) via device token (devices.token_hash) ---
-static bool sbAuthenticate() {
-  if (String(SUPABASE_URL).length() == 0 || String(SUPABASE_ANON_KEY).length() == 0 ||
-      String(DEVICE_TOKEN).length() == 0) {
-    logf("[DB] Supabase not configured (SUPABASE_URL/ANON_KEY/DEVICE_TOKEN empty)");
-    return false;
+// --- Supabase device session, configuration pull and upload ----------------
+//
+// HTTP contract (network-master-database-plan.md §3):
+//   POST /rest/v1/rpc/authenticate  {"p_token":"..."}
+//   GET  /rest/v1/devices?select=device_id,bottle_count,owner_name,owner_email
+//   GET  /rest/v1/device_config?select=bottle_count,owner_name,owner_email,updated_at
+//   GET  /rest/v1/experiments?select=experiment_id,duration_h,sample_interval_s,
+//        setpoints&order=experiment_id.desc&limit=16
+//   GET  /rest/v1/readings?select=experiment_id&order=experiment_id.desc&limit=1
+//   POST /rest/v1/rpc/push_readings {"p_readings":[...]}
+//
+// Every request names the device_data schema explicitly, because a hosted
+// project whose default profiles include public would resolve the wrong
+// namespace. `x-device-session` is a custom device token, not a Supabase Auth
+// JWT, so it never goes in Authorization. No service-role key or database
+// password exists on this board.
+
+static const char* kDbSchema = "device_data";
+static char s_dbUrl[320];
+static char s_dbBody[kDbBodyCap];
+
+static bool sbConfigured() {
+  return String(SUPABASE_URL).length() > 0 && String(SUPABASE_ANON_KEY).length() > 0 &&
+         String(DEVICE_TOKEN).length() > 0;
+}
+
+static bool dbSessionExpiring() {
+  if (!dbSessionValid) return true;
+  if (!ntpSynced) return true;  // cannot reason about expiry without UTC
+  uint32_t now = (uint32_t)time(nullptr);
+  return now + kDbRenewMarginS >= dbSessionExpiryUnix;
+}
+
+static void dbSessionInvalidate(const char* why) {
+  if (dbSessionValid) logf("[DB] session invalidated (%s)", why);
+  memset(dbSession, 0, sizeof(dbSession));
+  dbSessionValid = false;
+  dbSessionDevice = -1;
+  dbSessionExpiryUnix = 0;
+}
+
+// Bounded response reader. `truncated` means the server body was larger than
+// the buffer: callers must treat that as a payload fault, not parse a prefix.
+static size_t readBodyCapped(HTTPClient& http, char* out, size_t cap, bool& truncated) {
+  truncated = false;
+  if (out == nullptr || cap < 2) {
+    truncated = true;
+    return 0;
   }
-  String url = String(SUPABASE_URL) + "/rest/v1/rpc/authenticate";
-  String body = String("{\"p_token\":\"") + DEVICE_TOKEN + "\"}";
+  WiFiClient* stream = http.getStreamPtr();
+  if (stream == nullptr) {
+    out[0] = '\0';
+    return 0;
+  }
+  // Use Content-Length when the server sends one, so a short body never waits
+  // out the socket timeout. Chunked replies fall back to connection state.
+  const int contentLen = http.getSize();
+  const bool haveLen = contentLen >= 0;
+  size_t want = haveLen ? (size_t)contentLen : (cap - 1);
+  if (want > cap - 1) {
+    truncated = true;
+    want = cap - 1;
+  }
+  size_t total = 0;
+  uint8_t buf[128];
+  while (total < want) {
+    if (!haveLen && !http.connected()) break;
+    size_t room = want - total;
+    if (room > sizeof(buf)) room = sizeof(buf);
+    int n = stream->readBytes(reinterpret_cast<char*>(buf), room);
+    if (n <= 0) break;
+    memcpy(out + total, buf, (size_t)n);
+    total += (size_t)n;
+  }
+  out[total] = '\0';
+  if (haveLen && (size_t)contentLen > total) truncated = true;
+  return total;
+}
+
+enum DbMethod : uint8_t { DB_GET, DB_POST };
+struct DbReply {
+  int code;
+  size_t len;
+  bool truncated;
+};
+
+// Performs one request and keeps the bounded body in s_dbBody. No tokens or
+// headers are logged. Retry-After is returned in seconds (0 when absent).
+static DbReply dbRequest(DbMethod method, const char* pathAndQuery, const char* jsonBody,
+                         const char* sessionToken, uint16_t& retryAfterS) {
+  DbReply rep = {0, 0, false};
+  retryAfterS = 0;
+  int w = snprintf(s_dbUrl, sizeof(s_dbUrl), "%s%s", SUPABASE_URL, pathAndQuery);
+  if (w <= 0 || (size_t)w >= sizeof(s_dbUrl)) {
+    rep.code = -100;  // URL will not fit: configuration fault, not a network one
+    return rep;
+  }
   WiFiClientSecure client;
   sbApplyTls(client);
   HTTPClient http;
-  http.begin(client, url);
+  http.begin(client, s_dbUrl);
   http.setTimeout(10000);
   http.addHeader("apikey", SUPABASE_ANON_KEY);
-  http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
-  int code = http.POST(body);
-  bool ok = false;
-  if (code == 200) {
-    String resp = http.getString();
-    int at = resp.indexOf("session_token");
-    if (at >= 0) {
-      // Value may be quoted; find the 64-hex run directly.
-      int hexStart = -1;
-      for (int i = at; i + 64 <= (int)resp.length(); i++) {
-        bool hex = true;
-        for (int j = 0; j < 64; j++) {
-          char c = resp[i + j];
-          if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) { hex = false; break; }
-        }
-        if (hex) { hexStart = i; break; }
-      }
-      if (hexStart >= 0) {
-        dbSession = resp.substring(hexStart, hexStart + 64);
-        sbParseAuthMeta(resp);
-        logf("[DB] authenticated, session cached (RAM only), bottles=%d owner='%s'",
-             dbBottleCount, dbOwnerName);
-        ok = true;
-      }
-    }
-    if (!ok) logf("[DB] authenticate: no session_token in reply (wrong token?)");
+  if (method == DB_GET) {
+    http.addHeader("Accept-Profile", kDbSchema);
   } else {
-    logf("[DB] authenticate HTTP %d", code);
+    http.addHeader("Content-Profile", kDbSchema);
+    http.addHeader("Content-Type", "application/json");
+  }
+  if (sessionToken != nullptr && sessionToken[0] != '\0') {
+    http.addHeader("x-device-session", sessionToken);  // never logged
+  }
+  const char* headerKeys[] = {"Retry-After"};
+  http.collectHeaders(headerKeys, 1);
+  rep.code = (method == DB_GET) ? http.GET()
+                                : http.POST((uint8_t*)jsonBody, strlen(jsonBody));
+  if (rep.code > 0) {
+    rep.len = readBodyCapped(http, s_dbBody, sizeof(s_dbBody), rep.truncated);
+    if (http.hasHeader("Retry-After")) {
+      long v = strtol(http.header("Retry-After").c_str(), nullptr, 10);
+      if (v > 0 && v <= 3600) retryAfterS = (uint16_t)v;
+    }
   }
   http.end();
-  return ok;
+  return rep;
 }
 
-static int sbParseLatestExp(const String& resp) {
-  int at = resp.indexOf("experiment_id");
-  if (at < 0) return -1;  // empty array = no experiments yet
-  int colon = resp.indexOf(':', at);
-  if (colon < 0) return -1;
-  return resp.substring(colon + 1).toInt();
+// Maps an HTTP result and PostgREST error body to one fault category. The
+// classification decides whether to retry, reauthenticate or stop hot-looping.
+static DbFault dbClassify(const DbReply& rep, char* sqlstate, size_t sqlstateCap) {
+  sqlstate[0] = '\0';
+  if (rep.code < 0) return DB_FAULT_NET;
+  if (rep.len > 0) dbc::parseErrorCode(s_dbBody, rep.len, sqlstate, sqlstateCap);
+  if (rep.code == 401 || rep.code == 403) return DB_FAULT_AUTH;
+  if (rep.code == 429 || rep.code >= 500) return DB_FAULT_NET;
+  if (strcmp(sqlstate, "28000") == 0) return DB_FAULT_AUTH;
+  if (strcmp(sqlstate, "42501") == 0 || strncmp(sqlstate, "PGRST", 5) == 0) {
+    return DB_FAULT_SCHEMA;
+  }
+  if (rep.code >= 400) return DB_FAULT_PAYLOAD;
+  return DB_FAULT_NONE;
 }
 
-// Returns latest experiment_id, -1 when none, -2 on failure.
-static int sbFetchLatestExp() {
-  if (dbSession.length() == 0 && !sbAuthenticate()) return -2;
-  String url = String(SUPABASE_URL) +
-               "/rest/v1/readings?select=experiment_id&order=experiment_id.desc&limit=1";
-  for (int attempt = 0; attempt < 2; attempt++) {
-    WiFiClientSecure client;
-    sbApplyTls(client);
-    HTTPClient http;
-    http.begin(client, url);
-    http.setTimeout(10000);
-    http.addHeader("apikey", SUPABASE_ANON_KEY);
-    http.addHeader("x-device-session", dbSession);
-    http.addHeader("Accept", "application/json");
-    int code = http.GET();
-    if (code == 200) {
-      String resp = http.getString();
-      http.end();
-      int latest = sbParseLatestExp(resp);
-      logf("[DB] latest experiment_id=%d (raw %d chars)", latest, resp.length());
-      return latest;
+static bool dbArrayIsEmpty(const char* body, size_t len) {
+  const char* end = body + len;
+  const char* p = dbc::skipWs(body, end);
+  if (p >= end || *p != '[') return false;
+  ++p;
+  p = dbc::skipWs(p, end);
+  return p < end && *p == ']';
+}
+
+// Copies a JSON string field into a fixed buffer. Absent key keeps the
+// caller's default; an explicit null yields "".
+static bool dbStringField(const char* ob, const char* oe, const char* key, char* out,
+                          size_t cap) {
+  const char* vb = nullptr;
+  const char* ve = nullptr;
+  if (!dbc::findField(ob, oe, key, vb, ve)) return false;
+  const char* p = dbc::skipWs(vb, ve);
+  if ((size_t)(ve - p) >= 4 && strncmp(p, "null", 4) == 0) {
+    if (cap > 0) out[0] = '\0';
+    return true;
+  }
+  return dbc::parseString(vb, ve, out, cap);
+}
+
+static bool dbIntField(const char* ob, const char* oe, const char* key, int32_t& out) {
+  const char* vb = nullptr;
+  const char* ve = nullptr;
+  if (!dbc::findField(ob, oe, key, vb, ve)) return false;
+  const char* p = dbc::skipWs(vb, ve);
+  if ((size_t)(ve - p) >= 4 && strncmp(p, "null", 4) == 0) return false;
+  return dbc::parseInt(vb, ve, out);
+}
+
+static bool sbAuthenticate() {
+  if (!sbConfigured()) {
+    logf("[DB] Supabase not configured (SUPABASE_URL/ANON_KEY/DEVICE_TOKEN empty)");
+    dbFault = DB_FAULT_AUTH;
+    return false;
+  }
+  if (!ntpSynced) {
+    dbFault = DB_FAULT_CLOCK;
+    logf("[DB] authenticate deferred: clock unsynced");
+    return false;
+  }
+
+  // {"p_token":"<escaped>"}: the token is provisioning data, never logged.
+  static char body[300];
+  size_t o = (size_t)snprintf(body, sizeof(body), "{\"p_token\":\"");
+  for (const char* p = DEVICE_TOKEN; *p != '\0'; ++p) {
+    if (o + 8 >= sizeof(body)) {
+      logf("[DB] device token too long for the request buffer");
+      dbFault = DB_FAULT_AUTH;
+      return false;
     }
-    logf("[DB] readings HTTP %d (attempt %d)", code, attempt);
-    http.end();
-    if (code == 401 || code == 403) {
-      dbSession = "";  // session expired, re-login once
-      if (!sbAuthenticate()) return -2;
-    } else {
-      return -2;
+    if (*p == '"' || *p == '\\') body[o++] = '\\';
+    body[o++] = *p;
+  }
+  if (o + 4 >= sizeof(body)) {
+    dbFault = DB_FAULT_AUTH;
+    return false;
+  }
+  body[o++] = '"';
+  body[o++] = '}';
+  body[o] = '\0';
+
+  uint16_t retryAfter = 0;
+  DbReply rep = dbRequest(DB_POST, "/rest/v1/rpc/authenticate", body, nullptr, retryAfter);
+  char sqlstate[8];
+  DbFault fault = dbClassify(rep, sqlstate, sizeof(sqlstate));
+  if (rep.code != 200) {
+    dbFault = fault;
+    logf("[DB] authenticate HTTP %d%s%s (retry in %us)", rep.code,
+         sqlstate[0] != '\0' ? " " : "", sqlstate, (unsigned)retryAfter);
+    return false;
+  }
+  if (rep.truncated) {
+    dbFault = DB_FAULT_PAYLOAD;
+    logf("[DB] authenticate reply exceeds %u bytes", (unsigned)sizeof(s_dbBody));
+    return false;
+  }
+
+  // The response is a one-row array: {"session_token":...,"device_id":...,
+  // "bottle_count":...,"owner_name":...,"owner_email":...,"expires_at":...}
+  const char* ob = nullptr;
+  const char* oe = nullptr;
+  size_t cursor = 0;
+  if (!dbc::nextObject(s_dbBody, rep.len, cursor, ob, oe)) {
+    dbFault = DB_FAULT_PAYLOAD;
+    logf("[DB] authenticate: reply is not a one-row array (wrong token?)");
+    return false;
+  }
+  char token[80];
+  if (!dbStringField(ob, oe, "session_token", token, sizeof(token))) {
+    dbFault = DB_FAULT_PAYLOAD;
+    logf("[DB] authenticate: no session_token in reply");
+    return false;
+  }
+  size_t tokenLen = strlen(token);
+  bool tokenHex = tokenLen >= 32 && tokenLen <= 64;
+  for (size_t i = 0; tokenHex && i < tokenLen; ++i) {
+    char c = token[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+      tokenHex = false;
     }
   }
-  return -2;
+  if (!tokenHex) {
+    dbFault = DB_FAULT_PAYLOAD;
+    logf("[DB] authenticate: session_token is not a hex token");
+    return false;
+  }
+
+  int32_t dev = -1;
+  int32_t bottles = -1;
+  if (!dbIntField(ob, oe, "device_id", dev) || dev < 0) {
+    dbFault = DB_FAULT_PAYLOAD;
+    logf("[DB] authenticate: missing or invalid device_id");
+    return false;
+  }
+  if (!dbIntField(ob, oe, "bottle_count", bottles) || bottles < 1 || bottles > 99) {
+    dbFault = DB_FAULT_PAYLOAD;
+    logf("[DB] authenticate: missing or invalid bottle_count");
+    return false;
+  }
+  char expiresRaw[48];
+  uint32_t expiresUnix = 0;
+  if (!dbStringField(ob, oe, "expires_at", expiresRaw, sizeof(expiresRaw)) ||
+      !dbc::parseIsoUtc(expiresRaw, expiresUnix)) {
+    dbFault = DB_FAULT_CLOCK;
+    logf("[DB] authenticate: unparseable expires_at; refusing the session");
+    return false;
+  }
+  uint32_t now = (uint32_t)time(nullptr);
+  if (expiresUnix <= now + 60) {
+    dbFault = DB_FAULT_CLOCK;
+    logf("[DB] authenticate: session expiry is not in the future (clock?)");
+    return false;
+  }
+
+  strncpy(dbSession, token, sizeof(dbSession) - 1);
+  dbSession[sizeof(dbSession) - 1] = '\0';
+  dbSessionValid = true;
+  dbSessionDevice = dev;
+  dbSessionExpiryUnix = expiresUnix;
+  dbBottleCount = (int)bottles;
+  (void)dbStringField(ob, oe, "owner_name", dbOwnerName, sizeof(dbOwnerName));
+  (void)dbStringField(ob, oe, "owner_email", dbOwnerEmail, sizeof(dbOwnerEmail));
+
+  // The queue belongs to the provisioning identity. A different device must
+  // never receive rows collected before this authentication.
+  if (dbQueueDeviceId < 0) {
+    dbQueueDeviceId = dev;
+  } else if (dbQueueDeviceId != dev) {
+    dbFault = DB_FAULT_IDENTITY;
+    logf("[DB] identity mismatch: queue=%ld authenticated=%ld, uploads blocked",
+         (long)dbQueueDeviceId, (long)dev);
+    return true;  // reads stay available; uploads are refused below
+  }
+  if (dbFault == DB_FAULT_IDENTITY) dbFault = DB_FAULT_NONE;
+  logf("[DB] authenticated device=%ld bottles=%d expires_in=%us owner='%s'",
+       (long)dev, (int)bottles, (unsigned)(expiresUnix - now), dbOwnerName);
+  return true;
 }
 
-// Formats one queued round (all rows sharing the head's sampleUnix, up to
-// 24) as a JSON array in s_pushBody. Returns the row count, or 0 when the
-// queue is empty or the body would overflow (which sizes kPushBodyCap).
+enum DbFetch : uint8_t { DB_FETCH_OK, DB_FETCH_AUTH, DB_FETCH_FAIL, DB_FETCH_PAYLOAD };
+
+// GET helper shared by the configuration reads. Returns the HTTP status in
+// `rep` and the classified fault, mapping an empty or truncated body to a
+// payload fault so no caller parses a prefix.
+static DbFetch dbGetJson(const char* pathAndQuery, DbReply& rep) {
+  uint16_t retryAfter = 0;
+  rep = dbRequest(DB_GET, pathAndQuery, nullptr, dbSession, retryAfter);
+  char sqlstate[8];
+  DbFault fault = dbClassify(rep, sqlstate, sizeof(sqlstate));
+  if (fault == DB_FAULT_AUTH) {
+    logf("[DB] read rejected (HTTP %d%s%s)", rep.code,
+         sqlstate[0] != '\0' ? " " : "", sqlstate);
+    return DB_FETCH_AUTH;
+  }
+  if (fault != DB_FAULT_NONE) {
+    logf("[DB] read failed (HTTP %d, %s)", rep.code, dbFaultName(fault));
+    dbFault = fault;
+    return DB_FETCH_FAIL;
+  }
+  if (rep.truncated) {
+    logf("[DB] read exceeds %u bytes", (unsigned)sizeof(s_dbBody));
+    dbFault = DB_FAULT_PAYLOAD;
+    return DB_FETCH_PAYLOAD;
+  }
+  return DB_FETCH_OK;
+}
+
+// devices is authoritative for bottle_count; a missing row means the session
+// is no longer valid (RLS returns 200 + [] for a dead session).
+static DbFetch sbFetchDevices() {
+  DbReply rep;
+  DbFetch r = dbGetJson("/rest/v1/devices?select=device_id,bottle_count,owner_name,owner_email",
+                        rep);
+  if (r != DB_FETCH_OK) return r;
+  if (dbArrayIsEmpty(s_dbBody, rep.len)) {
+    dbFault = DB_FAULT_AUTH;
+    logf("[DB] devices read returned no row: session not live");
+    return DB_FETCH_AUTH;
+  }
+  const char* ob = nullptr;
+  const char* oe = nullptr;
+  size_t cursor = 0;
+  if (!dbc::nextObject(s_dbBody, rep.len, cursor, ob, oe)) {
+    dbFault = DB_FAULT_PAYLOAD;
+    logf("[DB] devices: reply is not a JSON object array");
+    return DB_FETCH_PAYLOAD;
+  }
+  int32_t dev = -1;
+  int32_t bottles = -1;
+  if (!dbIntField(ob, oe, "device_id", dev) || dev != dbSessionDevice) {
+    dbFault = DB_FAULT_IDENTITY;
+    logf("[DB] devices: row does not match session device");
+    return DB_FETCH_PAYLOAD;
+  }
+  if (!dbIntField(ob, oe, "bottle_count", bottles) || bottles < 1 || bottles > 99) {
+    dbFault = DB_FAULT_PAYLOAD;
+    logf("[DB] devices: missing or invalid bottle_count");
+    return DB_FETCH_PAYLOAD;
+  }
+  dbBottleCount = (int)bottles;
+  (void)dbStringField(ob, oe, "owner_name", dbOwnerName, sizeof(dbOwnerName));
+  (void)dbStringField(ob, oe, "owner_email", dbOwnerEmail, sizeof(dbOwnerEmail));
+  return DB_FETCH_OK;
+}
+
+// device_config mirrors devices without a synchronization trigger. It is
+// pulled for display/log only; devices stays authoritative for bottle_count.
+static DbFetch sbFetchDeviceConfig() {
+  DbReply rep;
+  DbFetch r = dbGetJson(
+      "/rest/v1/device_config?select=bottle_count,owner_name,owner_email,updated_at", rep);
+  if (r != DB_FETCH_OK) return r;
+  if (dbArrayIsEmpty(s_dbBody, rep.len)) {
+    return DB_FETCH_OK;  // no copy row: not an error, devices is authoritative
+  }
+  const char* ob = nullptr;
+  const char* oe = nullptr;
+  size_t cursor = 0;
+  if (!dbc::nextObject(s_dbBody, rep.len, cursor, ob, oe)) {
+    dbFault = DB_FAULT_PAYLOAD;
+    logf("[DB] device_config: reply is not a JSON object array");
+    return DB_FETCH_PAYLOAD;
+  }
+  int32_t cfgBottles = -1;
+  if (dbIntField(ob, oe, "bottle_count", cfgBottles) && dbBottleCount > 0 &&
+      cfgBottles != dbBottleCount) {
+    logf("[DB] device_config bottle_count=%ld differs from devices=%d; using devices",
+         (long)cfgBottles, dbBottleCount);
+  }
+  return DB_FETCH_OK;
+}
+
+static DbFetch sbFetchExperiments() {
+  DbReply rep;
+  DbFetch r = dbGetJson(
+      "/rest/v1/experiments?select=experiment_id,duration_h,sample_interval_s,setpoints"
+      "&order=experiment_id.desc&limit=16",
+      rep);
+  if (r != DB_FETCH_OK) return r;
+
+  dbExperimentCount = 0;
+  const char* ob = nullptr;
+  const char* oe = nullptr;
+  size_t cursor = 0;
+  while (dbExperimentCount < kDbExpHistory &&
+         dbc::nextObject(s_dbBody, rep.len, cursor, ob, oe)) {
+    int32_t id = -1;
+    if (!dbIntField(ob, oe, "experiment_id", id) || id < 0) {
+      dbFault = DB_FAULT_PAYLOAD;
+      logf("[DB] experiments: object without a valid experiment_id");
+      return DB_FETCH_PAYLOAD;
+    }
+    DbExperiment& e = dbExperiments[dbExperimentCount];
+    e.id = id;
+    e.durationH = -1;
+    e.sampleIntervalS = -1;
+    e.setpoints[0] = '\0';
+    (void)dbIntField(ob, oe, "duration_h", e.durationH);
+    (void)dbIntField(ob, oe, "sample_interval_s", e.sampleIntervalS);
+    const char* vb = nullptr;
+    const char* ve = nullptr;
+    if (dbc::findField(ob, oe, "setpoints", vb, ve)) {
+      (void)dbc::parseRaw(vb, ve, e.setpoints, sizeof(e.setpoints));
+    }
+    dbExperimentCount++;
+  }
+  return DB_FETCH_OK;
+}
+
+// Highest experiment with readings: the existing display hint. It is NOT the
+// running experiment and nothing here starts a run from it.
+static DbFetch sbFetchLatestReadingExp(int& latest) {
+  DbReply rep;
+  DbFetch r = dbGetJson(
+      "/rest/v1/readings?select=experiment_id&order=experiment_id.desc&limit=1", rep);
+  if (r != DB_FETCH_OK) return r;
+  latest = -1;
+  const char* ob = nullptr;
+  const char* oe = nullptr;
+  size_t cursor = 0;
+  if (dbc::nextObject(s_dbBody, rep.len, cursor, ob, oe)) {
+    int32_t id = -1;
+    if (dbIntField(ob, oe, "experiment_id", id) && id >= 0) latest = (int)id;
+  }
+  return DB_FETCH_OK;
+}
+
+static const DbExperiment* dbFindExperiment(int32_t id) {
+  if (id < 0) return nullptr;
+  for (size_t i = 0; i < dbExperimentCount; i++) {
+    if (dbExperiments[i].id == id) return &dbExperiments[i];
+  }
+  return nullptr;
+}
+
+// Freezes the run snapshot on a false -> true edge and pauses uploads on a
+// stop. A stop never discards queued active-run rows; they resume with their
+// original timestamps and experiment ids when a run is active again.
+static void dbApplyRunState() {
+  if (expRunning && !runActive) {
+    if (!dbConfigReady) {
+      // Decision 2026-11-10: no run may start until one successful pull has
+      // happened since boot. Cached or local configuration is not substituted.
+      if (!runStartRefused) {
+        logf("[DB] run start refused: no successful DB configuration pull since boot");
+      }
+      runStartRefused = true;
+      return;
+    }
+    const DbExperiment* cfg = dbFindExperiment(expNum);
+    runExperimentId = expNum;
+    runConfigFromDb = (cfg != nullptr && cfg->durationH > 0);
+    runDurationH = runConfigFromDb ? cfg->durationH : durationH;
+    runSampleIntervalS = (cfg != nullptr) ? cfg->sampleIntervalS : -1;
+    runStartUnix = ntpSynced ? (uint32_t)time(nullptr) : 0;
+    runActive = true;
+    runStartRefused = false;
+    logf("[DB] run exp=%ld started at %lu: src=%s dur=%ldh interval=%lds "
+         "setpoints=%s",
+         (long)runExperimentId, (unsigned long)runStartUnix,
+         runConfigFromDb ? "db" : "local", (long)runDurationH,
+         (long)runSampleIntervalS,
+         (cfg != nullptr && cfg->setpoints[0] != '\0') ? cfg->setpoints : "{}");
+    // Setpoints are recorded, not actuated: this build has no actuator path
+    // for them, and applying them is out of scope for telemetry.
+  } else if (!expRunning && runActive) {
+    runActive = false;
+    logf("[PUSH] run stopped: %u rows retained, uploads paused",
+         (unsigned)s_pushCount);
+  }
+}
+
+// Formats the oldest queued round (all rows sharing the head's sampleUnix,
+// at most 24) as {"p_readings":[...]} in s_pushBody. Returns the row count,
+// or 0 when the queue is empty or the envelope would not fit.
 static size_t pushFormatHeadRound() {
   if (s_pushCount == 0) return 0;
   int64_t headTs = s_pushQueue[s_pushHead].sampleUnix;
@@ -1337,134 +1885,270 @@ static size_t pushFormatHeadRound() {
     if (s_pushQueue[(s_pushHead + rows) % kPushQueueRows].sampleUnix != headTs) break;
     rows++;
   }
-  struct tm tmv;
-  time_t ts = (time_t)headTs;
-  gmtime_r(&ts, &tmv);
-  char tsBuf[32];
-  snprintf(tsBuf, sizeof(tsBuf), "%04d-%02d-%02dT%02d:%02d:%02dZ",
-           tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
-           tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
-  size_t pos = 0;
-  s_pushBody[0] = '[';
-  pos = 1;
+  // The round may wrap the ring, so copy it out before formatting.
+  PushRow batch[24];
   for (size_t k = 0; k < rows; k++) {
-    const PushRow& r = s_pushQueue[(s_pushHead + k) % kPushQueueRows];
-    char obj[256];
-    char phB[16], prB[16], teB[16], coB[16], chB[16];
-    auto fmtVal = [](float v, bool isNull, char* b, size_t n) {
-      if (isNull) snprintf(b, n, "null");
-      else snprintf(b, n, "%.6g", (double)v);
-    };
-    fmtVal(r.ph, r.nullMask & 0x01, phB, sizeof(phB));
-    fmtVal(r.pressure, r.nullMask & 0x02, prB, sizeof(prB));
-    fmtVal(r.tempC, r.nullMask & 0x04, teB, sizeof(teB));
-    fmtVal(r.co2, r.nullMask & 0x08, coB, sizeof(coB));
-    fmtVal(r.ch4, r.nullMask & 0x10, chB, sizeof(chB));
-    int w;
-    if (r.experimentId < 0) {
-      w = snprintf(obj, sizeof(obj),
-                   "%s{\"bottle_id\":%u,\"timestamp\":\"%s\","
-                   "\"ph\":%s,\"pressure\":%s,\"temp\":%s,\"co2\":%s,\"ch4\":%s}",
-                   k ? "," : "", r.bottleId, tsBuf, phB, prB, teB, coB, chB);
-    } else {
-      w = snprintf(obj, sizeof(obj),
-                   "%s{\"bottle_id\":%u,\"timestamp\":\"%s\",\"experiment_id\":%ld,"
-                   "\"ph\":%s,\"pressure\":%s,\"temp\":%s,\"co2\":%s,\"ch4\":%s}",
-                   k ? "," : "", r.bottleId, tsBuf, (long)r.experimentId,
-                   phB, prB, teB, coB, chB);
-    }
-    if (w <= 0 || (size_t)w >= sizeof(obj)) return 0;
-    if (pos + (size_t)w + 2 > sizeof(s_pushBody)) return 0;  // +2 for ']' + NUL
-    memcpy(s_pushBody + pos, obj, (size_t)w);
-    pos += (size_t)w;
+    batch[k] = s_pushQueue[(s_pushHead + k) % kPushQueueRows];
   }
-  s_pushBody[pos++] = ']';
-  s_pushBody[pos] = '\0';
+  if (dbc::formatPushEnvelope(batch, rows, s_pushBody, sizeof(s_pushBody)) == 0) {
+    return 0;
+  }
   return rows;
 }
 
-// POSTs the oldest queued round to push_readings(). The RPC resolves
-// device_id from the session and ignores unknown keys, so identity cannot be
-// forged from here; replays are idempotent server-side. Dequeues only on a
-// 2xx so a failed flush is retried, never lost (until oldest-drop).
-// Returns true when the queue advanced (round sent or queue empty).
+// Capped exponential backoff with jitter. A Retry-After wins when it is
+// longer. Payload and schema faults back off hard instead of hot-looping a
+// batch the server will keep rejecting; the batch itself is kept.
+static void dbPushBackoff(DbFault fault, uint16_t retryAfterS) {
+  if (dbBackoffMs == 0) {
+    dbBackoffMs = kDbRetryBaseMs;
+  } else if (dbBackoffMs < kDbRetryMaxMs) {
+    dbBackoffMs *= 2;
+    if (dbBackoffMs > kDbRetryMaxMs) dbBackoffMs = kDbRetryMaxMs;
+  }
+  if (fault == DB_FAULT_PAYLOAD || fault == DB_FAULT_SCHEMA) {
+    dbBackoffMs = kDbRetryMaxMs;
+  }
+  uint32_t wait = dbBackoffMs + (uint32_t)(esp_random() % 500u);
+  if ((uint32_t)retryAfterS * 1000u > wait) wait = (uint32_t)retryAfterS * 1000u;
+  dbNextPushMs = millis() + wait;
+  dbFault = fault;
+}
+
+// POSTs the oldest queued round to push_readings(). The RPC takes the device
+// from the session and ignores unknown keys, so identity cannot be forged
+// here. The batch is dequeued only after a readable acknowledgement whose
+// count is within the submitted row count; a replay may legitimately return
+// 0, and the server's first-write-wins rule means a changed value with the
+// same key is silently kept (the scalar result cannot reveal that).
 static bool sbPushOneRound() {
   if (s_pushCount == 0) return true;
-  if (dbSession.length() == 0 && !sbAuthenticate()) return false;
-  size_t rows = pushFormatHeadRound();
-  if (rows == 0) {
-    logf("[PUSH] format failed (queue inconsistent or body cap)");
+  if (!runActive) return false;
+  if (!sbConfigured()) return false;
+  if (dbSessionExpiring() && !sbAuthenticate()) return false;
+  if (dbQueueDeviceId >= 0 && dbSessionDevice >= 0 && dbQueueDeviceId != dbSessionDevice) {
+    dbFault = DB_FAULT_IDENTITY;
+    dbNextPushMs = millis() + kDbRetryMaxMs;
     return false;
   }
-  String url = String(SUPABASE_URL) + "/rest/v1/rpc/push_readings";
-  for (int attempt = 0; attempt < 2; attempt++) {
-    WiFiClientSecure client;
-    sbApplyTls(client);
-    HTTPClient http;
-    http.begin(client, url);
-    http.setTimeout(10000);
-    http.addHeader("apikey", SUPABASE_ANON_KEY);
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("Accept", "application/json");
-    http.addHeader("x-device-session", dbSession);
-    int code = http.POST((uint8_t*)s_pushBody, strlen(s_pushBody));
-    if (code >= 200 && code < 300) {
-      String resp = http.getString();
-      http.end();
-      s_pushHead = (s_pushHead + rows) % kPushQueueRows;
-      s_pushCount -= rows;
-      logf("[PUSH] flushed %u rows (server says %s, %u left)", (unsigned)rows,
-           resp.c_str(), (unsigned)s_pushCount);
-      return true;
-    }
-    logf("[PUSH] push_readings HTTP %d (attempt %d, %u queued)", code, attempt,
+  size_t rows = pushFormatHeadRound();
+  if (rows == 0) {
+    logf("[PUSH] format failed: %u bytes for %u queued rows", (unsigned)sizeof(s_pushBody),
          (unsigned)s_pushCount);
-    http.end();
-    if (code == 401 || code == 403) {
-      dbSession = "";
-      if (!sbAuthenticate()) return false;
-    } else {
+    dbPushBackoff(DB_FAULT_PAYLOAD, 0);
+    return false;
+  }
+  for (int attempt = 0; attempt < 2; attempt++) {
+    uint16_t retryAfter = 0;
+    DbReply rep =
+        dbRequest(DB_POST, "/rest/v1/rpc/push_readings", s_pushBody, dbSession, retryAfter);
+    char sqlstate[8];
+    DbFault fault = dbClassify(rep, sqlstate, sizeof(sqlstate));
+    if (rep.code >= 200 && rep.code < 300) {
+      long acked = -1;
+      if (!rep.truncated && dbc::parseScalarCount(s_dbBody, rep.len, acked) &&
+          acked >= 0 && acked <= (long)rows) {
+        s_pushHead = (s_pushHead + rows) % kPushQueueRows;
+        s_pushCount -= rows;
+        s_pushAckRounds++;
+        dbUploadAckMs = millis();
+        dbBackoffMs = 0;
+        dbNextPushMs = millis();
+        dbFault = DB_FAULT_NONE;
+        logf("[PUSH] acked %u rows (server inserted %ld, %u queued)", (unsigned)rows,
+             acked, (unsigned)s_pushCount);
+        return true;
+      }
+      // Never discard queued data on a 2xx we cannot read.
+      logf("[PUSH] unreadable acknowledgement (HTTP %d, %u bytes); batch kept", rep.code,
+           (unsigned)rep.len);
+      dbPushBackoff(DB_FAULT_PAYLOAD, 0);
       return false;
     }
+    if (fault == DB_FAULT_AUTH && attempt == 0) {
+      logf("[PUSH] session rejected (HTTP %d%s%s), reauthenticating", rep.code,
+           sqlstate[0] != '\0' ? " " : "", sqlstate);
+      dbSessionInvalidate("push rejected");
+      if (sbAuthenticate()) continue;  // replay the unchanged batch
+      dbPushBackoff(DB_FAULT_AUTH, retryAfter);
+      return false;
+    }
+    logf("[PUSH] push_readings HTTP %d%s%s (%u queued); batch kept", rep.code,
+         sqlstate[0] != '\0' ? " " : "", sqlstate, (unsigned)s_pushCount);
+    dbPushBackoff(fault == DB_FAULT_NONE ? DB_FAULT_NET : fault, retryAfter);
+    return false;
   }
   return false;
 }
 
-// Flushes buffered rounds, oldest first. Clock-gated: returns early while
-// NTP is unsynced so nothing is ever stamped at 1970; rows stay queued.
-// Dormant until the sensor chain lands: with an empty queue this is a no-op.
-static void sbPushReadings() {
-  if (!ntpSynced) return;
-  if (s_pushCount == 0) return;
-  if (String(SUPABASE_URL).length() == 0 || String(SUPABASE_ANON_KEY).length() == 0 ||
-      String(DEVICE_TOKEN).length() == 0) {
-    return;
-  }
-  for (int i = 0; i < kPushFlushRounds && s_pushCount > 0; i++) {
-    if (!sbPushOneRound()) break;
+// Ends a pass. The 30 s cadence is measured from the END of a pass, so a slow
+// or failing pass cannot immediately chain into another one.
+static void dbPassFinish() {
+  lastDbPollMs = millis();
+  link_emit_db();
+  dbPass = DB_PASS_IDLE;
+}
+
+// One cooperative DB pass. Each call performs AT MOST ONE blocking HTTPS
+// operation and then returns to loop(), which services the display link, the
+// sensor poll and the heartbeat before the next step. A 10 s socket timeout
+// therefore delays the UART once, not for the whole pass (auth + four reads +
+// two uploads). The queue has a single owner: all steps run in loop().
+static void dbPassTick() {
+  switch (dbPass) {
+    case DB_PASS_IDLE:
+      if (millis() - lastDbPollMs < kDbPollMs) return;
+      lastDbPollMs = millis();
+      ensureNtpSync();
+      if (!ntpSynced) {
+        dbFault = DB_FAULT_CLOCK;
+        dbPassFinish();
+        return;
+      }
+      if (!sbConfigured()) {
+        dbFault = DB_FAULT_AUTH;
+        dbPassFinish();
+        return;
+      }
+      dbPassAuthRetried = 0;
+      dbPass = dbSessionExpiring() ? DB_PASS_AUTH : DB_PASS_DEVICES;
+      return;
+
+    case DB_PASS_AUTH:
+      if (!sbAuthenticate()) {
+        logf("[DB] pass aborted: authentication failed (%s)", dbFaultName(dbFault));
+        dbPassFinish();
+        return;
+      }
+      dbPass = DB_PASS_DEVICES;
+      return;
+
+    case DB_PASS_DEVICES: {
+      // An empty devices array means the session is not live (RLS 200 + []).
+      DbFetch r = sbFetchDevices();
+      if (r == DB_FETCH_AUTH && dbPassAuthRetried == 0) {
+        dbPassAuthRetried = 1;
+        dbSessionInvalidate("devices read empty");
+        dbPass = DB_PASS_AUTH;
+        return;
+      }
+      if (r != DB_FETCH_OK) {
+        logf("[DB] pass aborted: devices (%s)", dbFaultName(dbFault));
+        dbPassFinish();
+        return;
+      }
+      dbPass = DB_PASS_CONFIG;
+      return;
+    }
+
+    case DB_PASS_CONFIG: {
+      DbFetch r = sbFetchDeviceConfig();
+      if (r == DB_FETCH_AUTH && dbPassAuthRetried == 0) {
+        dbPassAuthRetried = 1;
+        dbSessionInvalidate("device_config rejected");
+        dbPass = DB_PASS_AUTH;
+        return;
+      }
+      if (r != DB_FETCH_OK) {
+        logf("[DB] pass aborted: device_config (%s)", dbFaultName(dbFault));
+        dbPassFinish();
+        return;
+      }
+      dbPass = DB_PASS_EXPERIMENTS;
+      return;
+    }
+
+    case DB_PASS_EXPERIMENTS: {
+      DbFetch r = sbFetchExperiments();
+      if (r == DB_FETCH_AUTH && dbPassAuthRetried == 0) {
+        dbPassAuthRetried = 1;
+        dbSessionInvalidate("experiments rejected");
+        dbPass = DB_PASS_AUTH;
+        return;
+      }
+      if (r != DB_FETCH_OK) {
+        logf("[DB] pass aborted: experiments (%s)", dbFaultName(dbFault));
+        dbPassFinish();
+        return;
+      }
+      dbPass = DB_PASS_LATEST;
+      return;
+    }
+
+    case DB_PASS_LATEST: {
+      int latest = -1;
+      DbFetch r = sbFetchLatestReadingExp(latest);
+      if (r == DB_FETCH_AUTH && dbPassAuthRetried == 0) {
+        dbPassAuthRetried = 1;
+        dbSessionInvalidate("readings rejected");
+        dbPass = DB_PASS_AUTH;
+        return;
+      }
+      if (r != DB_FETCH_OK) {
+        logf("[DB] pass aborted: readings (%s)", dbFaultName(dbFault));
+        dbPassFinish();
+        return;
+      }
+      if (latest != dbLatest) {
+        logf("[DB] latest reading experiment %d -> %d", dbLatest, latest);
+        dbLatest = latest;
+      }
+      dbConfigReady = true;
+      dbConfigReadOkMs = millis();
+      // A stale identity mismatch keeps uploads blocked and must stay visible
+      // even though the reads themselves just succeeded.
+      dbFault = (dbQueueDeviceId >= 0 && dbSessionDevice >= 0 &&
+                 dbQueueDeviceId != dbSessionDevice)
+                    ? DB_FAULT_IDENTITY
+                    : DB_FAULT_NONE;
+      logf("[DB] config pull ok: bottles=%d experiments=%u latest=%d", dbBottleCount,
+           (unsigned)dbExperimentCount, dbLatest);
+      // A start refused for want of configuration can proceed now; the
+      // operator's run request is still standing.
+      if (runStartRefused && expRunning && !runActive) {
+        logf("[DB] configuration now available, honouring the pending run start");
+        dbApplyRunState();
+      }
+      dbPushRoundsThisPass = 0;
+      dbPass = DB_PASS_PUSH;
+      return;
+    }
+
+    case DB_PASS_PUSH: {
+      // Idle runs never upload and never start a request. Queued active-run
+      // rows wait for the next run, keeping their stamps and experiment ids.
+      if (!runActive || s_pushCount == 0) {
+        dbPass = DB_PASS_REPORT;
+        return;
+      }
+      if (!ntpSynced || dbPushRoundsThisPass >= (uint8_t)kPushFlushRounds) {
+        dbPass = DB_PASS_REPORT;
+        return;
+      }
+      if ((int32_t)(millis() - dbNextPushMs) < 0) {
+        dbPass = DB_PASS_REPORT;  // backing off
+        return;
+      }
+      dbPushRoundsThisPass++;
+      if (!sbPushOneRound()) {
+        dbPass = DB_PASS_REPORT;
+        return;
+      }
+      return;  // another round next loop iteration, still bounded by the budget
+    }
+
+    case DB_PASS_REPORT:
+      // One declaration per pass, including a failed one: the display shows
+      // the last known truth, while `reads`/`ack` keep the last success time.
+      dbPassFinish();
+      return;
   }
 }
 
-static void syncDbLatest(bool force) {
-  if (millis() - lastDbPollMs < kDbPollMs && !force) return;
-  lastDbPollMs = millis();
-  ensureNtpSync();
-  int latest = sbFetchLatestExp();
-  if (latest != -2) {
-    if (latest != dbLatest) {
-      logf("[DB] latest %d -> %d, next=%d", dbLatest, latest, latest + 1);
-    }
-    dbLatest = latest;
-  } else {
-    logf("[DB] fetch failed, keeping last known value");
-  }
-  // Every DB pass declares the result, including a failed one: the display
-  // shows the last known truth with a fresh age stamp.
-  link_emit_db();
-  // Drain buffered sample rounds (no-op until the sensor chain enqueues).
-  // Clock gating lives inside sbPushReadings: time= state above is unaffected,
-  // so the display keeps showing unsynced state.
-  sbPushReadings();
+// Makes the next pass due immediately (used after login and on demand).
+static void dbPassForce() {
+  lastDbPollMs = millis() - kDbPollMs;
+  if (dbPass == DB_PASS_IDLE) dbPassTick();
 }
 
 // Returns true on authenticated, false otherwise. The caller emits RESULT and
@@ -1561,6 +2245,9 @@ void loop() {
   // Sensor rounds run in every stage, including while the portal gate is
   // open; the poll has its own 30 s gate and does not depend on the network.
   sens_poll();
+  // At most one HTTPS operation per iteration, after the link and the sensor
+  // poll have been serviced. A slow DB read delays the next step, not the UART.
+  dbPassTick();
 
   if (ledOffMs != 0 && (int32_t)(millis() - ledOffMs) >= 0) {
     digitalWrite(TEST_LED_PIN, LOW);
@@ -1594,7 +2281,6 @@ void loop() {
         link_emit_net();
         link_emit_db();
         link_emit_loginreq();
-        syncDbLatest(false);
         if (millis() - lastAuthProbeMs >= kAuthProbeMs) {
           // No staged creds: check whether the port is already through
           // before asking the user for a login they don't need.
@@ -1621,7 +2307,7 @@ void loop() {
       link_emit_result(ok);
       clearCreds();
       if (ok) {
-        syncDbLatest(true);
+        dbPassForce();
         stage = STAGE_RUN;
         stageAtMs = 0;
       } else {
@@ -1655,7 +2341,6 @@ void loop() {
       }
       // Declare the fresh verdict every cycle so /info stays live.
       link_emit_net();
-      syncDbLatest(false);
 
       // The data fetch is the portal verdict: WALLED means the session
       // expired, so pause the loop and re-auth via the display.

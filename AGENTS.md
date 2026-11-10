@@ -151,4 +151,3 @@ graphify --help
 - When the user decides to postpone work to another session, document the outstanding tasks in `backlog.md`.
 - When the user corrects an agent, document the mistake and its lesson in `docs/llm-summary/learned-mistakes.md`.
 - Agents may read `learned-mistakes.md` when relevant to avoid repeating previous mistakes.
-- For any throwaway or one-off scripts, place them in `.tmp`. This should link into the system's temporary directory. If not yet setup, set it up for the user. The directory is `$env:TEMP` on Windows and `/tmp` on Unix-based systems.

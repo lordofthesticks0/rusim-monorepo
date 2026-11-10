@@ -166,7 +166,7 @@ Received from the WT32:
 | `LOGINREQ` | route to `/setup` (idempotent); heartbeat while creds are needed |
 | `RESULT OK` / `RESULT FAIL` | login verdict: route home / stay on setup with retry text |
 | `NET ip= up= [ping=]` | `/info` IP, link and latency store |
-| `DB latest= time= bottles= drops=` | `/info` DB store; `-` = unknown, `latest=0` = no rows |
+| `DB latest= time= bottles= drops= ready= aexp= adur= asrc= pexp= pdur= cfgmax= queued= reads= ack= state=` | `/info` DB, run-configuration and queue stores; `/control` start gate, source label and next-id hint. `-` = unknown, `latest=0` = no rows |
 | `LOG <text>` | print `[W32] <text>` on the display USB console, verbatim |
 
 Sent to the WT32:
@@ -183,8 +183,23 @@ Staging a pair (phone form or USB `CREDS`) calls
 on each heartbeat until `RESULT` arrives. `LOGINREQ` routes to `/setup`;
 `RESULT OK` routes home but does NOT start the run; `RESULT FAIL` keeps
 `/setup` up with "wrong username or password" on the panel and on the phone
-page (§12). The run starts from `/control` (hold-to-confirm), which flips
-`run=1` and increments `num`.
+page (§12). The run starts from `/control` or `/home` (hold-to-confirm), which
+flips `run=1` without incrementing `num`.
+
+**Start gate and run configuration.** `ui_experiment_toggle()` refuses to start
+while `link_serial_db_ready()` is false, and shows a modal explaining that the
+WT32 has not completed a database configuration pull since boot. This is the
+2026-11-10 decision: no cached or local configuration is substituted. The
+operator still chooses the experiment number; on start the WT32 freezes that
+run's configuration from the `device_data.experiments` row for that id (or the
+display's duration when no row exists).
+
+`/control` labels the next start as `exp N: DB <dur>h` or `exp N: local
+<dur>h`, warns when the id already has readings, and during a run shows the
+frozen snapshot (`run N: <dur>h DB|local`) so edits on that screen are visibly
+pending for the next run. `/info` adds a **Run config** tile (frozen experiment/
+duration/source, or `ready`/`waiting`) and a **Queue** tile (queued rows and the
+ages of the last successful configuration read and acknowledged upload).
 
 Every outbound command is echoed locally as one `[LINK>] <word> [args]` line.
 `CREDS` echoes the word only, never the payload. A WT32 `HELLO` clears the
@@ -294,22 +309,23 @@ it, while letting a phone rejoin from `/info` after the run has started.
 
 Verify: `pio run -e display-v9`; on device open `/info`, tap Start phone login,
 scan with a phone — the code changes to the URL after the phone associates, and
-the Home button stops the AP. Under `-DIS_DEBUG=1`, reach `/info` via the bypass
-and check the same.
+the Home button stops the AP. With the debug flag on (the current
+`ui_config.h` default), reach `/info` via the bypass and check the same.
 
 ## 14. Debug flag `IS_DEBUG`
 
 `IS_DEBUG` is the compile-time gate for debug-only shortcuts in this UI.
-Defined in `ui_config.h`, default `0`, overridable per build with
-`-DIS_DEBUG=1` (a commented-out line sits in `[env:display-v9]` in
-`platformio.ini`; `[env:display-sim]` inherits it). Full detail lives in
-`display-debug-flag.md`.
+Defined in `ui_config.h`, currently defaulting to `1` for development,
+overridable per build with `-DIS_DEBUG=0` (a commented-out line sits in
+`[env:display-v9]` in `platformio.ini`; `[env:display-sim]` inherits it).
+Full detail lives in `display-debug-flag.md`.
 
-Current effect: when `1`, `/setup` gains a `DEBUG: bypass login` button
+Current effects: when `1`, `/setup` gains a `DEBUG: bypass login` button
 (`screen_setup.cpp`) that runs the normal success path — `g.loggedIn`,
-SoftAP stopped, route to `/home` — without the WT32 `RESULT=success`.
-Boot still starts at the login screen either way. Guarded by
-`#if IS_DEBUG`, so release builds contain none of the debug code.
+SoftAP stopped, route to `/home` — without the WT32 `RESULT=success`, and
+the USB console accepts `W32CMD <line>`. Boot still starts at the login
+screen either way. Guarded by `#if IS_DEBUG`, so builds with `0` contain
+none of the debug code.
 
 Note for future agents: use `IS_DEBUG` for anything intentionally gated,
 whether for safety (skipping auth, forcing outputs) or any other reason.

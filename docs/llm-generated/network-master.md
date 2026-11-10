@@ -97,8 +97,21 @@ the same way `PushRow` does. `ph` is pH units: the slave applies its per-bottle
 the frame. Failed rounds (timeout, overlong frame, non-JSON) are logged on the
 first failure and then every 20th, so a disconnected Mega cannot flood the
 display's log.
-- Nothing is enqueued. The push queue above stays dormant until the deferred
-step in `migration-plan.md` Â§6.
+- Every accepted frame is enqueued while an experiment run is active. The
+round keeps explicit bottle ids (Mega 1-4 -> DB 0-3) so a missing bottle is a
+hole and never a renumbered or fabricated sample. A present bottle with an
+unavailable sensor still contributes a row with `null` fields.
+- Enqueue is refused for idle rounds (no experiment-0 samples), for an
+unsynced clock, for timestamps outside 2025-01-01..now+10 min, and for a
+sample time that does not advance (second-resolution primary keys, and a
+clock step could otherwise collide silently). Those are counted separately
+from queue overflow and reported by `DUMP`.
+- The Mega frame has no per-sensor timestamp. The WT32 collection time is a
+proxy for when the sensors measured, not proof; per-sensor acquisition times
+would need a wire-protocol change.
+- Measurement values are stored and uploaded exactly as the slave reports
+them. Pressure is the slave's `press` value, which `new-slave.cpp` produces
+as `sensorValue * PA_PER_UNIT` (Pa). Nothing here rescales or recalibrates.
 
 ## 3. Line protocol
 
@@ -123,11 +136,29 @@ acks. Full rules: `link-serial-protocol.md` Â§2.
 | `LOGINREQ` | - | every heartbeat while credentials are needed |
 | `RESULT` | `OK` / `FAIL` | after every login attempt, plus the HELLO snapshot in RUN |
 | `NET` | `ip=<str> up=<0\|1> [ping=<n\|->]` | every heartbeat and ETH event |
-| `DB` | `latest=<n\|-> time=<0\|1> bottles=<n\|-> drops=<n>` | every heartbeat and after each DB pass |
+| `DB` | `latest=<n\|-> time=<0\|1> bottles=<n\|-> drops=<n> ready=<0\|1> aexp=<n\|-> adur=<n\|-> asrc=<db\|local\|-> pexp=<n\|-> pdur=<n\|-> cfgmax=<n\|-> queued=<n> reads=<ms\|-> ack=<ms\|-> state=<word>` | every heartbeat and after each DB pass |
 | `LOG` | `<text>` | every diagnostic line |
 
 `DB latest=0` means "no experiments yet" (the display maps it to -1), `-`
-means unknown. `drops=` is always a number; `0` is meaningful.
+means unknown. `drops=` and `queued=` are always numbers; `0` is meaningful.
+
+- `ready=1` means at least one full configuration pull (devices +
+device_config + experiments + latest reading) succeeded since boot. The
+display refuses to start a run while it is 0.
+- `aexp`/`adur`/`asrc` describe the FROZEN active run snapshot: experiment id,
+duration and whether the configuration came from the `experiments` row (`db`)
+or from the display (`local`). They are `-` while idle.
+- `pexp`/`pdur` are the operator-selected pending experiment and the DB
+duration for that id (`-` when the DB has no duration for it). The display
+shows this before a start; changes are only applied at the next run start.
+- `cfgmax` is the highest CONFIGURED experiment id in the pulled history; it
+can exceed `latest`, which only counts experiments with readings. The display
+uses `max(latest, cfgmax) + 1` for its next-id hint.
+- `reads`/`ack` are milliseconds since the last successful configuration read
+and the last acknowledged upload; `-` means never. They are never refreshed by
+re-sending cached values, so they show link freshness, not report freshness.
+- `state` is the current DB fault category: `none`, `net`, `auth`, `payload`,
+`schema`, `clock` or `identity`.
 
 ### 3.3 Credential state
 
@@ -164,11 +195,17 @@ WAIT_IP -> NEED_CREDS -> LOGIN -> RUN
   `NEED_CREDS` for re-auth. A ping failure alone does not trigger re-auth.
 
 `loop()` is non-blocking between stage ticks: it pulls and dispatches link
-lines before anything else, then checks `millis()` gates. `doLogin()` and the
-HTTPS calls still block for their duration; the UART FIFO absorbs one
-heartbeat and the next pass drains it. The sensor poll blocks for at most
+lines before anything else, then checks `millis()` gates. The database pass is
+a cooperative state machine (`dbPassTick()`): each loop iteration performs at
+most ONE HTTPS operation (renew/auth, one read, or one upload round), then
+returns so the link, heartbeat and sensor poll are serviced before the next
+step. A 10 s socket timeout therefore delays the UART once, not for the whole
+pass. `doLogin()` still blocks for its duration; the UART FIFO absorbs a
+heartbeat and the next iteration drains it. The sensor poll blocks for at most
 1.5 s once per 30 s, and it pulls the display link from inside that wait so a
-`CREDS` line arriving during a reply is not left in the FIFO.
+`CREDS` line arriving during a reply is not left in the FIFO. The queue has a
+single owner: every pass step runs in `loop()`, so no lock or task handoff is
+needed.
 
 There is no `DONE` halt state: every failure path returns to the display.
 Reset is never required to retry.
@@ -195,17 +232,17 @@ through a 320-byte rolling window because the WT32-ETH01 has no PSRAM.
 
 ## 6. Memory and limits
 
-- Flash used: 990,117 B of 1,310,720 B (75.5%). RAM used: 62,312 B of
-  327,680 B (19.0%). The tight flash is why the SoftAP credential form lives
+- Flash used: 1,006,409 B of 1,310,720 B (76.8%). RAM used: 116,896 B of
+  327,680 B (35.7%). The tight flash is why the SoftAP credential form lives
   on the display rather than here: a web server does not fit in the
   remaining ~300 KB. See `display-provisioning-ap.md`. The Supabase CA bundle
   (`supabase_ca.h`, 3 roots, ~4 KB flash) is included in those figures.
   The sensor poll adds one fixed 513-byte RX frame and ~20 B of counters.
-- Push queue: the 1200-row ring (~48 KB `.bss`) is still folded away because
-  nothing enqueues yet, but the 6,144-byte JSON body is present in the image
-  (`nm` shows `s_pushBody` at 0x1800 bytes, `s_pushQueue` absent). When the
-  sensor step adds a caller the ring materializes and RAM rises by roughly
-  48 KB, still inside the 100-150 KB ceiling.
+- Push queue: the 1200-row ring is now materialized (~48 KB `.bss`, 40 B per
+  row). The configuration pull adds a 4,096-byte response buffer, a 320-byte
+  URL buffer, 16 experiment slots (`DbExperiment`, ~108 B each, ~1.7 KB) and
+  ~200 B of session/counter state. Nominal capacity at 30 s sampling is 300
+  four-bottle rounds (~150 min); RAM contents are lost on reboot.
 - The line link adds two fixed 1 KB log buffers, one 1 KB RX buffer, and
   ~130 B of state. No heap allocation is added.
 - DHCP only, no static-IP fallback.
@@ -214,11 +251,12 @@ through a 320-byte rolling window because the WT32-ETH01 has no PSRAM.
   Supabase calls (`sbAuthenticate`, `sbFetchLatestExp`, `sbPushReadings`)
   pin the CA bundle via `setCACert()` instead: chain + hostname checking
   on, no insecure fallback. See `esp-db-sync.md` Â§5.
-- Sample push queue: fixed 1200-row ring (~50 rounds), oldest-drop with a
-  saturating drop counter, sample-time stamps, clock-gated on NTP, flushed
-  2 rounds per 30 s cycle to `push_readings()`. Still dormant: the sensor
-  poll logs but does not enqueue (`migration-plan.md` Â§6). See
-  `esp-db-sync.md` Â§7-8.
+- Sample push queue: fixed 1200-row ring, oldest-drop with a saturating drop
+  counter, immutable sample-time stamps, clock-gated on NTP. Enqueued only
+  from an accepted sensor frame during an active run; flushed 2 rounds per
+  30 s cycle, and only while a run is active. Stopping pauses retries but
+  keeps the rows; a later run flushes them with their original experiment id
+  and timestamp. See Â§6.1 and `esp-db-sync.md` Â§7-8.
 - Credential lifetime: RAM only. The working pair is overwritten with `x`
   before release. The last-attempted pair is kept for the same-pair rule.
   Never written to flash or NVS.
@@ -228,6 +266,67 @@ through a 320-byte rolling window because the WT32-ETH01 has no PSRAM.
   side only ever sees a staged pair.
 - Link limits: 1024-byte lines, 50 ms gap discard. A lost or corrupted line is
   replaced by the next heartbeat within 5 s.
+
+### 6.1 Database path (configuration, runs and uploads)
+
+Full rationale and acceptance criteria: `network-master-database-plan.md`.
+Implementation: the `sbAuthenticate()` / `dbPullConfig()` / `sbPushOneRound()`
+block in `main.cpp`, with the pure parsing and envelope code in
+`db_contract.h` (shared with the native `db-contract` test).
+
+**Requests.** Every call is HTTPS to `SUPABASE_URL` with `sbApplyTls()`
+(pinned CA, no insecure fallback). Common headers are `apikey`, `Accept`; GETs
+add `Accept-Profile: device_data` and POSTs add `Content-Profile: device_data`
+plus `Content-Type: application/json`. After authentication every request also
+sends `x-device-session`. That is a custom device token, not a Supabase Auth
+JWT, so it never goes in `Authorization`. No service-role key or database
+password is stored on the board.
+
+| Call | Purpose |
+|---|---|
+| `POST /rest/v1/rpc/authenticate` `{"p_token":...}` | one-row array with `session_token`, `device_id`, `bottle_count`, owner fields and `expires_at` |
+| `GET /rest/v1/devices?select=device_id,bottle_count,owner_name,owner_email` | authoritative bottle count; an empty array means the session is not live |
+| `GET /rest/v1/device_config?select=bottle_count,owner_name,owner_email,updated_at` | copy for comparison only; disagreements are logged once and `devices` wins |
+| `GET /rest/v1/experiments?select=experiment_id,duration_h,sample_interval_s,setpoints&order=experiment_id.desc&limit=16` | bounded local history used for run configuration |
+| `GET /rest/v1/readings?select=experiment_id&order=experiment_id.desc&limit=1` | display hint only; never treated as the running experiment |
+| `POST /rest/v1/rpc/push_readings` `{"p_readings":[...]}` | one collected round, max 24 objects |
+
+Pipeline: `dbPassTick()` runs at most one of renew/auth, devices, device_config,
+experiments, latest-reading or one upload round per `loop()` iteration, then
+reports once with `link_emit_db()`. On a session rejection the pass
+reauthenticates once and replays the unchanged read/upload.
+
+All responses are read into one bounded 4,096-byte buffer. A body that does not
+fit is a payload fault: the firmware never parses a prefix. The session token is
+validated as a hex string, and `expires_at` is parsed from the response and
+renewed 5 minutes before it lapses (the SQL currently issues 12 hours).
+
+**Run snapshot.** The display remains the start/stop interface and the operator
+chooses the experiment number. On a false -> true `run` edge the WT32 refuses
+the start unless `ready=1` (one successful pull since boot). It then freezes
+experiment id, duration, sample interval and setpoints: the `experiments` row
+for that id supplies them, and the display values are used only when no row
+exists or its duration is null. Every queued row in the run carries the frozen
+experiment id. A DB update during the run only changes the pending
+configuration for the next run; it never relabels queued samples or changes the
+active duration. Starting does not increment the experiment number.
+
+**Uploads.** A request contains at most 24 rows sharing one collection time.
+`null` means a present bottle's sensor was unavailable; an absent bottle
+contributes no row. The response must be a bare integer between 0 and the sent
+row count (a replay can legitimately answer 0). Only then is the batch removed
+from the queue. The primary key is `(device_id, bottle_id, timestamp)`, so a
+replayed round with different values is ignored server-side and cannot be
+detected from the scalar acknowledgement; queued rows are therefore immutable.
+
+**Failures.** `net` (timeout, TLS, 429, 5xx) keeps the batch and retries with
+capped exponential backoff plus jitter, honouring `Retry-After`. `auth`
+reauthenticates once and replays the unchanged batch. `payload`/`schema` stop
+hot-looping and keep the batch for inspection; there is no automatic discard
+policy beyond the existing oldest-drop bound. `clock` means NTP or a timestamp
+is untrustworthy, and `identity` means the authenticated device differs from
+the identity the queue was collected under, in which case uploads are blocked
+rather than delivering rows to the wrong device.
 
 ## 7. Expected output
 
@@ -252,7 +351,17 @@ LOG [LOGIN] Verifying with a real data fetch...
 LOG [LOGIN] SUCCESS: port is authenticated.
 LOG [PING] 1.1.1.1 OK, avg time = 15 ms
 LOG [SENS] 4 bottles ok=20 fail=0 b1 ph=2.51 ch4=812.4 t=38.5 co2=1204 p=1013 b2 ph=2.49 ch4=790.1 t=38.2 co2=1198 p=1013 b3 ph=2.53 ch4=824.9 t=38.7 co2=1210 p=1014 b4 ph=2.47 ch4=801.3 t=38.4 co2=1202 p=1013
-LOG [RUN] exp=1 duration=24h running=1 dbLatest=3 bottles=24 ntp=1 queued=0 drops=0
+LOG [DB] authenticated device=1 bottles=4 expires_in=43200s owner='...'
+LOG [DB] config pull ok: bottles=4 experiments=2 latest=3
+LOG [DB] run exp=4 started: src=db dur=48h interval=30s setpoints={"t":39.5}
+LOG [RUN] exp=4 duration=48h running=1 dbLatest=3 bottles=4 ntp=1 queued=0 drops=0
+```
+
+An idle round is counted but not queued, and a refused start is explicit:
+
+```
+LOG [DB] run start refused: no successful DB configuration pull since boot
+LOG [PUSH] acked 3 rows (server inserted 3, 0 queued)
 ```
 
 With the Mega absent or its TX wire open, a failure line is logged on the
@@ -292,7 +401,4 @@ The display shows the same verdict on `/setup` and on the phone's form page.
 - `../hardware.md` â€” board pinouts (read-only reference).
 
 ---
-Content generated by `codebuff/deepseek-v4.1-flash` in `freebuff`.
-
----
-Content generated by `openai/gpt-6-codex` in `harness`.
+Content generated by LLM in Freebuff.

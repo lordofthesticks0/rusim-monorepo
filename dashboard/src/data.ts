@@ -10,7 +10,10 @@ export const PARAMETER_UNITS = {
   Temp: "°C",
   CO2: "ppm",
   CH4: "ppm",
-  Pressure: "kPa",
+  // The sensor slave emits Pa (`cachedPress = sensorValue * PA_PER_UNIT` in
+  // legacy/slave/new-slave.cpp). Firmware values are stored unchanged, so the
+  // label must match that source unit rather than the old kPa assumption.
+  Pressure: "Pa",
 } as const satisfies Record<ParameterName, string>;
 
 // Chamber numbering lives in its own module so pure helpers stay importable

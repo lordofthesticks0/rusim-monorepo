@@ -47,11 +47,12 @@
 
 #define FW_VERSION "v9.6-0.2.0"
 
-// Debug: general debug-build gate. Hardcoded default OFF; enable per-build
-// with -DIS_DEBUG=1 (e.g. extra build_flags). When on, /setup shows a
-// "DEBUG: bypass login" button that routes straight to /home.
+// Debug: general debug-build gate. Default ON for now; disable per-build
+// with -DIS_DEBUG=0 (e.g. extra build_flags). When on, /setup shows a
+// "DEBUG: bypass login" button that routes straight to /home and the USB
+// serial console accepts W32CMD.
 #ifndef IS_DEBUG
-#define IS_DEBUG 0
+#define IS_DEBUG 1
 #endif
 
 // Palette (light background). UI_COL_TEXT is the primary foreground, so it is

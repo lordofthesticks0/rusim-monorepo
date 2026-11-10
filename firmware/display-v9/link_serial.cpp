@@ -46,6 +46,23 @@ static bool s_timeOk = false;
 static int s_dbBottles = -1;
 static uint16_t s_pushDrops = 0;
 
+// WT32-pushed configuration state. Ages are stored as reported plus the line
+// timestamp, so /info can keep counting between the WT32's 30 s DB passes.
+static bool s_dbReady = false;
+static int s_dbActiveExp = -1;
+static int s_dbActiveDur = -1;
+static int s_dbActiveSrc = 0;  // 0 none, 1 db, 2 local
+static int s_dbPendingExp = -1;
+static int s_dbPendingDur = -1;
+static int s_dbCfgMax = -1;
+static uint16_t s_dbQueued = 0;
+static bool s_dbReadSeen = false;
+static bool s_dbAckSeen = false;
+static uint32_t s_dbReadAge0 = 0;
+static uint32_t s_dbAckAge0 = 0;
+static uint32_t s_dbStampMs = 0;
+static char s_dbState[12] = "none";
+
 static bool s_passthrough = false;
 
 // --- small bounded helpers -------------------------------------------------
@@ -165,6 +182,20 @@ static void handle_hello() {
   s_verdictForPair = false;
   s_loginReq = false;
   s_loginReqPending = false;
+  // A rebooted WT32 has no configuration and no session: drop the previous
+  // ready/active state so the display cannot start a run until the new WT32
+  // has completed a pull.
+  s_dbReady = false;
+  s_dbActiveExp = -1;
+  s_dbActiveDur = -1;
+  s_dbActiveSrc = 0;
+  s_dbPendingExp = -1;
+  s_dbPendingDur = -1;
+  s_dbCfgMax = -1;
+  s_dbQueued = 0;
+  s_dbReadSeen = false;
+  s_dbAckSeen = false;
+  snprintf(s_dbState, sizeof(s_dbState), "none");
   Serial.println("[LINK] WT32 HELLO, link up (pair kept for re-push)");
 }
 
@@ -215,15 +246,46 @@ static void handle_net(const char *args) {
   s_netStampMs = millis();
 }
 
+// Parses one "<key>=<value>" age field. "-" (or absence) means never.
+static bool parse_age(const char *args, const char *key, bool &seen, uint32_t &value) {
+  char raw[16] = "-";
+  if (!arg_lookup(args, key, raw, sizeof(raw))) return false;
+  if (strcmp(raw, "-") == 0) return false;
+  char *end = nullptr;
+  unsigned long v = strtoul(raw, &end, 10);
+  if (end == raw) return false;
+  seen = true;
+  value = (uint32_t)v;
+  return true;
+}
+
+static int parse_opt_int(const char *args, const char *key) {
+  char raw[16] = "-";
+  if (!arg_lookup(args, key, raw, sizeof(raw))) return -1;
+  if (strcmp(raw, "-") == 0) return -1;
+  char *end = nullptr;
+  long v = strtol(raw, &end, 10);
+  if (end == raw || v < 0) return -1;
+  return (int)v;
+}
+
 static void handle_db(const char *args) {
   char latestRaw[16] = "-";
   char timeRaw[8] = "0";
   char bottlesRaw[16] = "-";
   char dropsRaw[16] = "0";
+  char readyRaw[8] = "0";
+  char srcRaw[8] = "-";
+  char queuedRaw[16] = "0";
+  char stateRaw[16] = "none";
   (void)arg_lookup(args, "latest", latestRaw, sizeof(latestRaw));
   (void)arg_lookup(args, "time", timeRaw, sizeof(timeRaw));
   (void)arg_lookup(args, "bottles", bottlesRaw, sizeof(bottlesRaw));
   (void)arg_lookup(args, "drops", dropsRaw, sizeof(dropsRaw));
+  (void)arg_lookup(args, "ready", readyRaw, sizeof(readyRaw));
+  (void)arg_lookup(args, "asrc", srcRaw, sizeof(srcRaw));
+  (void)arg_lookup(args, "queued", queuedRaw, sizeof(queuedRaw));
+  (void)arg_lookup(args, "state", stateRaw, sizeof(stateRaw));
 
   if (strcmp(latestRaw, "-") == 0) {
     s_dbLatest = -2;
@@ -243,6 +305,27 @@ static void handle_db(const char *args) {
   if (d < 0) d = 0;
   if (d > 0xFFFF) d = 0xFFFF;
   s_pushDrops = (uint16_t)d;
+
+  // Configuration state. ready=0 blocks run starts on this display; an older
+  // WT32 sends no fields, which also stays "not ready" rather than starting a
+  // run whose configuration provenance is unknown.
+  s_dbReady = (atoi(readyRaw) != 0);
+  s_dbActiveExp = parse_opt_int(args, "aexp");
+  s_dbActiveDur = parse_opt_int(args, "adur");
+  s_dbActiveSrc =
+      (strcmp(srcRaw, "db") == 0) ? 1 : (strcmp(srcRaw, "local") == 0) ? 2 : 0;
+  s_dbPendingExp = parse_opt_int(args, "pexp");
+  s_dbPendingDur = parse_opt_int(args, "pdur");
+  s_dbCfgMax = parse_opt_int(args, "cfgmax");
+  long q = strtol(queuedRaw, nullptr, 10);
+  if (q < 0) q = 0;
+  if (q > 0xFFFF) q = 0xFFFF;
+  s_dbQueued = (uint16_t)q;
+  strncpy(s_dbState, stateRaw, sizeof(s_dbState) - 1);
+  s_dbState[sizeof(s_dbState) - 1] = '\0';
+  s_dbStampMs = millis();
+  (void)parse_age(args, "reads", s_dbReadSeen, s_dbReadAge0);
+  (void)parse_age(args, "ack", s_dbAckSeen, s_dbAckAge0);
 }
 
 // LOG payloads are verbatim text and must never become a printf format.
@@ -442,6 +525,34 @@ bool link_serial_time_ok() { return s_timeOk; }
 int link_serial_get_db_bottles() { return s_dbBottles; }
 
 int link_serial_get_push_drops() { return (int)s_pushDrops; }
+
+bool link_serial_db_ready() { return s_dbReady; }
+
+int link_serial_get_db_active_exp() { return s_dbActiveExp; }
+
+int link_serial_get_db_active_dur() { return s_dbActiveDur; }
+
+int link_serial_get_db_active_src() { return s_dbActiveSrc; }
+
+int link_serial_get_db_pending_exp() { return s_dbPendingExp; }
+
+int link_serial_get_db_pending_dur() { return s_dbPendingDur; }
+
+int link_serial_get_db_cfg_max() { return s_dbCfgMax; }
+
+int link_serial_get_db_queued() { return (int)s_dbQueued; }
+
+const char *link_serial_db_state() { return s_dbState; }
+
+uint32_t link_serial_get_db_read_age_ms() {
+  if (!s_dbReadSeen) return 0;
+  return s_dbReadAge0 + (millis() - s_dbStampMs);
+}
+
+uint32_t link_serial_get_db_ack_age_ms() {
+  if (!s_dbAckSeen) return 0;
+  return s_dbAckAge0 + (millis() - s_dbStampMs);
+}
 
 uint32_t link_serial_net_age_ms() {
   if (s_netStampMs == 0) return 0;

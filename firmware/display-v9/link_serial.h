@@ -74,6 +74,30 @@ int link_serial_get_db_bottles();
 // Buffered push rows dropped on WT32 queue overflow.
 int link_serial_get_push_drops();
 
+// DB configuration state (network-master-database-plan.md §4).
+// ready: at least one successful configuration pull since the WT32 booted.
+// A run must not start while this is false.
+bool link_serial_db_ready();
+// Frozen configuration of the active run: experiment id, duration, and source.
+// exp is -1 while idle. src: 0 = none, 1 = DB row, 2 = display/local values.
+int link_serial_get_db_active_exp();
+int link_serial_get_db_active_dur();
+int link_serial_get_db_active_src();
+// DB configuration for the operator-selected (pending) experiment. dur is -1
+// when the DB has no duration for that id; exp is -1 when unknown.
+int link_serial_get_db_pending_exp();
+int link_serial_get_db_pending_dur();
+// Highest CONFIGURED experiment id in the pulled history (may be higher than
+// the highest id with readings). -1 when unknown.
+int link_serial_get_db_cfg_max();
+// Rows waiting on the WT32 and the error/state category word.
+int link_serial_get_db_queued();
+const char *link_serial_db_state();  // none|net|auth|payload|schema|clock|identity
+// Ages in ms of the last successful config read / acknowledged upload;
+// 0 means it has not happened yet.
+uint32_t link_serial_get_db_read_age_ms();
+uint32_t link_serial_get_db_ack_age_ms();
+
 // Debug over USB Serial.
 void link_serial_debug_print();
 

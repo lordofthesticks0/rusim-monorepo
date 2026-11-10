@@ -24,7 +24,7 @@ describe("CSV chamber numbering", () => {
     ]);
     const [header, first, second] = csv.split("\r\n");
 
-    expect(header).toBe("bottle_id,timestamp,pH,Temp (°C),CO2 (ppm),CH4 (ppm),Pressure (kPa)");
+    expect(header).toBe("bottle_id,timestamp,pH,Temp (°C),CO2 (ppm),CH4 (ppm),Pressure (Pa)");
     expect(first!.startsWith("1,")).toBe(true);
     expect(second!.startsWith("8,")).toBe(true);
   });

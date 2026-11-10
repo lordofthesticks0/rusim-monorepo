@@ -48,9 +48,36 @@ static void exp_show() {
   lv_label_set_text(s_expValue, t);
 }
 
+// Explains which configuration the next start will use, and why a start is
+// blocked. While a run is active it reports the FROZEN snapshot instead, so
+// edits on this screen are visibly pending rather than silently applied.
 static void db_refresh_warn() {
   if (!ui_is_control()) return;
   if (s_expDesc == nullptr) return;
+  char t[64];
+
+  if (g.experimentRunning) {
+    int aexp = link_serial_get_db_active_exp();
+    if (aexp < 0) {
+      // Older WT32 firmware sends no active-run fields.
+      lv_label_set_text(s_expDesc, "run: config unknown");
+      lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_WARN), LV_PART_MAIN);
+      return;
+    }
+    int src = link_serial_get_db_active_src();
+    snprintf(t, sizeof(t), "run %d: %dh %s", aexp, link_serial_get_db_active_dur(),
+             src == 1 ? "DB" : src == 2 ? "local" : "?");
+    lv_label_set_text(s_expDesc, t);
+    lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_OK), LV_PART_MAIN);
+    return;
+  }
+
+  if (!link_serial_db_ready()) {
+    lv_label_set_text(s_expDesc, "DB not loaded: blocked");
+    lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_ALARM), LV_PART_MAIN);
+    return;
+  }
+
   int latest = link_serial_get_db_latest();
   if (latest == -2) {
     lv_label_set_text(s_expDesc, "DB: waiting for sync");
@@ -59,7 +86,11 @@ static void db_refresh_warn() {
   }
   if (!s_dbSuggested) {
     s_dbSuggested = true;
-    int next = latest + 1;
+    // Consider configured-but-unread experiments too: suggesting latest+1 would
+    // reuse an id that already has a reserved configuration row.
+    int cfgMax = link_serial_get_db_cfg_max();
+    int base = latest > cfgMax ? latest : cfgMax;
+    int next = base + 1;
     if (next < UI_EXP_NUM_MIN) next = UI_EXP_NUM_MIN;
     if (next > UI_EXP_NUM_MAX) next = UI_EXP_NUM_MAX;
     if (g.expNum != next) {
@@ -71,16 +102,21 @@ static void db_refresh_warn() {
     }
   }
   if (g.expNum <= latest) {
-    char t[64];
     snprintf(t, sizeof(t), "exp %d exists, use %d", g.expNum, latest + 1);
     lv_label_set_text(s_expDesc, t);
     lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_WARN), LV_PART_MAIN);
-  } else {
-    char t[64];
-    snprintf(t, sizeof(t), "DB latest %d, use %d", latest, g.expNum);
-    lv_label_set_text(s_expDesc, t);
-    lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_OK), LV_PART_MAIN);
+    return;
   }
+  // The DB row for the selected id supplies duration/interval at run start.
+  // No row means the display values are used, which is shown before starting.
+  int pendingDur = link_serial_get_db_pending_dur();
+  if (pendingDur > 0) {
+    snprintf(t, sizeof(t), "exp %d: DB %dh", g.expNum, pendingDur);
+  } else {
+    snprintf(t, sizeof(t), "exp %d: local %dh", g.expNum, g.durationH);
+  }
+  lv_label_set_text(s_expDesc, t);
+  lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_OK), LV_PART_MAIN);
 }
 
 void screen_control_poll() {
