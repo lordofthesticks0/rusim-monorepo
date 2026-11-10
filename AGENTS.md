@@ -145,6 +145,7 @@ graphify --help
 - Prefer Graphify queries over broad file searches when exploring code relationships.
 - Read source files only after establishing which files are relevant.
 - Do not open entire documentation directories. Read only the documents necessary for the current task.
+- When compiling, a lot of the text will be mostly noise. Greatly utilize `tail` or `grep` to filter out unnecessary output.
 
 ### Backlog and Continuity
 

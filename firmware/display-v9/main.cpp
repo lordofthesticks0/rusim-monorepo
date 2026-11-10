@@ -13,7 +13,7 @@
 
 #include "fake_data.h"
 #include "link_serial.h"
-#include "provision_ap.h"
+
 #include "screen_control.h"
 #include "screen_home.h"
 #include "screen_info.h"
@@ -225,7 +225,7 @@ void loop() {
     screen_info_poll(); /* info tiles refresh */
     ui_update_clock();
   }
-  provision_ap_poll(); /* SoftAP credential form, while it is running */
+
   if (!passthrough) {
     sleep_tick();       /* 60 s idle -> backlight off */
     lv_timer_handler(); /* let the GUI do its work */

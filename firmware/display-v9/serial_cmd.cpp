@@ -4,14 +4,10 @@
 
 #include "fake_data.h"
 #include "link_serial.h"
-#include "provision_ap.h"
 #include "ui_config.h"
 #include "ui_shell.h"
 
-// 96 bytes was sized for the one-argument fake-data commands. CREDS carries a
-// username and a password of up to LINK_USER_MAX / LINK_PASS_MAX, so the
-// buffer has to fit the command word, both fields, two spaces and the
-// terminator. 200 is comfortably above that and still bounded.
+// Bounded USB console line buffer. Characters past the end are dropped.
 static char s_line[200];
 static size_t s_len = 0;
 
@@ -73,8 +69,7 @@ static void print_help() {
   Serial.println("CMDS: SETPOINT <f> | DURATION <1-99> | STIRRER ON|OFF |");
   Serial.println("      POST ON|OFF | RUN ON|OFF | EXP <n> | PUSH | STATUS | LINK | MEM | HELP");
   Serial.println("PUSH                  request the WT32 snapshot (no synthetic readings)");
-  Serial.println("CREDS <user> <pass>   stage portal credentials for the WT32");
-  Serial.println("AP                    toggle the cloaked SoftAP credential form");
+
   Serial.println("MEM                   heap/PSRAM counters (O(1); never walks the heap)");
   Serial.println("PASSTH ON|OFF         raw USB <-> IO17/IO18 tunnel (WT32 flash/log)");
 #if IS_DEBUG
@@ -103,26 +98,6 @@ static void print_status() {
   }
 }
 
-// Credentials sourced from the phone form on /setup, and staged onto the
-// serial link exactly as the on-screen Confirm does. Username only: the
-// password would land in the terminal scrollback and in any captured log,
-// which is what the non-echoing serial prompt in the WT32 ping-test exists
-// to avoid. Use the SoftAP or the touchscreen for the password itself.
-static void handle_creds(char *args) {
-  char *user = strtok(args, " \t");
-  char *pass = strtok(nullptr, " \t");
-  if (user == nullptr || pass == nullptr) {
-    Serial.println("usage: CREDS <user> <pass>");
-    return;
-  }
-  int dur = g.durationH;
-  if (dur < UI_DURATION_MIN_H) dur = UI_DURATION_MIN_H;
-  if (dur > UI_DURATION_MAX_H) dur = UI_DURATION_MAX_H;
-  g.durationH = dur;
-  link_serial_set_credentials(user, pass);
-  link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
-  Serial.printf("[SETUP] creds staged from serial user='%s'\n", user);
-}
 
 static bool parse_onoff(const char *t, bool &out) {
   if (strcasecmp(t, "ON") == 0 || strcasecmp(t, "1") == 0) {
@@ -147,37 +122,7 @@ static void handle_line(char *line) {
 
   bool mutated = false;
 
-  if (strcmp(cmd, "CREDS") == 0) {
-    // strtok replaced the first delimiter after the command word with a NUL,
-    // so the argument text starts one byte past the end of cmd. If cmd ran to
-    // the end of the line there was no delimiter, and stepping over the
-    // terminator would read past the line into whatever the previous, longer
-    // command left in the buffer.
-    size_t cmdLen = strlen(cmd);
-    if (cmd + cmdLen >= line + lineLen) {
-      Serial.println("usage: CREDS <user> <pass>");
-      return;
-    }
-    handle_creds(cmd + cmdLen + 1);
-    return;
-  } else if (strcmp(cmd, "AP") == 0) {
-    if (provision_ap_active()) {
-      provision_ap_end();
-      Serial.println("[AP] stopped");
-    } else {
-      provision_ap_begin();
-      if (provision_ap_active()) {
-        char payload[PROVISION_QR_MAX];
-        provision_ap_wifi_qr_payload(payload, sizeof(payload));
-        Serial.printf("[AP] ssid='%s' hidden=%d\n", provision_ap_ssid(),
-                      provision_ap_hidden() ? 1 : 0);
-        Serial.printf("[AP] step 1 QR: %s\n", payload);
-        Serial.printf("[AP] step 2 QR: %s\n", provision_ap_url());
-      } else {
-        Serial.println("[AP] failed to start");
-      }
-    }
-  } else if (strcmp(cmd, "HELP") == 0 || strcmp(cmd, "?") == 0) {
+  if (strcmp(cmd, "HELP") == 0 || strcmp(cmd, "?") == 0) {
     print_help();
   } else if (strcmp(cmd, "STATUS") == 0) {
     print_status();

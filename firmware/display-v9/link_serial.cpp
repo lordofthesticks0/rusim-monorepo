@@ -16,12 +16,6 @@ static bool s_rxOverflow = false;
 static uint32_t s_lastByteMs = 0;
 static uint32_t s_lastBeatMs = 0;
 
-// Staged pair. Kept for the whole session: HELLO after a WT32 reboot clears
-// the verdict bookkeeping and expects the pair to be re-pushed.
-static char s_user[LINK_USER_MAX + 1];
-static char s_pass[LINK_PASS_MAX + 1];
-static bool s_havePair = false;
-static bool s_verdictForPair = false;
 
 static int s_durationH = 24;
 static bool s_expRunning = false;
@@ -76,19 +70,6 @@ static bool s_passthrough = false;
 
 // --- small bounded helpers -------------------------------------------------
 
-static void trim_ws(char *s) {
-  if (s == nullptr) return;
-  size_t len = strlen(s);
-  size_t start = 0;
-  while (start < len && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r' ||
-                         s[start] == '\n'))
-    start++;
-  while (len > start && (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\r' ||
-                         s[len - 1] == '\n'))
-    len--;
-  if (start > 0) memmove(s, s + start, len - start);
-  s[len - start] = '\0';
-}
 
 // Reads key=value out of a space-separated argument string. Bounded copy.
 static bool arg_lookup(const char *args, const char *key, char *out, size_t cap) {
@@ -110,85 +91,32 @@ static bool arg_lookup(const char *args, const char *key, char *out, size_t cap)
   return false;
 }
 
-// Percent-encodes user/pass values. Only [0-9A-Za-z-._~] pass unescaped;
-// '%' and '=' are escaped like any other reserved byte.
-static bool pct_encode(const char *in, char *out, size_t cap) {
-  static const char *hex = "0123456789ABCDEF";
-  size_t o = 0;
-  for (size_t i = 0; in[i] != '\0'; i++) {
-    unsigned char c = (unsigned char)in[i];
-    bool plain = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
-                 (c >= 'a' && c <= 'z') || c == '-' || c == '_' || c == '.' || c == '~';
-    size_t need = plain ? 1 : 3;
-    if (o + need + 1 > cap) return false;
-    if (plain) {
-      out[o++] = (char)c;
-    } else {
-      out[o++] = '%';
-      out[o++] = hex[(c >> 4) & 0xF];
-      out[o++] = hex[c & 0xF];
-    }
-  }
-  out[o] = '\0';
-  return true;
-}
 
 // --- outbound --------------------------------------------------------------
 
-// Echoes one outbound command on the USB console. The CREDS payload is
-// replaced by the word alone so the password never reaches a log.
-static void echo_line(const char *line, bool hideArgs) {
-  if (hideArgs) {
-    const char *sp = strchr(line, ' ');
-    if (sp != nullptr) {
-      char word[24];
-      size_t n = (size_t)(sp - line);
-      if (n >= sizeof(word)) n = sizeof(word) - 1;
-      memcpy(word, line, n);
-      word[n] = '\0';
-      Serial.printf("[LINK>] %s\n", word);
-      return;
-    }
-  }
-  Serial.printf("[LINK>] %s\n", line);
-}
-
-static void write_line(const char *line, bool hideArgs) {
+static void write_line(const char *line) {
   if (s_passthrough || line == nullptr) return;
   Serial1.print(line);
   Serial1.print('\n');
-  echo_line(line, hideArgs);
+  Serial.printf("[LINK>] %s\n", line);
 }
 
-static void emit_hello() { write_line("HELLO", false); }
+static void emit_hello() { write_line("HELLO"); }
 
 static void emit_experiment() {
   char line[64];
   snprintf(line, sizeof(line), "EXPERIMENT run=%d num=%d dur=%d",
            s_expRunning ? 1 : 0, s_expNum, s_durationH);
-  write_line(line, false);
-}
-
-static void emit_creds() {
-  char userEnc[3 * LINK_USER_MAX + 1];
-  char passEnc[3 * LINK_PASS_MAX + 1];
-  if (!pct_encode(s_user, userEnc, sizeof(userEnc))) return;
-  if (!pct_encode(s_pass, passEnc, sizeof(passEnc))) return;
-  char line[sizeof(userEnc) + sizeof(passEnc) + 16];
-  int n = snprintf(line, sizeof(line), "CREDS user=%s pass=%s", userEnc, passEnc);
-  if (n <= 0 || (size_t)n >= sizeof(line)) return;
-  write_line(line, true);
+  write_line(line);
 }
 
 // --- inbound parsing -------------------------------------------------------
 
 static void handle_hello() {
   // A fresh WT32 knows nothing. Drop the old verdict and pending bookkeeping
-  // so a pair that was already staged is pushed to it, and let the WT32's
-  // snapshot decide whether the login gate comes back.
+  // so the login gate is driven by the WT32's next LOGINREQ.
   s_result = LINK_RESULT_NONE;
   s_resultPending = false;
-  s_verdictForPair = false;
   s_loginReq = false;
   s_loginReqPending = false;
   // A rebooted WT32 has no configuration and no session: drop the previous
@@ -207,7 +135,7 @@ static void handle_hello() {
   snprintf(s_dbState, sizeof(s_dbState), "none");
   s_sensSeen = false;
   s_sens = {};
-  Serial.println("[LINK] WT32 HELLO, link up (pair kept for re-push)");
+  Serial.println("[LINK] WT32 HELLO, link up");
 }
 
 static void handle_login_req() {
@@ -225,7 +153,6 @@ static void handle_result(const char *args) {
     return;
   }
   s_resultPending = true;
-  s_verdictForPair = true;
   Serial.printf("[LINK] WT32 RESULT %s\n", args);
 }
 
@@ -496,7 +423,6 @@ void link_serial_poll() {
   if (millis() - s_lastBeatMs >= LINK_BEAT_MS) {
     s_lastBeatMs = millis();
     emit_experiment();
-    if (s_havePair && !s_verdictForPair) emit_creds();
   }
 }
 
@@ -506,32 +432,6 @@ bool link_serial_take_login_request() {
   return v;
 }
 
-void link_serial_set_credentials(const char *user, const char *pass) {
-  memset(s_user, 0, sizeof(s_user));
-  memset(s_pass, 0, sizeof(s_pass));
-  if (user != nullptr) {
-    strncpy(s_user, user, sizeof(s_user) - 1);
-    trim_ws(s_user);
-  }
-  if (pass != nullptr) {
-    strncpy(s_pass, pass, sizeof(s_pass) - 1);
-    trim_ws(s_pass);
-  }
-  if (s_user[0] == '\0' || s_pass[0] == '\0') {
-    s_havePair = false;
-    s_verdictForPair = false;
-    Serial.println("[LINK] credentials ignored: username and password both required");
-    return;
-  }
-  s_havePair = true;
-  s_verdictForPair = false;
-  s_result = LINK_RESULT_NONE;
-  s_resultPending = false;
-  Serial.printf("[LINK] creds staged user='%s'\n", s_user);
-  // Sent immediately, so a corrected pair takes effect without waiting for the
-  // heartbeat. Every staging path lands here.
-  emit_creds();
-}
 
 void link_serial_set_exp_state(bool running, int expNum, int durationH) {
   if (expNum < 0) expNum = 0;
@@ -556,9 +456,7 @@ void link_serial_set_exp_state(bool running, int expNum, int durationH) {
 
 void link_serial_emit_experiment() { emit_experiment(); }
 
-bool link_serial_creds_ready() { return s_havePair && !s_verdictForPair; }
 
-int link_serial_result() { return s_result; }
 
 bool link_serial_take_result(int &out) {
   if (!s_resultPending) return false;
@@ -570,12 +468,11 @@ bool link_serial_take_result(int &out) {
 void link_serial_debug_print() {
   char ip[LINK_IP_MAX + 1];
   link_serial_get_ip(ip, sizeof(ip));
-  Serial.printf("[LINK] link=%s beat=%lums req=%d pair=%d pending=%d result=%d user='%s' "
+  Serial.printf("[LINK] link=%s beat=%lums req=%d result=%d "
                 "exp=%d run=%d dur=%d ip='%s' ping=%d up=%d age=%lu db=%d tok=%d "
                 "bottles=%d drops=%d\n",
                 s_passthrough ? "passthrough" : "line", (unsigned long)(millis() - s_lastBeatMs),
-                s_loginReq ? 1 : 0, s_havePair ? 1 : 0, link_serial_creds_ready() ? 1 : 0,
-                s_result, s_user, s_expNum, s_expRunning ? 1 : 0, s_durationH, ip,
+                s_loginReq ? 1 : 0, s_result, s_expNum, s_expRunning ? 1 : 0, s_durationH, ip,
                 link_serial_get_ping_ms(), s_netUp ? 1 : 0,
                 (unsigned long)link_serial_net_age_ms(), s_dbLatest, s_timeOk ? 1 : 0,
                 s_dbBottles, (int)s_pushDrops);
@@ -638,7 +535,7 @@ uint32_t link_serial_net_age_ms() {
 bool link_serial_send_raw(const char *line) {
   if (line == nullptr || s_passthrough) return false;
   if (strlen(line) > LINK_LINE_MAX) return false;
-  write_line(line, false);
+  write_line(line);
   return true;
 }
 

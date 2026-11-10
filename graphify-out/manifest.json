@@ -114,51 +114,39 @@
     "semantic_hash": ""
   },
   "firmware/display-v9/fake_data.cpp": {
-    "mtime": 1794288169.0474436,
-    "seen": 1794288321.1266465,
-    "ast_hash": "79e313cd2cfa9501b30055f1c01fd2ca",
+    "mtime": 1794292370.7587478,
+    "seen": 1794303723.8013878,
+    "ast_hash": "716dbeeed27bf66134b3f0395eb71a4c",
     "semantic_hash": ""
   },
   "firmware/display-v9/fake_data.h": {
-    "mtime": 1794288152.0934181,
-    "seen": 1794288321.1266484,
-    "ast_hash": "9147354413d3015cf29a201b3e1fa247",
+    "mtime": 1794292370.7847478,
+    "seen": 1794303723.8013892,
+    "ast_hash": "9e0dfb62b592fa04bd1f709a7efea8e7",
     "semantic_hash": ""
   },
   "firmware/display-v9/link_serial.cpp": {
-    "mtime": 1794288094.6463318,
-    "seen": 1794288321.1266494,
-    "ast_hash": "3aee5860f27567e28699319c8e48ff20",
+    "mtime": 1794302675.03836,
+    "seen": 1794303723.8013906,
+    "ast_hash": "f4ffe9fad3a021689a3598ffaaa04e2b",
     "semantic_hash": ""
   },
   "firmware/display-v9/link_serial.h": {
-    "mtime": 1794288094.6443317,
-    "seen": 1794288321.1266503,
-    "ast_hash": "81ce300836f0f74b914e0f429f741013",
+    "mtime": 1794302428.8700838,
+    "seen": 1794303723.8013916,
+    "ast_hash": "5a6e6bf44f18cd6663727bb8f7fee17a",
     "semantic_hash": ""
   },
   "firmware/display-v9/lv_conf.h": {
-    "mtime": 1792038690.807452,
-    "seen": 1794285266.745888,
-    "ast_hash": "d504be2a184186e61f585e830bb15cd9",
+    "mtime": 1794302613.6442912,
+    "seen": 1794303723.8013926,
+    "ast_hash": "ce7f0d38ab7a536eca4c2edc2b233ce4",
     "semantic_hash": ""
   },
   "firmware/display-v9/main.cpp": {
-    "mtime": 1792826409.352122,
-    "seen": 1794285266.74589,
-    "ast_hash": "a27bd8039028dc63bb98abd2fbeef9d3",
-    "semantic_hash": ""
-  },
-  "firmware/display-v9/provision_ap.cpp": {
-    "mtime": 1792822943.509389,
-    "seen": 1794285266.7458916,
-    "ast_hash": "c05865dcc4148fa77b64cff71d2bbd7d",
-    "semantic_hash": ""
-  },
-  "firmware/display-v9/provision_ap.h": {
-    "mtime": 1792822717.6052108,
-    "seen": 1794285266.7458935,
-    "ast_hash": "8c7ee78a7ff8867ef24113adb9c93461",
+    "mtime": 1794302487.9281502,
+    "seen": 1794303723.8013937,
+    "ast_hash": "c8ad02dfa30dab664ef441d08256067b",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_control.cpp": {
@@ -174,9 +162,9 @@
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_data.cpp": {
-    "mtime": 1792037761.4825296,
-    "seen": 1794285266.745898,
-    "ast_hash": "aa4a4777cb15d5cb062bee9c3507540e",
+    "mtime": 1794298698.753377,
+    "seen": 1794303723.8014333,
+    "ast_hash": "ae2d8be8404402f8338032174b18d88a",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_data.h": {
@@ -186,9 +174,9 @@
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_home.cpp": {
-    "mtime": 1792822676.9632201,
-    "seen": 1794285266.745901,
-    "ast_hash": "8a0a71d967cd92dae2eebdcd10f0e069",
+    "mtime": 1794292399.49778,
+    "seen": 1794303723.8014512,
+    "ast_hash": "04e80166304c5764d31b0beee43bf67d",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_home.h": {
@@ -198,9 +186,9 @@
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_info.cpp": {
-    "mtime": 1794284669.6475844,
-    "seen": 1794285266.7459042,
-    "ast_hash": "d3f12e24d72e7596b538d5d96f3bcdd7",
+    "mtime": 1794292399.50978,
+    "seen": 1794303723.801469,
+    "ast_hash": "6bc87591a8ac582d3800c4df17ae4aeb",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_info.h": {
@@ -210,51 +198,45 @@
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_setup.cpp": {
-    "mtime": 1792823238.5476215,
-    "seen": 1794285266.7459073,
-    "ast_hash": "675ff76f31f5b904cef21b60f8788036",
+    "mtime": 1794303601.811546,
+    "seen": 1794303723.801488,
+    "ast_hash": "5bd135c4fd4bec87e3e798de34f4d347",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_setup.h": {
-    "mtime": 1792822717.5882108,
-    "seen": 1794285266.745909,
-    "ast_hash": "2ef3f2caad5c47acbcef25b5b4ac4dbb",
+    "mtime": 1794302500.4591641,
+    "seen": 1794303723.8014889,
+    "ast_hash": "7ce6133c15d1cd34b8e0365a5f4278d6",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_sleep.cpp": {
-    "mtime": 1791359606.1490333,
-    "seen": 1794285266.745911,
-    "ast_hash": "38906d7e1b5d6283c15cf2efc616d9d8",
+    "mtime": 1794302494.3691573,
+    "seen": 1794303723.8014898,
+    "ast_hash": "f14dd6f184f4e53c1517ac34ac368b2c",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_sleep.h": {
-    "mtime": 1791359602.3980265,
-    "seen": 1794285266.7459123,
-    "ast_hash": "edc9f85eb7900b9049b20f2048023ff9",
+    "mtime": 1794302494.958158,
+    "seen": 1794303723.801491,
+    "ast_hash": "54108db248df5ad85486c4461ecf8363",
     "semantic_hash": ""
   },
   "firmware/display-v9/serial_cmd.cpp": {
-    "mtime": 1792822960.6574025,
-    "seen": 1794285266.7459137,
-    "ast_hash": "0095b2362649863495bec535837b43ba",
+    "mtime": 1794302523.0071895,
+    "seen": 1794303723.801492,
+    "ast_hash": "bb3d2919818ebe564c6885ecbec56fba",
     "semantic_hash": ""
   },
   "firmware/display-v9/serial_cmd.h": {
-    "mtime": 1792822705.4832013,
-    "seen": 1794285266.7459154,
-    "ast_hash": "158c972acd33277f8ef4375ecc01b6c7",
+    "mtime": 1794292399.5787802,
+    "seen": 1794303723.801493,
+    "ast_hash": "4958d9c06d25db6d261594b688407150",
     "semantic_hash": ""
   },
   "firmware/display-v9/sim/Arduino.h": {
     "mtime": 1792040366.8105354,
     "seen": 1794285266.745917,
     "ast_hash": "de05e83308c1fd91f3f86b6b44f94808",
-    "semantic_hash": ""
-  },
-  "firmware/display-v9/sim/link_provision_stub.cpp": {
-    "mtime": 1794288176.7784553,
-    "seen": 1794288321.126945,
-    "ast_hash": "5fc2de9565c7c9f5a3afd2cf22eaee26",
     "semantic_hash": ""
   },
   "firmware/display-v9/sim/lv_conf.h": {
@@ -276,9 +258,9 @@
     "semantic_hash": "ab0b9cfefa55119ca907b4f6ada89d8a"
   },
   "firmware/display-v9/ui_config.h": {
-    "mtime": 1794288152.0894182,
-    "seen": 1794288321.1269956,
-    "ast_hash": "10db370d6f6136b1c5d479d254215fcc",
+    "mtime": 1794292399.52378,
+    "seen": 1794303723.8015742,
+    "ast_hash": "8912a33e32a7c8d46ed9cf18b07c8754",
     "semantic_hash": ""
   },
   "firmware/display-v9/ui_hold_button.cpp": {
@@ -294,15 +276,15 @@
     "semantic_hash": ""
   },
   "firmware/display-v9/ui_shell.cpp": {
-    "mtime": 1794288176.7854552,
-    "seen": 1794288321.1270359,
-    "ast_hash": "9a52987170ec1be72677fa1ddbeae333",
+    "mtime": 1794299297.9371924,
+    "seen": 1794303723.8016093,
+    "ast_hash": "e9baa7b145c81be155fbe1f312132676",
     "semantic_hash": ""
   },
   "firmware/display-v9/ui_shell.h": {
-    "mtime": 1792035812.0586562,
-    "seen": 1794285266.7459326,
-    "ast_hash": "7695ff86b220525935ba43749cb70cf4",
+    "mtime": 1794292478.8948686,
+    "seen": 1794303723.8016105,
+    "ast_hash": "65d436e685d0362cece7a31b25431d41",
     "semantic_hash": ""
   },
   "firmware/methane-calibrate/main.cpp": {
@@ -318,9 +300,9 @@
     "semantic_hash": ""
   },
   "firmware/network-master/main.cpp": {
-    "mtime": 1794288144.9434073,
-    "seen": 1794288321.1270988,
-    "ast_hash": "7c8bb06f8f3310919f580603b527409f",
+    "mtime": 1794302996.2957249,
+    "seen": 1794303723.8016653,
+    "ast_hash": "4aff9a86659f7aae366fa7518548e3b2",
     "semantic_hash": ""
   },
   "firmware/network-master/supabase_ca.h": {
@@ -433,9 +415,9 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1794282164.3426394,
-    "seen": 1794285266.7459848,
-    "ast_hash": "6f41f5dc4f3627b644f98794410af4d6",
+    "mtime": 1794303064.6568174,
+    "seen": 1794303723.8021038,
+    "ast_hash": "5e4369c2a6d7751c9dd957ac464cc304",
     "semantic_hash": ""
   },
   "README.md": {
@@ -469,9 +451,9 @@
     "semantic_hash": ""
   },
   "docs/index.md": {
-    "mtime": 1794284876.7031145,
-    "seen": 1794285266.7459946,
-    "ast_hash": "20d4e1b086997a7bbe6baf6c9f72257b",
+    "mtime": 1794303707.0466888,
+    "seen": 1794303723.8021872,
+    "ast_hash": "d48b7d9509655e687635610d7721bac7",
     "semantic_hash": ""
   },
   "docs/llm-generated/SUNTON-luna.md": {
@@ -529,9 +511,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/db-sync-experiment-ntp.md": {
-    "mtime": 1792823210.497412,
-    "seen": 1794285266.7460196,
-    "ast_hash": "03cb49d58b36be94359a7f049c68edef",
+    "mtime": 1794290587.9006782,
+    "seen": 1794303723.802344,
+    "ast_hash": "df91ca8f23dcf26d6f029a1f9e0e3650",
     "semantic_hash": ""
   },
   "docs/llm-generated/display-debug-flag.md": {
@@ -541,9 +523,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/display-docs.md": {
-    "mtime": 1794288294.3576322,
-    "seen": 1794288321.127769,
-    "ast_hash": "98b26657a401283629680437b275ec50",
+    "mtime": 1794303706.9146886,
+    "seen": 1794303723.8023622,
+    "ast_hash": "488672d2001284a84339acfe3264613a",
     "semantic_hash": ""
   },
   "docs/llm-generated/display-info-reboot.md": {
@@ -559,9 +541,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/display-provisioning-ap.md": {
-    "mtime": 1792834723.2172825,
-    "seen": 1794285266.7460282,
-    "ast_hash": "e85008a1d26cbc93057e93c520d13917",
+    "mtime": 1794303602.2785466,
+    "seen": 1794303723.8023973,
+    "ast_hash": "b61a21e7c034ecb784ff06165ceae461",
     "semantic_hash": ""
   },
   "docs/llm-generated/display-sim.md": {
@@ -619,15 +601,15 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/link-serial-protocol.md": {
-    "mtime": 1794288263.790586,
-    "seen": 1794288321.127992,
-    "ast_hash": "37b8dafbce7e3415c7861416b3d632b2",
+    "mtime": 1794303706.9706886,
+    "seen": 1794303723.8026042,
+    "ast_hash": "2640ee9e83d2bb18d202ac345ef4be2d",
     "semantic_hash": ""
   },
   "docs/llm-generated/lvgl-redesign.md": {
-    "mtime": 1794288302.5446444,
-    "seen": 1794288321.1279926,
-    "ast_hash": "11d95fa1ae0bb7dca6d0d5ef1a84c689",
+    "mtime": 1794299357.5162716,
+    "seen": 1794303723.8026054,
+    "ast_hash": "035fe055113565ec6dc2c4a43e336c13",
     "semantic_hash": ""
   },
   "docs/llm-generated/memory-safety-hardening.md": {
@@ -649,9 +631,9 @@
     "semantic_hash": ""
   },
   "docs/llm-generated/network-master.md": {
-    "mtime": 1794288272.383599,
-    "seen": 1794288321.1280594,
-    "ast_hash": "7d34a68986bf4fb55f06fb8d5d6266a0",
+    "mtime": 1794303707.0186887,
+    "seen": 1794303723.8026755,
+    "ast_hash": "9cbab12d465c62eeb8515fdcf73bf9c5",
     "semantic_hash": ""
   },
   "docs/llm-generated/pi-kiosk-font-scale.md": {
@@ -892,6 +874,42 @@
     "mtime": 1794284867.7630916,
     "seen": 1794285266.7460582,
     "ast_hash": "ac8fe75b55052d5897cd1c085b932d78",
+    "semantic_hash": ""
+  },
+  "firmware/display-v9/sim/link_stub.cpp": {
+    "mtime": 1794302590.157265,
+    "seen": 1794303723.801517,
+    "ast_hash": "239cb6a6ca32f1f095e6f07bb9973281",
+    "semantic_hash": ""
+  },
+  "firmware/tests/display-sensors/Arduino.h": {
+    "mtime": 1794292591.6049943,
+    "seen": 1794303723.8017385,
+    "ast_hash": "a7201d23277be657c4b64a7b0b043b1e",
+    "semantic_hash": ""
+  },
+  "firmware/tests/display-sensors/lvgl.h": {
+    "mtime": 1794292591.6119943,
+    "seen": 1794303723.8017397,
+    "ast_hash": "48ca3f8db14608471c89692d2be24fc9",
+    "semantic_hash": ""
+  },
+  "firmware/tests/display-sensors/run_tests.py": {
+    "mtime": 1794292591.6159942,
+    "seen": 1794303723.8017411,
+    "ast_hash": "c3198552d665b229987f52074c966bdb",
+    "semantic_hash": ""
+  },
+  "firmware/tests/display-sensors/test_display_sensors.cpp": {
+    "mtime": 1794302649.158331,
+    "seen": 1794303723.801742,
+    "ast_hash": "65990aae01ba65ed466622f205c41145",
+    "semantic_hash": ""
+  },
+  "docs/llm-summary/learned-mistakes.md": {
+    "mtime": 1794291837.9918895,
+    "seen": 1794303723.8031375,
+    "ast_hash": "25afade9633f8381b908289efb9701b9",
     "semantic_hash": ""
   }
 }

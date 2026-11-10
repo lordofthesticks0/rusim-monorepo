@@ -12,7 +12,7 @@
 // docs/llm-generated/link-serial-protocol.md for the wire specification.
 //
 // Inbound words handled here: HELLO, LOGINREQ, RESULT, NET, DB, LOG, SENS.
-// Outbound words: HELLO, EXPERIMENT, CREDS (DUMP via W32CMD in debug builds).
+// Outbound words: HELLO, EXPERIMENT (DUMP via W32CMD in debug builds).
 // Unknown or wrong-direction lines are ignored.
 
 #include <Arduino.h>
@@ -29,8 +29,6 @@
 #define LINK_BEAT_MS 5000
 
 #define LINK_IP_MAX 16
-#define LINK_USER_MAX 64
-#define LINK_PASS_MAX 64
 
 #define LINK_RESULT_NONE 0
 #define LINK_RESULT_SUCCESS 1
@@ -42,13 +40,6 @@ void link_serial_poll();
 // Called from loop(). Returns true once per LOGINREQ line received.
 bool link_serial_take_login_request();
 
-// Stores a credential pair and emits CREDS immediately. The pair is re-emitted
-// on every heartbeat until a RESULT for it arrives. Called by every staging
-// path (phone form, USB serial).
-void link_serial_set_credentials(const char *user, const char *pass);
-
-// True while a pair has been staged and no verdict for it has arrived.
-bool link_serial_creds_ready();
 int link_serial_result();
 
 // Experiment state mirror; emits EXPERIMENT immediately when it changes.

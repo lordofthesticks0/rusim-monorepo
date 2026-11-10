@@ -936,7 +936,7 @@
 #define LV_USE_RLE 0
 
 /** QR code library */
-#define LV_USE_QRCODE 1   /**< /setup shows a Wi-Fi join code, then the URL */
+#define LV_USE_QRCODE 1   /**< /setup shows a QR code for the WT32 login URL */
 
 /** Barcode code library */
 #define LV_USE_BARCODE 0

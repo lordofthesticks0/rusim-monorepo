@@ -5,9 +5,11 @@
 `firmware/display-v9/` is the Display MCU firmware: Sunton 800×480 ST7262
 (RGB565) + GT911 touch, ESP32-S3, LVGL v9.6.0, Arduino_GFX flush path.
 
-The WT32 supplies login, network status, database state, experiment state,
-and bottle readings over `rusim-line` (`link-serial-protocol.md`). Sensor
-values start unavailable and change only when a real `SENS` frame arrives;
+The WT32 serves the login page and supplies network status, database state,
+experiment state, and bottle readings over `rusim-line`
+(`link-serial-protocol.md`). The display shows a QR for the WT32's reported IP;
+it never serves a web page, provisions Wi-Fi, or receives login credentials.
+Sensor values start unavailable and change only when a real `SENS` frame arrives;
 there is no fake seed, random jitter, or simulated sensor fallback. The
 legacy filenames/types `fake_data` and `BottleFake` remain for compatibility.
 Setpoint, stirrer and POST controls still lack real hardware transport.
@@ -32,15 +34,15 @@ hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
 
 | File | Role |
 |---|---|
-| `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_serial_init()` + `ui_init()`; `loop()` = USB serial poll → link poll → setup/home/control/info polls → clock → SoftAP poll → sleep tick → `lv_timer_handler()`, with all LVGL work suspended while the `PASSTH` tunnel is open |
-| `lv_conf.h` | Enables vs stock: `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART, BUTTONMATRIX, QRCODE (+CANVAS, required by qrcode)` = 1; fonts +12/+20/+28. `KEYBOARD` is now 0 (credential entry moved to QR, §12). **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
-| `link_serial.h/.cpp` | `rusim-line` v1 peer on `Serial1` (RX 18 / TX 17, 115200 8N1). Line parser, 5 s heartbeats, all inbound/outbound words, log forwarding, `SENS` real sensor frames, `PASSTH` tunnel. `Serial` stays USB debug only. Full wire spec in §10 and `link-serial-protocol.md` |
-| `screen_setup.h/.cpp` | `/setup` first-class route (route 6): 300 px QR (Wi-Fi join code, then the login URL) + SSID and passphrase readout + Start/Stop button. `ui_init()` opens it first; WT32 `LOGINREQ` re-raises it; `RESULT OK` routes home. No keyboard (§12); duration/exp number/run live on `/control`. The SoftAP stays up while either `/setup` or `/info` is showing (§13). `RESULT FAIL` puts the wrong-password text on the panel, and the phone sees the same verdict (§12) |
+| `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_serial_init()` + `ui_init()`; `loop()` polls USB, link, screens, clock, sleep, and LVGL; all LVGL work is suspended while the `PASSTH` tunnel is open |
+| `lv_conf.h` | Enables `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART, BUTTONMATRIX, QRCODE (+CANVAS, required by qrcode)`; fonts +12/+20/+28. `KEYBOARD` is 0 because the display has no credential entry form (§12). **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
+| `link_serial.h/.cpp` | `rusim-line` v1 peer on `Serial1` (RX 18 / TX 17, 115200 8N1). Line parser, 5 s heartbeats, link gate words (`LOGINREQ`, `RESULT`), network/database/sensor state, log forwarding, and `PASSTH` tunnel. Credentials are not part of the wire protocol. `Serial` stays USB debug only. Full wire spec in §10 and `link-serial-protocol.md` |
+| `screen_setup.h/.cpp` | `/setup` first-class route (route 6): 300 px QR and typed URL for `http://<WT32-IP>/`. The QR stays hidden until the WT32 reports an IP via `NET`; it is refreshed only when that IP changes. `ui_init()` opens the route first; WT32 `LOGINREQ` raises it; `RESULT OK` routes home. The display has no credential form or Wi-Fi provisioning. `RESULT FAIL` shows retry guidance on the panel. |
 | `touch.h` | Unchanged GT911 glue |
 | `ui_config.h` | Capacity (6 clusters × 4 bottles; all offline until reported), ranges, 2000 ms / 60 s timings, 5 s sensor apply / 90 s expiry, thresholds, pins, palette, `FW_VERSION`, `IS_DEBUG` |
 | `fake_data.h/.cpp` | `AppState g`: controls and real bottle values; `fake_init()` starts all nodes offline, bottles absent, readings/history unavailable; `sens_apply_real()` applies WT32 frames to node 0 and clears missing/expired data. Bottle presence is independent of database capacity |
-| `serial_cmd.h/.cpp` | Human-typeable debug protocol over USB serial (see §5). Display-local only. Also `CREDS` and `AP` (§12) |
-| `provision_ap.h/.cpp` | SoftAP + web credential form on the display, staging into the same link pair as the `CREDS` serial command (§12). `/status` leads with a `waiting`/`success`/`fail` token and a reject gets the error page with a retry link |
+| `serial_cmd.h/.cpp` | Human-typeable debug protocol over USB serial (see §5). Display-local only; no `CREDS` or `AP` commands. |
+| `provision_ap.h/.cpp` | Removed. The display no longer provisions Wi-Fi or serves web pages; login is hosted by the WT32 (§12). |
 | `ui_shell.h/.cpp` | Status bar, content router, single blocking-modal primitive, bell logic, overheat eval, `ui_mk_*` styled helpers (no LVGL theme is enabled, so all styling is explicit) |
 | `screen_home.h/.cpp` | `/home`: DATA / CONTROL / INFO nav + run summary + serial hint |
 | `screen_data.h/.cpp` | `/data` picker (6 clusters, offline greyed); `/data/X` node page = one 180×180 square per bottle, laid out like the `/info` tiles (bottle temperature on top, `Bottle n` caption below), greyed card when the node is offline, red value when the WT32 reported that temperature as NULL, and the square itself opens the chamber; `/data/X/bottle_Y` 5 sensor rows + `lv_chart` temp trend (values ×10, range 300–450) |
@@ -51,10 +53,10 @@ hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
 ## 4. Screen tree / state machine (as built)
 
 ```
-/setup (first route after boot; QR credential form) -> /home on RESULT OK
+/setup (first route after boot; QR to WT32 login page) -> /home on RESULT OK
 /home -> /data (picker) -> /data/X (grid) -> /data/X/bottle_Y (5 sensors + chart)
 /home -> /control (setpoint, duration, run/stirrer hold-2000ms)
-/home -> /info (fresh on open; network QR + Start/Stop, shares the SoftAP with /setup)
+/home -> /info (link, database, configuration and queue status)
 [any, post-confirm]  chamber>=41 -> warn modal (ack; re-arms <41)
                      chamber>=45 -> trip modal (stirrer fake-OFF; re-arms <45)
 [any]  30 s no touch -> backlight off -> touch -> back on
@@ -63,7 +65,7 @@ hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
 ```
 
 There is no boot gate. `ui_init()` calls `ui_show_setup()` and that route
-remains up until credentials are accepted or `IS_DEBUG` bypasses it.
+remains up until the WT32 reports successful login or `IS_DEBUG` bypasses it.
 Overheat modals reuse the single-modal primitive and can stack over any
 screen. `ui_refresh_current()` re-runs the current route builder after
 pushes/serial edits; the modal overlay is a sibling of the content container
@@ -83,8 +85,6 @@ EXP 3                set the experiment number
 STIRRER ON|OFF       also logs [FAKE->WT32] like the on-screen toggle
 POST ON|OFF
 
-CREDS <user> <pass>  stage a portal pair (bench path; echoed scrollback)
-AP                   toggle the credential SoftAP, print both QR payloads
 MEM                  heap/PSRAM free, low-water and largest block
 PASSTH ON|OFF        raw USB <-> IO17/IO18 tunnel (§10)
 W32CMD <line>        send one arbitrary line to the WT32 (IS_DEBUG builds)
@@ -134,7 +134,8 @@ The host suite compiles the actual model, link parser, and USB command
 sources against a buffered serial/clock shim. It covers unavailable startup,
 partial/malformed/nonfinite fields, successive frame sequences, observed-only
 trends, missing bottles, expiry/recovery, HELLO invalidation, wire command
-format/clamps/heartbeat, credential encoding/redaction, and USB command routing.
+format/clamps/heartbeat, and USB command routing. Login credentials are not a
+display-side concern and are not sent over the serial link.
 Its UI spy verifies that USB RUN delegates to the shared gate; it does not
 execute LVGL or exercise the real gate itself.
 
@@ -175,8 +176,8 @@ Received from the WT32:
 
 | Word | Meaning |
 |---|---|
-| `HELLO` | WT32 booted; clear verdict bookkeeping so the staged pair is re-pushed |
-| `LOGINREQ` | route to `/setup` (idempotent); heartbeat while creds are needed |
+| `HELLO` | WT32 booted; reset display-side link state |
+| `LOGINREQ` | route to `/setup` (idempotent); heartbeat while login is needed |
 | `RESULT OK` / `RESULT FAIL` | login verdict: route home / stay on setup with retry text |
 | `NET ip= up= [ping=]` | `/info` IP, link and latency store |
 | `DB latest= time= bottles= drops= ready= aexp= adur= asrc= pexp= pdur= cfgmax= queued= reads= ack= state=` | `/info` DB, run-configuration and queue stores; `/control` start gate, source label and next-id hint. `-` = unknown, `latest=0` = no rows |
@@ -189,15 +190,13 @@ Sent to the WT32:
 |---|---|
 | `HELLO` | display booted; the WT32 replies with its full snapshot |
 | `EXPERIMENT run= num= dur=` | on every change and every heartbeat |
-| `CREDS user= pass=` | percent-encoded pair, sent on staging and every heartbeat until a verdict |
 | `DUMP` | debug-build bench command via `W32CMD`, never automatic |
 
-Staging a pair (phone form or USB `CREDS`) calls
-`link_serial_set_credentials()`, which sends `CREDS` immediately and repeats it
-on each heartbeat until `RESULT` arrives. `LOGINREQ` routes to `/setup`;
-`RESULT OK` routes home but does NOT start the run; `RESULT FAIL` keeps
-`/setup` up with "wrong username or password" on the panel and on the phone
-page (§12). The run starts from `/control` or `/home` (hold-to-confirm), which
+The WT32 serves the login page and collects the credentials locally. The
+serial link carries only the gate request and verdict: `LOGINREQ` routes to
+`/setup`; `RESULT OK` routes home but does NOT start the run; `RESULT FAIL`
+keeps `/setup` up with retry guidance. The QR and typed URL use the WT32's
+reported IP. The run starts from `/control` or `/home` (hold-to-confirm), which
 flips `run=1` without incrementing `num`.
 
 **Start gate and run configuration.** `ui_experiment_toggle()` refuses to start
@@ -216,9 +215,8 @@ duration/source, or `ready`/`waiting`) and a **Queue** tile (queued rows and the
 ages of the last successful configuration read and acknowledged upload).
 
 Every outbound command is echoed locally as one `[LINK>] <word> [args]` line.
-`CREDS` echoes the word only, never the payload. A WT32 `HELLO` clears the
-local verdict and re-pushes the kept pair, so the rebooted master can log in
-without retyping. A display `HELLO` makes the WT32 re-send `NET`/`DB`, `SENS`
+A WT32 `HELLO` resets link state; credentials are not retained or re-pushed by
+the display. A display `HELLO` makes the WT32 re-send `NET`/`DB`, `SENS`
 (a frame fresh enough to be called current) and `RESULT OK` if it is running.
 
 **Real sensor values.** `link_serial` stores each accepted `SENS` line as one
@@ -259,54 +257,26 @@ print the link state. Short display IO18 to IO17 with the WT32 absent to
 loop back lines: each emitted command must still produce no parse reply, which
 proves the direction check is in place.
 
-## 12. Credential entry by QR (`provision_ap`)
+## 12. WT32 login page QR
 
-The `/setup` keyboard has been removed. `LV_USE_KEYBOARD` is `0` and the
-route carries no textareas.
+The display does not run a web server or provision Wi-Fi. `/setup` shows a
+300 px QR containing `http://<WT32-IP>/` and a typed URL for fallback. The IP
+comes from the WT32's `NET ip=` message. Until an address is available, the QR
+is hidden and the display says it is waiting for the WT32. The QR is re-encoded
+only when the reported IP changes.
 
-`firmware/display-v9/provision_ap.{h,cpp}` raises a WPA2 SoftAP on demand with
-a cloaked SSID, and serves a form at `http://192.168.4.1/`. `/setup` shows a
-300 px QR that advances through two steps on its own:
+The phone opens the login form served by the WT32 on port 80. Credentials are
+submitted directly to that board and never enter display memory or the serial
+protocol. A `RESULT FAIL` received over `rusim-line` keeps `/setup` visible and
+shows retry guidance; `RESULT OK` routes home. The WT32's web page handles its
+own form result. See `network-master.md` for the HTTP login and security notes.
 
-1. `WIFI:T:WPA;S:RUSIM-SETUP-<MAC>;P:setup-<MAC>;H:true;;` — scanning joins the
-   phone to the AP. Switches when `WiFi.softAPgetStationNum()` reports a station.
-2. `http://192.168.4.1/` — scanning opens the credential form. Reverts to step 1
-   if the phone disconnects.
+The page uses plain HTTP. The password is unencrypted between the phone and
+WT32, so use a trusted LAN. The phone must be able to route to the WT32, and AP
+client isolation can block that traffic. `display-provisioning-ap.md` records
+the retired display-hosted provisioning design.
 
-`T:WPA` is the only legal token for a passphrase network, and `H:` must be
-present when the SSID is cloaked. One constant (`kHidden`) drives both the radio
-and the payload's `H:` field, so they cannot disagree.
-
-Controls sit in a right-hand column: the SSID, the passphrase, and the
-Start/Stop button. The passphrase is there for a phone that
-scans the join code and does nothing — Settings → Other network, then type what
-the panel shows. The duration spinbox moved to `/control`; the Confirm button
-is gone; there is nothing on the panel to confirm.
-
-Build flags: `PROVISION_AP_HIDDEN=0` broadcasts the SSID,
-`PROVISION_AP_PASSWORD="secret"` (8–63 chars) replaces the MAC-derived
-passphrase.
-
-USB serial gained `AP` (toggle the AP, print both payloads) and
-`CREDS <user> <pass>` (stage directly; the password reaches the scrollback, so
-this is the bench path only).
-
-Credentials remain RAM-only on both boards; nothing reaches NVS or flash.
-`network-master` is unaware of this path: it only sees a staged pair.
-
-A rejected pair is visible in three places (`display-provisioning-ap.md` §7.1):
-the phone's result page turns red with an **Enter them again** link, the form
-that link returns to carries a banner until the next pair is staged, and the
-`/setup` status line carries the same wording. Retrying calls
-`link_serial_set_credentials()`, which sends `CREDS` immediately, so the WT32
-acts on the corrected pair on its next loop pass instead of on its next 5 s
-heartbeat.
-
-Full detail: the WIFI: payload format and escaping rules, the cloaked-network
-tradeoff, the single-canvas re-encode, the `/status` state machine, and the
-verification steps are in `display-provisioning-ap.md`.
-
-## 13. Light theme and the /info network QR
+## 13. Light theme and the /setup QR
 
 Two UI changes sit outside the screen-tree logic.
 
@@ -321,23 +291,15 @@ border, which is what now separates a white button from a white card or the ligh
 background. The modal ack button and the bell label keep light text because both
 sit on a dark fill.
 
-**Network QR on /info.** `/info` carries a 180 px QR and a Start/Stop button. It
-runs the same two-step payload as `/setup`: the Wi-Fi join code first, then
-`http://192.168.4.1/` once a phone associates. `screen_info_poll()` repaints it
-each loop, so the payload follows association and an idle-timeout stop without a
-route change. There is no "phone connected" modal here; the step label carries
-that. It is smaller than the `/setup` code because the diagnostic rows share the
-same route.
+**Setup QR.** `/setup` encodes only the WT32's HTTP URL. It is hidden until a
+non-empty IP arrives and changes only when that address changes. `/info` shows
+the reported network state and address as ordinary status data; it does not
+start a SoftAP or host a login QR.
 
-The SoftAP is shared with `/setup`. `screen_setup_poll()` no longer tears it down
-when the route is neither `/setup` nor `/info`; `ui_is_info()` is the guard. That
-keeps the rule that the credential form does not outlive the screens that offer
-it, while letting a phone rejoin from `/info` after the run has started.
-
-Verify: `pio run -e display-v9`; on device open `/info`, tap Start phone login,
-scan with a phone — the code changes to the URL after the phone associates, and
-the Home button stops the AP. With the debug flag on (the current
-`ui_config.h` default), reach `/info` via the bypass and check the same.
+Verify: build `display-v9`; on hardware, confirm `/setup` shows a waiting state
+before `NET ip=` arrives, then the matching `http://<ip>/` QR and typed URL
+once the WT32 reports an address. This hardware check was not performed as part
+of this documentation update.
 
 ## 14. Debug flag `IS_DEBUG`
 
@@ -349,7 +311,7 @@ Full detail lives in `display-debug-flag.md`.
 
 Current effects: when `1`, `/setup` gains a `DEBUG: bypass login` button
 (`screen_setup.cpp`) that runs the normal success path — `g.loggedIn`,
-SoftAP stopped, route to `/home` — without the WT32 `RESULT=success`, and
+route to `/home` — without the WT32 `RESULT=success`, and
 the USB console accepts `W32CMD <line>`. Boot still starts at the login
 screen either way. Guarded by `#if IS_DEBUG`, so builds with `0` contain
 none of the debug code.
@@ -373,4 +335,4 @@ Update by `opencode/glm-5.3-flash-free` in `OpenCode`: §10 gained the `SENS` re
 Update by `LLM` in `Freebuff`: the `/data/X` node page was rebuilt as a row of 180×180 temperature squares that copies the `/info` tile layout (value font `montserrat_28_compressed` on top, `Bottle n` caption in font 14), and the chamber title lost its `(WT32)`/`(no live data)`/`(fake)` source tag.
 
 ---
-Content generated by `LLM` in `Freebuff`.
+Content generated by LLM.

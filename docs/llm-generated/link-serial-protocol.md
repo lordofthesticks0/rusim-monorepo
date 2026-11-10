@@ -57,9 +57,9 @@ direct GND. The display's `PASSTH ON` tunnel (§7) is the other quick check.
 
 | Command | Payload | Sender cadence | Display action |
 |---|---|---|---|
-| `HELLO` | - | once at WT32 boot | log link-up; clear local verdict/creds-pending bookkeeping (the staged pair is kept and re-pushed) |
+| `HELLO` | - | once at WT32 boot | log link-up and clear local login-result bookkeeping |
 | `LOGINREQ` | - | every heartbeat while the WT32 needs credentials | raise `/setup` (idempotent) |
-| `RESULT` | `OK` or `FAIL` | after every login attempt; once more on the HELLO snapshot if running | `OK`: stop credential re-push, clear the gate, route home; `FAIL`: `/setup` retry text + phone-page banner |
+| `RESULT` | `OK` or `FAIL` | after every login attempt; once more on the HELLO snapshot if running | `OK`: clear the gate and route home; `FAIL`: show retry text on `/setup` |
 | `NET` | `ip=<str> up=<0\|1> [ping=<n\|->]` | every heartbeat + on every ETH event | `/info` status store. `up=0` carries empty `ip=` and no `ping=` |
 | `DB` | `latest=<n\|-> time=<0\|1> bottles=<n\|-> drops=<n> ready=<0\|1> aexp=<n\|-> adur=<n\|-> asrc=<db\|local\|-> pexp=<n\|-> pdur=<n\|-> cfgmax=<n\|-> queued=<n> reads=<ms\|-> ack=<ms\|-> state=<word>` | every heartbeat + after each DB pass | `/info` DB/config/queue stores and the `/control` start gate. `-` = unknown; `latest=0` means "no rows yet", which the display maps to -1 |
 | `LOG` | `<text>` | continuously | print `"[W32] " + text` on the display's USB console, verbatim, never through a printf format string |
@@ -106,7 +106,6 @@ Rules:
 |---|---|---|---|
 | `HELLO` | - | once at display boot | log link-up; immediately re-send current truth (`NET`, `DB`, `LOGINREQ` if needed, `RESULT OK` if running) |
 | `EXPERIMENT` | `run=<0\|1> num=<n> dur=<1-99>` | on every change + every heartbeat | store; log only on change |
-| `CREDS` | `user=<pct> pass=<pct>` | when a pair is staged, then every heartbeat while no verdict for it has arrived | decode, trim, empty -> ignore. Same pair as last attempt -> re-emit the stored verdict. Changed pair -> run the portal login |
 | `DUMP` | - | bench only, `IS_DEBUG` builds | emit a `LOG [DUMP] ...` snapshot of local state |
 
 The display ignores display-direction words arriving on its RX; the WT32
@@ -133,9 +132,8 @@ the next run actually starts.
 ### 3.3 Gone from the Modbus design
 
 - Master/slave roles, FC codes, slave ID, the duplicated register map.
-- The `CREDS_READY` handshake and the `IO11 -> IO14` "poll now" line. Staging
-  a pair transmits `CREDS` immediately, so a corrected password takes effect
-  on the spot instead of up to 5 s later.
+- The `CREDS_READY` handshake, credential wire word, and the `IO11 -> IO14`
+  "poll now" line. Login credentials are entered in the WT32-hosted web form.
 - Polling entirely: both ends declare truth on a cadence; there is no
   request/response anywhere on the link.
 - CRC16. The display module no longer carries it; the WT32 keeps an unused
@@ -154,8 +152,8 @@ WAIT_IP  ->  NEED_CREDS  ->  LOGIN  ->  RUN
 
 - `WAIT_IP`: heartbeat `NET up=0`; logs every 2 s while waiting for DHCP.
 - `NEED_CREDS`: every 5 s emits `NET up=1`, `DB` and `LOGINREQ`, plus the
-  30 s already-authenticated probe. A `CREDS` line moves to `LOGIN`.
-- `LOGIN`: runs `doLogin()`, emits `RESULT OK` or `RESULT FAIL`, wipes the
+  30 s already-authenticated probe. A WT32 web-form submission moves to `LOGIN`.
+- `LOGIN`: runs `doLogin()`, emits `RESULT OK` or `RESULT FAIL`, clears the
   working pair, then moves to `RUN` or back to `NEED_CREDS`.
 - `RUN`: every 5 s pings, fetches the data URL, runs the DB pass, and emits
   `NET` + `DB`. A WALLED fetch returns to `NEED_CREDS`.
@@ -167,40 +165,36 @@ absorbs a heartbeat and the next pass drains it.
 ### 4.2 Credential and verdict flow
 
 ```
-display: user confirms      WT32: NEED_CREDS
-   |  CREDS user=.. pass=..  ->  |
-   |                             |  decode, trim, stage LOGIN
+phone: submits form          WT32: NEED_CREDS
+   |  HTTP POST /login  ------>  |
+   |                             |  copy bounded fields, stage LOGIN
    |                             |  doLogin()
-   |  <- RESULT OK / FAIL        |
-   |  stop re-pushing this pair  |
+   |  <- RESULT OK / FAIL        |  (rusim-line)
+   |                             |  page shows result/retry
 ```
 
-The display keeps the pair in RAM for the session. A WT32 `HELLO` (reboot)
-clears the display's verdict bookkeeping, so the pair is re-pushed and the
-rebooted master can log in again without retyping. A display `HELLO` (reboot)
-makes the WT32 re-send its truth, so a display that rebooted mid-run leaves
-the login gate as soon as the snapshot `RESULT OK` arrives.
-
-Same-pair rule: if the WT32 receives a pair identical to the last attempt, it
-re-emits the stored verdict instead of logging in again. This makes a retry tap
-of an unchanged pair harmless.
+Credentials are not stored or retransmitted by the display. After a WT32
+reboot, its login page remains available and credentials must be entered there
+again. A display `HELLO` makes the WT32 re-send its current truth, so a display
+that rebooted mid-run leaves the login gate as soon as the snapshot `RESULT OK`
+arrives.
 
 ### 4.3 Identity and privacy
 
-- `user=` and `pass=` are percent-encoded by the display and decoded by the
-  WT32. Empty values are ignored at the WT32.
-- The display logs only the username. The `CREDS` local echo is the word alone
-  (`[LINK>] CREDS`), never the payload.
-- The WT32 never logs the password and wipes its working buffers after each
-  attempt. The last attempted pair stays in RAM so the same-pair rule can
-  answer a repeat; nothing enters NVS or flash.
+- Credentials are submitted directly to the WT32's HTTP form; the display
+  neither receives nor forwards them.
+- The WT32 does not log credential values. Its bounded working buffers are
+  cleared after the attempt, and credentials are not written to NVS or flash.
+- The login page uses plain HTTP on the local network. The password is therefore
+  unencrypted in transit; use a trusted LAN and ensure AP client isolation does
+  not block phone-to-WT32 traffic.
 
 ## 5. Timing budget
 
 | Event | Period |
 |---|---|
 | Heartbeat both ends (`LINK_BEAT_MS`), carrying each side's full truth | 5 s |
-| Immediate pushes | credentials staged, experiment change, ETH event, after DB pass, after login attempt |
+| Immediate pushes | experiment change, ETH event, after DB pass, after login attempt |
 | Line gap discard | 50 ms |
 | HELLO snapshots | once per boot, both ways |
 | Worst-case wire load | a few hundred bytes/s against ~11 KB/s capacity at 115200 |
@@ -334,7 +328,7 @@ with this port.
 |---|---|
 | Nothing received on the display | data wires swapped (swap first), missing direct GND |
 | Commands arrive, logs never | WT32 still emits multi-part `Serial.print` fragments instead of single `logf` lines |
-| WT32 never reacts to `CREDS` | percent-decoding bug, empty pair, or the staging path bypassed `link_serial_set_credentials` |
+| Login page is unreachable | phone is not on a route to the WT32 IP, DHCP has not assigned an address, or AP client isolation blocks local traffic |
 | `/info` stale but heartbeats seen on the wire | heartbeat tick skipped by a blocking loop on either board |
 | Flash over the tunnel fails | WT32 not in download mode (`IO0` jumpered, then power-cycled), or its wires are not on display `IO17`/`IO18` |
 | Tunnel disappears while a monitor is open | any ordinary open of the display's CH340 port resets the board; close the monitor before uploading |
@@ -351,8 +345,8 @@ with this port.
    no errors.
 3. **Both boards:** see `[W32]`-forwarded WT32 logs, then `NET`/`DB`/
    `LOGINREQ`; `/info` shows the live IP after the HELLO exchange.
-4. **Portal round trip:** stage credentials; `RESULT OK` routes home, `FAIL`
-   shows the retry path; a corrected pair takes effect immediately.
+4. **Portal round trip:** open the WT32 IP page, submit credentials;
+   `RESULT OK` routes home, while `FAIL` leaves `/setup` available for retry.
 5. **Reboot mixes:** WT32 reboot mid-run is released by the snapshot
    `RESULT OK`; display reboot mid-run re-raises `/setup` and replies to
    `HELLO` with experiment state.
@@ -365,4 +359,4 @@ with this port.
    `display-sim`, `network-master`.
 
 ---
-Content generated by `OpenAI/GPT-6.1 Sol` in `Zed`.
+Content generated by LLM.

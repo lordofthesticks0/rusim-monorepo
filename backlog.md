@@ -1,6 +1,7 @@
 # The Backlog 
 > For LLM agents: Add as little text as possible while still being descriptive. When things are done, **REMOVE** it. 
 
+- [FIRMWARE] **PRIORITY** Fix UART polling.
 - [ALL] Remove LLM design artifacts (unnecessary descriptions like this).
 - [ALL] Indonesian localization.
 - [FIRMWARE] Delegate GPIOs in the master ESP for control.

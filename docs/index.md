@@ -27,7 +27,7 @@ document is the source of truth for anything measured on real hardware.
 
 | Directory | Board | Document |
 |---|---|---|
-| [`firmware/display-v9/`](../firmware/display-v9/) | ESP32-S3 DevKitC-1 | [display-docs.md](llm-generated/display-docs.md), [migration-notes.md](llm-generated/migration-notes.md), [link-serial-protocol.md](llm-generated/link-serial-protocol.md), [display-provisioning-ap.md](llm-generated/display-provisioning-ap.md), [display-sim.md](llm-generated/display-sim.md), [display-debug-flag.md](llm-generated/display-debug-flag.md), [lvgl-redesign.md](llm-generated/lvgl-redesign.md), [display-info-reboot.md](llm-generated/display-info-reboot.md) |
+| [`firmware/display-v9/`](../firmware/display-v9/) | ESP32-S3 DevKitC-1 | [display-docs.md](llm-generated/display-docs.md), [migration-notes.md](llm-generated/migration-notes.md), [link-serial-protocol.md](llm-generated/link-serial-protocol.md), [display-provisioning-ap.md](llm-generated/display-provisioning-ap.md) (retired), [display-sim.md](llm-generated/display-sim.md), [display-debug-flag.md](llm-generated/display-debug-flag.md), [lvgl-redesign.md](llm-generated/lvgl-redesign.md), [display-info-reboot.md](llm-generated/display-info-reboot.md) |
 | [`firmware/wt32-eth01_captive-recon/`](../firmware/wt32-eth01_captive-recon/) | WT32-ETH01 | [wt32-eth01-captive-recon.md](llm-generated/wt32-eth01-captive-recon.md) |
 | [`firmware/network-master/`](../firmware/network-master/) | WT32-ETH01 | [network-master.md](llm-generated/network-master.md) (production), [link-serial-protocol.md](llm-generated/link-serial-protocol.md) |
 | [`firmware/motor-driver/`](../firmware/motor-driver/) | ATmega328 Nano | [platformio-environments.md](llm-generated/platformio-environments.md) §3 (L298N PWM ramp demo) |
@@ -50,14 +50,14 @@ document is the source of truth for anything measured on real hardware.
 | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) | The four sensor calibration programs |
 | [water-level-test.md](llm-generated/water-level-test.md) | Standalone Uno sketch for reading a water level sensor on A0 |
 | [wt32-eth01-captive-recon.md](llm-generated/wt32-eth01-captive-recon.md) | Captive portal recon firmware |
-| [network-master.md](llm-generated/network-master.md) | Production WT32 firmware: portal login via display `rusim-line` link, database configuration pull, run snapshots and sensor upload |
-| [link-serial-protocol.md](llm-generated/link-serial-protocol.md) | `rusim-line` v1 wire spec: wiring, line rules, command set, log forwarding, `PASSTH`, RS485 follow-on |
+| [network-master.md](llm-generated/network-master.md) | Production WT32 firmware: WT32-hosted portal login page, database configuration pull, run snapshots and sensor upload |
+| [link-serial-protocol.md](llm-generated/link-serial-protocol.md) | `rusim-line` v1 wire spec: wiring, line rules, credential-free command set, log forwarding, `PASSTH`, RS485 follow-on |
 | [display-wt32-link.md](llm-generated/display-wt32-link.md) | Retired: replaced by `link-serial-protocol.md` |
 | [comms-rework-plan.md](llm-generated/comms-rework-plan.md) | Implemented plan that produced `rusim-line` v1 (blueprint; the wire spec is `link-serial-protocol.md`) |
 | [db-sync-experiment-ntp.md](llm-generated/db-sync-experiment-ntp.md) | Supabase latest-experiment sync, mismatch warn, NTP (backlog #1/#9/#12) |
 | [esp-db-sync.md](llm-generated/esp-db-sync.md) | ESP to database round trip: the missing push path, write grants, sensor chain, token exposure |
 | [network-master-database-plan.md](llm-generated/network-master-database-plan.md) | Implemented firmware/database communication plan: HTTPS RPC contract, sensor enqueue, sessions, experiment/config snapshot choices, recovery, and acceptance tests |
-| [display-provisioning-ap.md](llm-generated/display-provisioning-ap.md) | SoftAP credential form on the display: phone login instead of on-screen typing |
+| [display-provisioning-ap.md](llm-generated/display-provisioning-ap.md) | Retired display-hosted provisioning; login form is served by the WT32 (`network-master.md`) |
 | [display-sim.md](llm-generated/display-sim.md) | `[env:display-sim]`: native PC/SDL build of the display-v9 UI |
 | [display-debug-flag.md](llm-generated/display-debug-flag.md) | `IS_DEBUG`: compile-time debug gate (login bypass on `/setup`) |
 | [display-info-reboot.md](llm-generated/display-info-reboot.md) | `/info` reboot triage: heap-walk hang, backtrace decode, CPU gauge + `MEM` command, open corruption hunt |

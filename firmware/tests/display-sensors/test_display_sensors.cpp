@@ -1,10 +1,9 @@
 // Behavioral integration tests: bytes enter Serial1 and the actual production
 // link_serial.cpp parses them before fake_data.cpp updates the model. Neither
 // sensor/link/USB functions nor model state are replaced by simulator stubs.
-// Only UI delegation and unused ESP/provisioning dependencies are stubbed.
+// Only UI delegation and unused ESP dependencies are stubbed.
 #include "fake_data.h"
 #include "link_serial.h"
-#include "provision_ap.h"
 #include "serial_cmd.h"
 #include "ui_shell.h"
 
@@ -41,18 +40,6 @@ void ui_experiment_toggle() {
 }
 void ui_shell_on_data() { ++host::data_calls; }
 void ui_eval_overheat() { ++host::overheat_calls; }
-
-// Provisioning is outside these tests. Fail instead of silently accepting an
-// accidental AP call from a sensor, experiment, or credential command.
-void provision_ap_begin() { throw std::logic_error("unexpected AP begin"); }
-void provision_ap_end() { throw std::logic_error("unexpected AP end"); }
-bool provision_ap_active() { throw std::logic_error("unexpected AP status"); }
-const char *provision_ap_ssid() { throw std::logic_error("unexpected AP SSID"); }
-bool provision_ap_hidden() { throw std::logic_error("unexpected AP hidden"); }
-void provision_ap_wifi_qr_payload(char *, size_t) {
-  throw std::logic_error("unexpected AP QR");
-}
-const char *provision_ap_url() { throw std::logic_error("unexpected AP URL"); }
 
 namespace {
 
@@ -101,7 +88,6 @@ void reset_group() {
 
 void reset_command_group() {
   reset_group();
-  link_serial_set_credentials(nullptr, nullptr);
   link_serial_set_exp_state(false, 0, 24);
   // Re-anchor the production heartbeat without reaching into its statics.
   link_serial_init();
@@ -551,47 +537,6 @@ void test_experiment_heartbeat_replays_exact_state() {
   expect_uart("EXPERIMENT run=0 num=73 dur=17\n");
 }
 
-void no_password_in_usb(const std::string &raw, const std::string &encoded) {
-  CHECK(Serial.output().find(raw) == std::string::npos);
-  CHECK(Serial.output().find(encoded) == std::string::npos);
-  CHECK(Serial.output().find("S3cr3t") == std::string::npos);
-  CHECK(Serial.output().find("pass=") == std::string::npos);
-}
-
-void test_credentials_encoding_replay_and_usb_redaction() {
-  reset_command_group();
-  // Synthetic test credentials, never read from configuration. Includes UTF-8
-  // bytes and reserved characters; unreserved -._~ must remain unescaped.
-  const char *raw = "host-only S3cr3t+%=/?:&!";
-  const char *encoded = "host-only%20S3cr3t%2B%25%3D%2F%3F%3A%26%21";
-  const std::string creds =
-      "CREDS user=student%2Blab%40example.edu%20%2F%3D%25~._-%C3%A9 "
-      "pass=host-only%20S3cr3t%2B%25%3D%2F%3F%3A%26%21\n";
-  link_serial_set_credentials("  student+lab@example.edu /=%~._-\xC3\xA9  ",
-                              "  host-only S3cr3t+%=/?:&!  ");
-  CHECK(link_serial_creds_ready());
-  expect_uart(creds);
-  CHECK(Serial.output().find("[LINK>] CREDS\n") != std::string::npos);
-  no_password_in_usb(raw, encoded);
-  link_serial_debug_print();
-  no_password_in_usb(raw, encoded);
-
-  host::advance_ms(5000);
-  link_serial_poll();
-  expect_uart("EXPERIMENT run=0 num=0 dur=24\n" + creds);
-  no_password_in_usb(raw, encoded);
-  receive("RESULT OK\n");
-  CHECK(!link_serial_creds_ready());
-  host::advance_ms(5000);
-  link_serial_poll();
-  expect_uart("EXPERIMENT run=0 num=0 dur=24\n");
-  receive("HELLO\n");
-  CHECK(link_serial_creds_ready());
-  host::advance_ms(5000);
-  link_serial_poll();
-  expect_uart("EXPERIMENT run=0 num=0 dur=24\n" + creds);
-  no_password_in_usb(raw, encoded);
-}
 
 void test_usb_run_delegates_without_incrementing_experiment() {
   reset_command_group();
@@ -682,20 +627,6 @@ void test_usb_synthetic_commands_leave_model_unchanged() {
   }
 }
 
-void test_usb_credentials_encode_and_do_not_echo_password() {
-  reset_command_group();
-  usb("CREDS user+lab@example.edu S3cr3t+%=/?:&!\n");
-  expect_uart("CREDS user=user%2Blab%40example.edu pass=S3cr3t%2B%25%3D%2F%3F%3A%26%21\n");
-  CHECK(link_serial_creds_ready());
-  no_password_in_usb("S3cr3t+%=/?:&!", "S3cr3t%2B%25%3D%2F%3F%3A%26%21");
-  CHECK(Serial.output().find("[SETUP] creds staged from serial user='user+lab@example.edu'") !=
-        std::string::npos);
-  host::advance_ms(5000);
-  link_serial_poll();
-  expect_uart("EXPERIMENT run=0 num=0 dur=24\n"
-              "CREDS user=user%2Blab%40example.edu pass=S3cr3t%2B%25%3D%2F%3F%3A%26%21\n");
-  no_password_in_usb("S3cr3t+%=/?:&!", "S3cr3t%2B%25%3D%2F%3F%3A%26%21");
-}
 
 struct TestCase {
   const char *name;
@@ -720,11 +651,11 @@ int main() {
       {"EXPERIMENT format / no implicit increment", test_experiment_wire_format_and_no_implicit_increment},
       {"EXPERIMENT clamps / normalized duplicates", test_experiment_clamps_and_normalized_duplicate},
       {"EXPERIMENT heartbeat replay", test_experiment_heartbeat_replays_exact_state},
-      {"CREDS encoding / replay / USB redaction", test_credentials_encoding_replay_and_usb_redaction},
+
       {"USB RUN delegates / no experiment increment", test_usb_run_delegates_without_incrementing_experiment},
       {"USB PUSH requests HELLO only", test_usb_push_requests_hello_without_mutating_model},
       {"USB synthetic commands leave model unchanged", test_usb_synthetic_commands_leave_model_unchanged},
-      {"USB CREDS encoding / password redaction", test_usb_credentials_encode_and_do_not_echo_password},
+
   };
   int passed = 0;
   int failed = 0;

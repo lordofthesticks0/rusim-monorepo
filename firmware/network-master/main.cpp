@@ -2,6 +2,7 @@
 #include <ETH.h>
 #include <ESPping.h>
 #include <HTTPClient.h>
+#include <WebServer.h>
 #include <WiFiClientSecure.h>
 #include <time.h>
 
@@ -30,9 +31,10 @@
 //   freezes a run configuration snapshot at each run start. Uploads go to the
 //   push_readings RPC only while a run is active. See
 //   docs/llm-generated/network-master-database-plan.md.
-// - Gets the captive portal username/password from the display instead of
-//   the serial console. Both ends declare their state every 5 s and push
-//   changes immediately; there is no master and no polling.
+// - Serves the captive portal login page on port 80 (plain HTTP, LAN only).
+//   The username and password are typed on that page. The display shows only
+//   this board's URL as a QR code. Both ends declare their state every 5 s and
+//   push changes immediately; there is no master and no polling.
 // - Experiment state (duration, experiment number, running flag) arrives as
 //   EXPERIMENT lines, so post-login edits on /control take effect without
 //   re-login.
@@ -43,7 +45,7 @@
 // - Credentials live in RAM only and are zeroed after use.
 //
 // Wire protocol (must match firmware/display-v9/link_serial.h):
-//   display -> WT32: HELLO, EXPERIMENT run num dur, CREDS user pass, DUMP
+//   display -> WT32: HELLO, EXPERIMENT run num dur, DUMP
 //   WT32 -> display: HELLO, LOGINREQ, RESULT OK|FAIL, NET ip up ping, DB ...
 // See docs/llm-generated/link-serial-protocol.md.
 
@@ -52,7 +54,6 @@
 #define LINK_BEAT_MS 5000
 #define LINK_IP_MAX 16
 #define LINK_USER_MAX 64
-#define LINK_PASS_MAX 64
 
 // Optional external LED + 1k to GND on IO2 (pulled low at boot, safe for
 // strapping). It blinks briefly on any line received from the display as a
@@ -189,10 +190,11 @@ static const int kPushFlushRounds = 2;
 // than this are rejected at enqueue so a 1970 clock can never enter the queue.
 static const uint32_t kMinSampleUnix = 1735689600UL;
 static const uint32_t kCredPollMs = 5000;
-// Re-probe for an already-valid portal session while waiting for creds.
+// Re-probe for an already-valid portal session while waiting for a login.
 // Without this the gate deadlocks when no login is needed: the display
 // waits for RESULT OK, but doLogin() (which detects "already through")
-// is only reached after staged credentials arrive, which never come.
+// is only reached after a login is submitted on the web page, which never
+// happens when none is needed.
 static const uint32_t kAuthProbeMs = 30000;
 static uint32_t lastAuthProbeMs = (uint32_t)-30000;
 
@@ -201,16 +203,14 @@ static Stage stage = STAGE_WAIT_IP;
 static uint32_t stageAtMs = 0;
 static uint32_t lastBeatMs = 0;
 
+static WebServer webServer(80);
+
 // Fixed-size credential buffers. No Arduino String here: avoids heap
 // fragmentation from repeated concat/realloc, and the password can be zeroed
 // deterministically.
 static const size_t kCredCap = LINK_USER_MAX + 1;
 static char username[kCredCap];
 static char password[kCredCap];
-// Last attempted pair, kept for the "same pair -> re-emit the verdict" rule.
-// RAM only, never a register, never flash.
-static char lastUser[kCredCap];
-static char lastPass[kCredCap];
 static bool haveVerdict = false;
 static bool lastVerdict = false;
 
@@ -518,31 +518,6 @@ static bool arg_lookup(const char* args, const char* key, char* out, size_t cap)
   return false;
 }
 
-static int hexVal(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  return -1;
-}
-
-// Decodes the percent-escaped user/pass values. Truncates safely at cap - 1.
-static void pct_decode(const char* in, char* out, size_t cap) {
-  size_t o = 0;
-  for (size_t i = 0; in[i] != '\0' && o + 1 < cap; i++) {
-    if (in[i] == '%' && in[i + 1] != '\0' && in[i + 2] != '\0') {
-      int hi = hexVal(in[i + 1]);
-      int lo = hexVal(in[i + 2]);
-      if (hi >= 0 && lo >= 0) {
-        out[o++] = (char)((hi << 4) | lo);
-        i += 2;
-        continue;
-      }
-    }
-    out[o++] = in[i];
-  }
-  out[o] = '\0';
-}
-
 static void trimInPlace(char* s) {
   if (s == nullptr) return;
   size_t len = strlen(s);
@@ -597,59 +572,85 @@ static void handle_experiment(const char* args) {
   dbApplyRunState();
 }
 
-// New pair -> stage LOGIN. Identical in-flight pair -> ignore (the display
-// re-pushes every heartbeat until it hears a verdict). Same pair as the last
-// attempt -> re-emit that verdict instead of logging in again.
-static void handle_creds(const char* args) {
-  char userEnc[3 * LINK_USER_MAX + 1];
-  char passEnc[3 * LINK_PASS_MAX + 1];
-  if (!arg_lookup(args, "user", userEnc, sizeof(userEnc)) ||
-      !arg_lookup(args, "pass", passEnc, sizeof(passEnc))) {
-    logf("[LINK] malformed CREDS ignored");
+// Copies one form field into a fixed buffer. Fields longer than the buffer are
+// rejected rather than truncated, so the password the user typed is never
+// silently changed.
+static bool copyFormArg(const char* name, char* out, size_t cap) {
+  String v = webServer.arg(name);
+  if (v.length() >= cap) return false;
+  memcpy(out, v.c_str(), v.length() + 1);
+  trimInPlace(out);
+  return out[0] != '\0';
+}
+
+static void redirectToRoot() {
+  webServer.sendHeader("Location", "/");
+  webServer.send(303, "text/plain", "");
+}
+
+static void sendPage(const String& body, bool refresh) {
+  String page = "<!doctype html><html><head><meta charset=\"utf-8\">"
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">";
+  if (refresh) page += "<meta http-equiv=\"refresh\" content=\"3\">";
+  page += "<title>RUSIM network login</title></head>"
+          "<body style=\"font-family:sans-serif;margin:2em\">";
+  page += body;
+  page += "</body></html>";
+  webServer.send(200, "text/html", page);
+}
+
+// Login form, shown while the gate waits for credentials (STAGE_NEED_CREDS).
+static void handleRoot() {
+  if (stage == STAGE_NEED_CREDS) {
+    String body = "<h2>RUSIM network login</h2>";
+    if (haveVerdict && !lastVerdict) body += "<p><b>Wrong username or password. Try again.</b></p>";
+    body += "<form method=\"POST\" action=\"/login\">"
+            "<p><label>Username <input name=\"username\" maxlength=\"";
+    body += String(LINK_USER_MAX);
+    body += "\" required></label></p>"
+            "<p><label>Password <input name=\"password\" type=\"password\" maxlength=\"";
+    body += String(LINK_USER_MAX);
+    body += "\" required></label></p>"
+            "<p><button type=\"submit\">Log in</button></p></form>";
+    sendPage(body, false);
+    return;
+  }
+  if (stage == STAGE_LOGIN) {
+    sendPage("<h2>Logging in...</h2>", true);
+    return;
+  }
+  if (stage == STAGE_RUN) {
+    sendPage("<h2>Connected.</h2>", false);
+    return;
+  }
+  sendPage("<h2>Waiting for network.</h2>", true);
+}
+
+// The POST handler only stores the pair and changes the stage. doLogin() runs
+// later from loop(), so this handler never blocks on the network.
+static void handleLogin() {
+  if (stage != STAGE_NEED_CREDS) {
+    redirectToRoot();
     return;
   }
   char u[kCredCap];
   char p[kCredCap];
-  pct_decode(userEnc, u, sizeof(u));
-  pct_decode(passEnc, p, sizeof(p));
-  trimInPlace(u);
-  trimInPlace(p);
-  if (u[0] == '\0' || p[0] == '\0') {
+  bool ok = copyFormArg("username", u, sizeof(u)) && copyFormArg("password", p, sizeof(p));
+  if (!ok) {
+    memset(u, 0, sizeof(u));
     memset(p, 0, sizeof(p));
-    logf("[LINK] CREDS empty, ignored");
+    logf("[WEB] login rejected: field empty or longer than %d", LINK_USER_MAX);
+    redirectToRoot();
     return;
   }
-  if (stage == STAGE_WAIT_IP) {
-    memset(p, 0, sizeof(p));
-    logf("[LINK] CREDS ignored: no IP yet");
-    return;
-  }
-  if (stage == STAGE_LOGIN && strcmp(u, username) == 0 && strcmp(p, password) == 0) {
-    memset(p, 0, sizeof(p));
-    logf("[LINK] CREDS duplicate while logging in, ignored");
-    return;
-  }
-  if (haveVerdict && strcmp(u, lastUser) == 0 && strcmp(p, lastPass) == 0) {
-    memset(p, 0, sizeof(p));
-    logf("[LINK] CREDS same pair, answering %s", lastVerdict ? "OK" : "FAIL");
-    link_emit_result(lastVerdict);
-    return;
-  }
-
-  strncpy(username, u, sizeof(username) - 1);
-  username[sizeof(username) - 1] = '\0';
-  strncpy(password, p, sizeof(password) - 1);
-  password[sizeof(password) - 1] = '\0';
-  strncpy(lastUser, u, sizeof(lastUser) - 1);
-  lastUser[sizeof(lastUser) - 1] = '\0';
-  strncpy(lastPass, p, sizeof(lastPass) - 1);
-  lastPass[sizeof(lastPass) - 1] = '\0';
-  haveVerdict = false;
-  // Wipe the decoded stack copies; the working pair is wiped after login.
+  snprintf(username, sizeof(username), "%s", u);
+  snprintf(password, sizeof(password), "%s", p);
   memset(u, 0, sizeof(u));
   memset(p, 0, sizeof(p));
-  logf("[LINK] captured creds user='%s' (password in RAM only)", username);
+  haveVerdict = false;
   stage = STAGE_LOGIN;
+  logf("[WEB] login submitted user='%s' (password in RAM only)", username);
+  redirectToRoot();
 }
 
 static void link_log_dump() {
@@ -685,8 +686,6 @@ static void handle_line(char* line) {
     link_send_snapshot();
   } else if (strcmp(line, "EXPERIMENT") == 0 && args != nullptr) {
     handle_experiment(args);
-  } else if (strcmp(line, "CREDS") == 0 && args != nullptr) {
-    handle_creds(args);
   } else if (strcmp(line, "DUMP") == 0) {
     // Read-only, so accepted ungated: the debug gate lives on the display
     // sender (W32CMD).
@@ -1395,7 +1394,7 @@ static void sens_report_round() {
 }
 
 // One request/reply round, gated to one every 30 s. The wait is blocking for
-// at most 1.5 s, so the display link is pulled from inside it: a CREDS line
+// at most 1.5 s, so the display link is pulled from inside it: a link line
 // arriving during the reply would otherwise sit in the FIFO.
 static void sens_poll() {
   if (millis() - lastSensPollMs < kSensPollMs) return;
@@ -2225,7 +2224,7 @@ static void dbPassForce() {
 // Returns true on authenticated, false otherwise. The caller emits RESULT and
 // wipes the working pair.
 bool doLogin() {
-  logf("[LOGIN] user='%s' from display (password in RAM only)", username);
+  logf("[LOGIN] user='%s' from web login (password in RAM only)", username);
 
   String portalUrl = fetchPortalUrl();
   if (portalUrl.length() == 0) {
@@ -2234,13 +2233,13 @@ bool doLogin() {
       logf("[LOGIN] Already authenticated, skipping POST.");
       return true;
     }
-    logf("[LOGIN] No portal and no internet. Will re-poll display.");
+    logf("[LOGIN] No portal and no internet. Will wait for a new login.");
     return false;
   }
 
   PageScan scan;
   if (!fetchLoginPage(portalUrl, scan)) {
-    logf("[LOGIN] Could not read the login page. Will re-poll display.");
+    logf("[LOGIN] Could not read the login page. Will wait for a new login.");
     return false;
   }
 
@@ -2269,7 +2268,7 @@ void setup() {
   logf("network-master (production WT32 portal + rusim-line peer)");
   logf("Ping target: 1.1.1.1");
   logf("Data URL: %s", kDataUrl);
-  logf("Credentials come from the display over UART0, never stored.");
+  logf("Login is entered on the web page (port 80), kept in RAM only.");
 
   pinMode(TEST_LED_PIN, OUTPUT);
   digitalWrite(TEST_LED_PIN, LOW);
@@ -2301,6 +2300,11 @@ void setup() {
   } else {
     logf("[ETH] Waiting for link + DHCP...");
   }
+
+  webServer.on("/", HTTP_GET, handleRoot);
+  webServer.on("/login", HTTP_POST, handleLogin);
+  webServer.begin();
+  logf("[WEB] login page on port 80");
 }
 
 void loop() {
@@ -2313,6 +2317,8 @@ void loop() {
   }
   if (ethEventCode != 0) log_eth_event();
   link_heartbeat_tick();
+  // Served after the link so a slow web request cannot delay the UART.
+  webServer.handleClient();
   // Sensor rounds run in every stage, including while the portal gate is
   // open; the poll has its own 30 s gate and does not depend on the network.
   sens_poll();
@@ -2328,7 +2334,7 @@ void loop() {
   switch (stage) {
     case STAGE_WAIT_IP:
       if (eth_connected) {
-        logf("[LINK] link up, waiting for credentials from the display");
+        logf("[LINK] link up, waiting for login at http://%s/", ETH.localIP().toString().c_str());
         stage = STAGE_NEED_CREDS;
         stageAtMs = 0;  // run the first cred tick immediately
       } else if (millis() - stageAtMs >= 2000) {
@@ -2338,10 +2344,10 @@ void loop() {
       break;
 
     case STAGE_NEED_CREDS: {
-      // Nothing but link work and the auth probe runs until credentials
-      // arrive. The display sends LOGINREQ back on every heartbeat.
+      // Nothing but link work and the auth probe runs until a login is
+      // submitted on the web page. LOGINREQ is re-sent every kCredPollMs.
       if (!eth_connected) {
-        logf("[ETH] link lost while waiting for creds");
+        logf("[ETH] link lost while waiting for login");
         link_emit_net();
         stage = STAGE_WAIT_IP;
         stageAtMs = millis();
@@ -2353,10 +2359,10 @@ void loop() {
         link_emit_db();
         link_emit_loginreq();
         if (millis() - lastAuthProbeMs >= kAuthProbeMs) {
-          // No staged creds: check whether the port is already through
+          // No login submitted: check whether the port is already through
           // before asking the user for a login they don't need.
           lastAuthProbeMs = millis();
-          logf("[LOGIN] no creds staged; probing for existing session...");
+          logf("[LOGIN] no login submitted; probing for existing session...");
           String portalUrl = fetchPortalUrl();
           if (portalUrl.length() == 0 && fetchData()) {
             logf("[LOGIN] session already valid; releasing display gate.");
@@ -2382,7 +2388,7 @@ void loop() {
         stage = STAGE_RUN;
         stageAtMs = 0;
       } else {
-        logf("[LOGIN] will wait for a corrected pair from the display");
+        logf("[LOGIN] will wait for a corrected login on the web page");
         stage = STAGE_NEED_CREDS;
         stageAtMs = millis();
       }
@@ -2416,7 +2422,7 @@ void loop() {
       // The data fetch is the portal verdict: WALLED means the session
       // expired, so pause the loop and re-auth via the display.
       if (!fetchData()) {
-        logf("[LOGIN] session walled mid-run, re-polling display");
+        logf("[LOGIN] session walled mid-run, waiting for a new login");
         stage = STAGE_NEED_CREDS;
         stageAtMs = 0;
         break;

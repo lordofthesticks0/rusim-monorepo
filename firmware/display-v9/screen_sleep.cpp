@@ -1,7 +1,7 @@
 #include "screen_sleep.h"
 
-#include "provision_ap.h"
 #include "ui_config.h"
+#include "ui_shell.h"
 
 static uint32_t s_lastInputMs = 0;
 static bool s_sleeping = false;
@@ -10,12 +10,11 @@ void sleep_note_input() { s_lastInputMs = millis(); }
 
 void sleep_tick() {
   if (s_lastInputMs == 0) s_lastInputMs = millis();
-  // A QR code is on screen exactly while the provisioning AP is up (both
-  // /setup and /info hide the canvas when the AP is down). Keep the backlight
-  // on so the code stays scannable, and refresh the idle timer so the screen
-  // gets a full UI_SLEEP_MS grace period after the AP stops instead of going
-  // dark instantly.
-  if (provision_ap_active()) {
+  // /setup shows the login QR code, which must stay scannable. Keep the
+  // backlight on while it is up, and refresh the idle timer so the screen gets
+  // a full UI_SLEEP_MS grace period after leaving /setup instead of going dark
+  // at once.
+  if (ui_is_setup()) {
     s_lastInputMs = millis();
     if (s_sleeping) {
       s_sleeping = false;

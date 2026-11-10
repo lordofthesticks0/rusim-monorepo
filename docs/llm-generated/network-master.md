@@ -1,14 +1,15 @@
 # network-master (`firmware/network-master`) â€” production WT32 firmware
 
-Scope: the WT32-ETH01 firmware that ships. It brings up wired Ethernet,
-takes the captive portal username/password from the display over the
-`rusim-line` serial link, logs in to the portal, then holds the connection up
-with ping plus an HTTPS data fetch. Re-authentication reuses the same display
-path; there is no serial-console credential entry.
+Scope: production firmware for the WT32-ETH01. It brings up wired Ethernet,
+serves the captive-portal login page to a phone on port 80, submits the entered
+credentials to the upstream portal, then maintains connectivity with ping and
+HTTPS data fetches. The display reports the WT32 IP and login verdict over the
+`rusim-line` serial link; credentials are entered directly on the WT32-hosted
+page and never pass through the display.
 
-`link-serial-protocol.md` is the wire specification. `display-docs.md` Â§10
-documents the display end of the same link.
-`captive-portal-workaround.md` documents the portal relay plan.
+`link-serial-protocol.md` is the wire specification. `display-docs.md` §10
+documents the display end of the same link. `captive-portal-workaround.md`
+documents the portal relay plan.
 
 ## 1. Environment
 
@@ -130,7 +131,7 @@ acks. Full rules: `link-serial-protocol.md` Â§2.
 |---|---|---|
 | `HELLO` | - | display booted; reply with the full snapshot |
 | `EXPERIMENT` | `run=<0\|1> num=<n> dur=<1-99>` | experiment truth; log on change |
-| `CREDS` | `user=<pct> pass=<pct>` | staged portal pair; decode, trim, log in |
+
 | `DUMP` | - | emit a `LOG [DUMP] ...` state snapshot, including the sensor counters `sensOk`, `sensFail` and `sensAge` (read-only, ungated) |
 
 ### 3.2 Sent to the display
@@ -166,17 +167,13 @@ re-sending cached values, so they show link freshness, not report freshness.
 - `state` is the current DB fault category: `none`, `net`, `auth`, `payload`,
 `schema`, `clock` or `identity`.
 
-### 3.3 Credential state
+### 3.3 Credential handling
 
-Fixed 64-byte buffers, no Arduino `String`. A new pair is decoded from
-percent-encoding, trimmed, and copied to the working buffers and to the
-last-attempted pair. An identical pair answers with the stored verdict instead
-of logging in again. The working pair is overwritten with `x` then zeroed
-after each attempt; the last-attempted pair stays in RAM for the repeat rule.
-Nothing is written to NVS or flash.
-
-The display keeps its own copy for the session, so a WT32 reboot (`HELLO`)
-makes the display re-push the same pair without retyping.
+The WT32 copies the `username` and `password` fields from its HTTP form into
+fixed 64-byte buffers, then sets the login stage. The request handler redirects
+back to `/` without performing the blocking portal login in the HTTP callback;
+`loop()` runs `doLogin()`. The working pair is cleared after the attempt. The
+credentials are not stored in NVS or flash and are not sent over `rusim-line`.
 
 ## 4. State machine
 
@@ -190,12 +187,11 @@ WAIT_IP -> NEED_CREDS -> LOGIN -> RUN
 - `WAIT_IP`: heartbeat `NET up=0`. Logs `[ETH] Waiting for IP address (DHCP)...`
   every 2 s. `ETH_GOT_IP` moves to `NEED_CREDS`.
 - `NEED_CREDS`: every 5 s emits `NET up=1`, `DB` and `LOGINREQ`, and runs the
-  30 s already-authenticated probe (portal trigger + data fetch). A `CREDS`
-  line moves to `LOGIN` immediately. The display re-pushes its pair on every
-  heartbeat until a verdict arrives.
-- `LOGIN`: `doLogin()` (Â§5) with the RAM-only pair, then `RESULT OK`/`FAIL`.
-  The working pair is wiped. Success moves to `RUN`; failure returns to
-  `NEED_CREDS`, where a corrected pair from the display is acted on at once.
+  30 s already-authenticated probe (portal trigger + data fetch). The web form
+  remains available at the WT32 IP.
+- `LOGIN`: `doLogin()` (§5) uses the RAM-only pair collected by the web form,
+  then emits `RESULT OK`/`FAIL`. Success moves to `RUN`; failure returns to
+  `NEED_CREDS` and the page offers a retry.
 - `RUN`: every 5 s prints the IP, pings `1.1.1.1` 3x, fetches the data URL,
   runs the DB/push pass, and emits `NET` + `DB`. A WALLED fetch returns to
   `NEED_CREDS` for re-auth. A ping failure alone does not trigger re-auth.
@@ -208,8 +204,7 @@ returns so the link, heartbeat and sensor poll are serviced before the next
 step. A 10 s socket timeout therefore delays the UART once, not for the whole
 pass. `doLogin()` still blocks for its duration; the UART FIFO absorbs a
 heartbeat and the next iteration drains it. The sensor poll blocks for at most
-1.5 s once per 30 s, and it pulls the display link from inside that wait so a
-`CREDS` line arriving during a reply is not left in the FIFO. The queue has a
+1.5 s once per 30 s and services the display link during that wait. The queue has a
 single owner: every pass step runs in `loop()`, so no lock or task handoff is
 needed.
 
@@ -218,8 +213,20 @@ Reset is never required to retry.
 
 ## 5. Portal login (`doLogin()`)
 
-The request flow was prototyped in the removed standalone ping demo. The
-production firmware receives username/password over the line link:
+The WT32 serves a small HTML form at `http://<WT32-IP>/` using `WebServer` on
+port 80. The display's setup QR encodes that address, obtained from the `NET`
+message; the phone must be able to reach the WT32 over the same LAN. Submitting
+the form copies the username and password into bounded RAM buffers, sets the
+login stage, and redirects to `/`. The HTTP handler does not run the blocking
+portal transaction; `loop()` performs it and sends `RESULT` to the display.
+
+The form page reports the current stage: entry form, logging in, connected, or
+waiting for network. A failed attempt returns to the form with a retry message.
+The page itself uses plain HTTP, so credentials are not encrypted between the
+phone and WT32. Use only on a trusted LAN. Wi-Fi client/AP isolation may prevent
+the phone from reaching the WT32 even when both are connected to the same AP.
+
+The upstream portal transaction is:
 
 1. Trigger: GET `http://connectivitycheck.gstatic.com/generate_204` with
    redirects disabled, parse `window.location="..."`. Empty means no
@@ -238,11 +245,10 @@ through a 320-byte rolling window because the WT32-ETH01 has no PSRAM.
 
 ## 6. Memory and limits
 
-- Flash used: 1,006,409 B of 1,310,720 B (76.8%). RAM used: 116,896 B of
-  327,680 B (35.7%). The tight flash is why the SoftAP credential form lives
-  on the display rather than here: a web server does not fit in the
-  remaining ~300 KB. See `display-provisioning-ap.md`. The Supabase CA bundle
-  (`supabase_ca.h`, 3 roots, ~4 KB flash) is included in those figures.
+- This firmware now includes an HTTP login page served by `WebServer` on
+  port 80. Rebuild the target to measure current flash/RAM use; older footprint
+  figures predate this endpoint. The Supabase CA bundle (`supabase_ca.h`, 3
+  roots, ~4 KB flash) contributes to flash use.
   The sensor poll adds one fixed 513-byte RX frame and ~20 B of counters.
 - Push queue: the 1200-row ring is now materialized (~48 KB `.bss`, 40 B per
   row). The configuration pull adds a 4,096-byte response buffer, a 320-byte
@@ -263,13 +269,10 @@ through a 320-byte rolling window because the WT32-ETH01 has no PSRAM.
   30 s cycle, and only while a run is active. Stopping pauses retries but
   keeps the rows; a later run flushes them with their original experiment id
   and timestamp. See Â§6.1 and `esp-db-sync.md` Â§7-8.
-- Credential lifetime: RAM only. The working pair is overwritten with `x`
-  before release. The last-attempted pair is kept for the same-pair rule.
-  Never written to flash or NVS.
-- This firmware does not know where the credentials came from. The display's
-  SoftAP form and its USB `CREDS` command both land in
-  `link_serial_set_credentials()`, which sends `CREDS` immediately, and this
-  side only ever sees a staged pair.
+- Credential lifetime: RAM only. The working username/password buffers are
+  cleared after an attempt; values are never written to flash or NVS.
+- Credentials are collected by the WT32 HTTP form and used from RAM only;
+  they do not cross the display serial link or persist to NVS/flash.
 - Link limits: 1024-byte lines, 50 ms gap discard. A lost or corrupted line is
   replaced by the next heartbeat within 5 s.
 
@@ -359,7 +362,7 @@ its USB console. A bare adapter on the WT32 Debug header shows the prefix.
 LOG network-master (production WT32 portal + rusim-line peer)
 LOG Ping target: 1.1.1.1
 LOG Data URL: https://unison.boidu.dev/lyrics?v=dQw4w9WgXcQ
-LOG Credentials come from the display over UART0, never stored.
+LOG Login form: http://192.168.1.10/
 HELLO
 LOG [LINK] rusim-line v1 on UART0 IO1/IO3 115200 8N1
 LOG [SENS] UART1 on IO5 RX / IO17 TX, 9600 8N1
@@ -367,8 +370,7 @@ LOG [ETH] Waiting for link + DHCP...
 LOG [ETH] Started
 LOG [ETH] Link up
 LOG [ETH] Got IP 192.168.1.10 gw ... mask ... mac ...
-LOG [LINK] link up, waiting for credentials from the display
-LOG [LINK] captured creds user='...' (password in RAM only)
+LOG [LINK] link up
 LOG [LOGIN] Verifying with a real data fetch...
 LOG [LOGIN] SUCCESS: port is authenticated.
 LOG [PING] 1.1.1.1 OK, avg time = 15 ms
@@ -399,21 +401,21 @@ A field the slave reported invalid prints as `null`:
 LOG [SENS] 2 bottles ok=5 fail=2 b1 ph=null ch4=null t=null co2=null p=null b2 ph=2.5 ch4=700 t=37 co2=1000 p=1000 ...
 ```
 
-On a rejected pair:
+On a rejected pair, the WT32 returns to the form state and shows a retry
+message on its web page. The display receives `RESULT FAIL` and remains on
+`/setup` with retry guidance:
 
 ```
 LOG [LOGIN] FAILED: still walled (wrong credentials or portal changed).
-LOG [LOGIN] will wait for a corrected pair from the display
+LOG [LOGIN] will wait for a corrected pair from the web form
 ```
-
-The display shows the same verdict on `/setup` and on the phone's form page.
 
 ## 8. Related documents
 
 - `link-serial-protocol.md` â€” the wire spec, log forwarding, `PASSTH`, and
   the Mega link that replaced the RS485 pin reservation.
-- `display-docs.md` Â§10, Â§12 â€” display end, login gate, SoftAP form.
-- `display-provisioning-ap.md` â€” the phone login path on the display.
+- `display-docs.md` §10, §12 — display link and the WT32-IP QR shown on `/setup`.
+- `display-provisioning-ap.md` — retired display-hosted provisioning path.
 - `wt32-eth01-captive-recon.md` â€” portal recon sketch.
 - `captive-portal-workaround.md` â€” portal relay plan.
 - `migration-plan.md` â€” the sensor pull this implements, plus the deferred
@@ -423,4 +425,4 @@ The display shows the same verdict on `/setup` and on the phone's form page.
 - `../hardware.md` â€” board pinouts (read-only reference).
 
 ---
-Content generated by `OpenAI/GPT-6.1 Sol` in `Zed`.
+Content generated by LLM.
