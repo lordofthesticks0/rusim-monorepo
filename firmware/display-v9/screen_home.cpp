@@ -206,14 +206,14 @@ void screen_home_show(lv_obj_t *parent) {
   // Progress zone.
   ui_mk_label(parent, "Experiment runtime", 240, 172, 320, UI_COL_DIM, &lv_font_montserrat_14);
   lv_obj_set_style_text_align(
-      lv_obj_get_child(parent, lv_obj_get_child_cnt(parent) - 1), LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+      lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1), LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   s_arc = lv_arc_create(parent);
   lv_obj_set_pos(s_arc, 340, 194);
   lv_obj_set_size(s_arc, 120, 120);
   lv_arc_set_range(s_arc, 0, 100);
   lv_arc_set_value(s_arc, 0);
   lv_obj_remove_style(s_arc, nullptr, LV_PART_KNOB);
-  lv_obj_remove_flag(s_arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(s_arc, false);  // gauge only, not a control
   lv_obj_set_style_arc_color(s_arc, lv_color_hex(UI_COL_ACCENT), LV_PART_INDICATOR);
   lv_obj_set_style_arc_color(s_arc, lv_color_hex(UI_COL_BAR), LV_PART_MAIN);
   lv_obj_set_style_arc_width(s_arc, 10, LV_PART_MAIN);

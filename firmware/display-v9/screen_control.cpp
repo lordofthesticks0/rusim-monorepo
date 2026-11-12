@@ -247,7 +247,7 @@ void screen_control_show(lv_obj_t *parent) {
   ui_mk_label(parent, "Hold 2s to turn the stirrer on or off", 200, 182, 400, UI_COL_DIM,
               &lv_font_montserrat_14);
   // center desc
-  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_cnt(parent) - 1),
+  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1),
                              LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
 
   // Run hold button
@@ -256,15 +256,15 @@ void screen_control_show(lv_obj_t *parent) {
                                    g.experimentRunning, on_run_commit, nullptr);
   ui_mk_label(parent, "Hold 2s to start or stop the experiment", 200, 312, 400, UI_COL_DIM,
               &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_cnt(parent) - 1),
+  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1),
                              LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
 
   // Duration block
   ui_mk_label(parent, "Duration", 100, 340, 200, UI_COL_TEXT, &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_cnt(parent) - 1),
+  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1),
                              LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   ui_mk_label(parent, "hours 1-99", 100, 358, 200, UI_COL_DIM, &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_cnt(parent) - 1),
+  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1),
                              LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   s_btnDurDown = ui_mk_button(parent, LV_SYMBOL_DOWN, 116, 376, 48, 40, UI_COL_CARD);
   lv_obj_add_event_cb(s_btnDurDown, on_dur_down, LV_EVENT_CLICKED, nullptr);
@@ -280,7 +280,7 @@ void screen_control_show(lv_obj_t *parent) {
 
   // Experiment number block
   ui_mk_label(parent, "Experiment number", 500, 340, 200, UI_COL_TEXT, &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_cnt(parent) - 1),
+  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1),
                              LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   s_expDesc = ui_mk_label(parent, "DB: waiting for sync", 500, 358, 200, UI_COL_DIM,
                           &lv_font_montserrat_14);

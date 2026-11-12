@@ -3,6 +3,7 @@
 // through LVGL's SDL driver instead of the ST7262 + GT911.
 
 #include <SDL2/SDL.h>
+#include <math.h>
 
 #include <lvgl.h>
 
@@ -38,6 +39,25 @@ int main(int argc, char **argv) {
 
   fake_init();
   link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  // TEMP PREVIEW INJECTION (sim only, removed after review): gives the screens
+  // realistic numbers while the sim has no WT32 sensor feed.
+  g.loggedIn = true;
+  g.cluster[0].online = true;
+  for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) {
+    BottleFake &bt = g.cluster[0].bottle[b];
+    bt.present = (b != 3);
+    const float base[S_COUNT] = {1180.0f, 93.0f, 1.04f, 6.82f, 37.2f};
+    for (int s = 0; s < S_COUNT; s++) {
+      bt.sensor[s] = base[s] + b;
+      bt.sensorNull[s] = !bt.present;
+    }
+    const float amp[S_COUNT] = {40.0f, 6.0f, 0.15f, 0.10f, 0.60f};
+    for (int s = 0; s < S_COUNT; s++)
+      for (int i = 0; i < UI_TREND_PTS; i++)
+        bt.trend[s][i] = base[s] + b + amp[s] * sinf((float)i * 0.55f + (float)s) +
+                         amp[s] * 0.02f * (float)i;
+  }
+  printf("[SIM] TEMP preview data injected (sim build only)\n");
   ui_init();
 
   printf("display-v9 sim. Type serial commands here (PUSH, TEMP 42, STATUS, ...; HELP for list).\n");

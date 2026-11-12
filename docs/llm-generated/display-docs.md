@@ -40,12 +40,12 @@ hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
 | `screen_setup.h/.cpp` | `/setup` first-class route (route 6): 300 px QR and typed URL for `http://<WT32-IP>/`. The QR stays hidden until the WT32 reports an IP via `NET`; it is refreshed only when that IP changes. `ui_init()` opens the route first; WT32 `LOGINREQ` raises it; `RESULT OK` routes home. The display has no credential form or Wi-Fi provisioning. `RESULT FAIL` shows retry guidance on the panel. |
 | `touch.h` | Unchanged GT911 glue |
 | `ui_config.h` | Capacity (6 clusters × 4 bottles; all offline until reported), ranges, 2000 ms / 60 s timings, 5 s sensor apply / 90 s expiry, thresholds, pins, palette, `FW_VERSION`, `IS_DEBUG` |
-| `fake_data.h/.cpp` | `AppState g`: controls and real bottle values; `fake_init()` starts all nodes offline, bottles absent, readings/history unavailable; `sens_apply_real()` applies WT32 frames to node 0 and clears missing/expired data. Bottle presence is independent of database capacity |
+| `fake_data.h/.cpp` | `AppState g`: controls and real bottle values; `fake_init()` starts all nodes offline, bottles absent, readings/history unavailable; `sens_apply_real()` applies WT32 frames to node 0 and clears missing/expired data. Every sensor keeps its own 24-sample history (`trend[S_COUNT][UI_TREND_PTS]`, ~11.5 KB for all 24 slots). Bottle presence is independent of database capacity |
 | `serial_cmd.h/.cpp` | Human-typeable debug protocol over USB serial (see §5). Display-local only; no `CREDS` or `AP` commands. |
 | `provision_ap.h/.cpp` | Removed. The display no longer provisions Wi-Fi or serves web pages; login is hosted by the WT32 (§12). |
 | `ui_shell.h/.cpp` | Status bar, content router, single blocking-modal primitive, bell logic, overheat eval, `ui_mk_*` styled helpers (no LVGL theme is enabled, so all styling is explicit) |
 | `screen_home.h/.cpp` | `/home`: DATA / CONTROL / INFO nav + run summary + serial hint |
-| `screen_data.h/.cpp` | `/data` picker (6 clusters, offline greyed); `/data/X` node page = one 180×180 square per bottle, laid out like the `/info` tiles (bottle temperature on top, `Bottle n` caption below), greyed card when the node is offline, red value when the WT32 reported that temperature as NULL, and the square itself opens the chamber; `/data/X/bottle_Y` 5 sensor rows + `lv_chart` temp trend (values ×10, range 300–450) |
+| `screen_data.h/.cpp` | `/data` picker (6 clusters, offline greyed); `/data/X` node page = one 180×180 square per bottle, laid out like the `/info` tiles (bottle temperature on top, `Bottle n` caption below), greyed card when the node is offline, red value when the WT32 reported that temperature as NULL, and the square itself opens the chamber; `/data/X/bottle_Y` = `BOTTLE n` header (`NODE n` as secondary text), five 144×144 sensor tiles in the `/info` style (big number, unit in the caption) and a trend card that charts the last 24 polls of the selected sensor — temperature by default, and tapping any tile charts that sensor on its own fixed scale |
 | `screen_control.h/.cpp` | `/control`: setpoint −/+ 0.1 °C (35.0–40.0, logs `[FAKE->WT32]`), duration/experiment-number steppers, and stirrer + run switches built from `ui_hold_button` (2000 ms hold, progress ring), plus a button that sends one immediate `EXPERIMENT` line for bench testing |
 | `screen_info.h/.cpp` | `/info`: real link/database/configuration/queue tiles, firmware version, LVGL UI-thread load; storage usage shows `--` because the protocol supplies no measurement |
 | `screen_sleep.h/.cpp` | Idle timer on last-touch millis; backlight off after 30 s, on at next touch tick |
@@ -54,7 +54,7 @@ hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
 
 ```
 /setup (first route after boot; QR to WT32 login page) -> /home on RESULT OK
-/home -> /data (picker) -> /data/X (grid) -> /data/X/bottle_Y (5 sensors + chart)
+/home -> /data (picker) -> /data/X (grid) -> /data/X/bottle_Y (5 tappable tiles + per-sensor trend)
 /home -> /control (setpoint, duration, run/stirrer hold-2000ms)
 /home -> /info (link, database, configuration and queue status)
 [any, post-confirm]  chamber>=41 -> warn modal (ack; re-arms <41)
@@ -107,7 +107,8 @@ database read.
 `bellRed = fake_null_count() > 0`. At boot all 24 bottle slots are absent and
 all 120 sensor fields are NULL. Only bottles reported by live WT32 frames
 count as online. Tapping the bell lists unavailable fields. Missing/invalid
-sensors show `-- NULL`; absent or expired bottles show no live data. Charts
+sensors show `-- NULL` in the bell list and `--` in `UI_COL_ALARM` on the
+bottle tiles; absent or expired bottles show no live data. Charts
 use gaps for missing samples and never manufacture historical points.
 
 The separate chamber temperature is `-- C`: `SENS` contains bottle readings,
@@ -334,5 +335,9 @@ Update by `opencode/glm-5.3-flash-free` in `OpenCode`: §10 gained the `SENS` re
 
 Update by `LLM` in `Freebuff`: the `/data/X` node page was rebuilt as a row of 180×180 temperature squares that copies the `/info` tile layout (value font `montserrat_28_compressed` on top, `Bottle n` caption in font 14), and the chamber title lost its `(WT32)`/`(no live data)`/`(fake)` source tag.
 
+Update by `opencode/deepseek-v4.1-flash-free` in `opencode`: the chamber detail (`/data/X/bottle_Y`) replaced its `/data/X/chamber_Y` path title and five small text rows with a `BOTTLE n` header (`NODE n` secondary), five 144×144 `/info`-style tiles (unit moved into the caption, `fake_sensor_value_text()` added for the bare number) and a trend card with explicit v9 chart line/point styles — without them the chart was invisible.
+
+Update by `opencode/deepseek-v4.1-flash-free` in `opencode`: the trend card now charts all five sensors. Each sensor has its own 24-sample history, the temperature graph is the default, and tapping a tile charts that sensor on its fixed scale (CO2 0–5000 ppm, CH4 0–10000 ppm, pressure 0–10 kPa, pH 5–9, temperature 25–45 °C). The selected tile is accent-filled, and `screen_data` holds the choice across the 5 s route rebuild.
+
 ---
-Content generated by LLM.
+Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.

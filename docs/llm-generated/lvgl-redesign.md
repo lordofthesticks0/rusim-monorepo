@@ -614,25 +614,74 @@ Source: `screen_data.cpp`, `screen_bottle_show()`.
 
 As built:
 
-- Title `/data/%d/chamber_%d (fake)` at (16, 8), width 500, font 20.
-- Offline note `node offline: values are NULL this cycle, not stale.` at
-  (16, 40), width 500, `UI_COL_ALARM`.
-- Five sensor labels at x = 24, `y = 72 + s*30`, width 320, font 14, formatted
-  `%-6s  %s`. Sensors are CO2, CH4, PRESS, pH, TEMP. Colour is
-  `UI_COL_ALARM` when `sensorNull[s]`, otherwise `UI_COL_TEXT`.
-  The unit is not appended here; `SENSOR_UNITS` is unused.
-- `lv_chart` at (360, 72), 400×220, `LV_CHART_TYPE_LINE`, 24 points, Y axis
-  300–450 (°C × 10), series colour `UI_COL_ACCENT`, background `UI_COL_CARD`.
-  Values come from the in-RAM ring buffer `BottleFake::trend`.
-- Caption `Temp trend x10C (fake ring)` at (360, 300).
-- `< Chambers` at (16, 360), 160×48.
-- No axis labels, ticks, units, gridlines, min/max markers, legend, or time
-  axis. One of the five sensors is charted.
+- Header: `BOTTLE %d` at (16, 6), width 220, font 20, `UI_COL_TEXT`; `NODE %d`
+  at (132, 12), font 14, `UI_COL_DIM`, baseline-aligned with the title. The
+  route path `/data/X/chamber_Y` and its `(fake)`/`(WT32)` source tags are gone.
+- Absent bottle: `No live data for this bottle.` right-aligned at (436, 12),
+  width 348, `UI_COL_ALARM`. No per-row offline banner.
+- Five sensor tiles, 144×144, at x = 16 + s·156, y = 40. 5·144 + 4·12 = 768
+  keeps the same 16 px edges as `/info`. Each tile is `ui_mk_card` (white,
+  2 px `UI_COL_ACCENT`, radius 10) and reuses the `/info` internals: value in
+  `montserrat_28_compressed`, width 124, centred, `LV_ALIGN_TOP_MID` offset +30;
+  caption `montserrat_14` in `UI_COL_DIM`, width 124, `LV_ALIGN_BOTTOM_MID`
+  offset −10. Offline node fills the tile with `UI_COL_CARD_OFF`.
+- Every tile is clickable and charts its own sensor (see below). The selected
+  tile is filled with `UI_COL_ACCENT` (the same active-tab language as the
+  status bar) with a 0 px border, white value and white caption. Unselected
+  tiles take `UI_COL_BAR` as their `LV_STATE_PRESSED` fill for touch feedback.
+  User data is `(c << 8) | (b << 4) | s`.
+- Captions carry the unit — `CO2 (ppm)`, `CH4 (ppm)`, `Pressure (kPa)`, `pH`,
+  `Temp (°C)` — so all five numbers stay the same size and every caption stays
+  on one line. Values come from
+  `fake_sensor_value_text()`, which returns the bare reading (`38.2`, `+1.04`,
+  `--`); `fake_sensor_text()` keeps the old unit-bearing form for the bell,
+  serial output and tests.
+- Value colour: `UI_COL_ALARM` when the WT32 reported that field NULL,
+  `UI_COL_TEXT` when valid, `UI_COL_DIM` when the node is offline. On the
+  selected tile the value and caption are white, because alarm red is not
+  legible on `UI_COL_ACCENT`.
+- Trend card at (16, 196), 768×160, `ui_mk_card`. Captions inside the card:
+  `<Sensor> trend, last 24 polls` left and the scale right, both font 14
+  `UI_COL_DIM`.
+- The chart follows the selected tile. Temperature is the default; the choice is
+  held in `s_chartSensor` so the 5 s route rebuild does not reset it, and it is
+  cleared in `on_back_bottle()` and when another bottle opens. All five sensors
+  keep their own 24-sample history (`BottleFake::trend[S_COUNT][UI_TREND_PTS]`,
+  about 11.5 KB for all 24 capacity slots), so any tile has data immediately.
+- Fixed Y axis per sensor, in engineering units; `kAxisGain` converts to the
+  int32 values `lv_chart` requires (kPa and pH in hundredths, °C in tenths):
 
-| Problem | Redesign idea | Priority |
-|---|---|---|
-|  |  |  |
-|  |  |  |
+  | Sensor | Range | Gain | Caption |
+  |---|---|---|---|
+  | CO2 | 0–5000 ppm | 1 | `scale 0-5000 ppm` |
+  | CH4 | 0–10000 ppm | 1 | `scale 0-10000 ppm` |
+  | Pressure | 0–10 kPa | 100 | `scale 0-10 kPa` |
+  | pH | 5–9 | 100 | `scale 5-9` |
+  | Temperature | 25–45 °C | 10 | `scale 25-45 °C` |
+
+  `axis_caption()` prints the scale from the same constants, so the label cannot
+  drift from the drawn axis.
+- `lv_chart` at content (0, 20), 748×120 (the card's border and padding leave
+  748×140), `LV_CHART_TYPE_LINE`, 24 points, series `UI_COL_ACCENT`,
+  transparent background (the card is the surface), 3 horizontal division lines
+  in `UI_COL_BAR`, no vertical lines.
+- Chart draw properties are set explicitly: 3 px rounded series line on
+  `LV_PART_ITEMS` and 6 px circular points on `LV_PART_INDICATOR`. No LVGL theme
+  is enabled, so leaving these at their zero defaults draws nothing — that was
+  the state before this pass.
+- No samples for the selected sensor (all `NAN`): the chart is replaced by
+  `No samples yet.` / `Values appear after the next WT32 poll.`, centred in the
+  card.
+- `Tap a tile to chart that sensor.` at (16, 386), width 340, font 14
+  `UI_COL_DIM`, clear of the back button.
+- `< Chambers` (`LV_SYMBOL_NEW_LINE`) at (364, 372), 72×48, goes back to the
+  node grid.
+- Still no axis tick labels (v9 charts draw none), min/max markers, legend or
+  time axis; the card captions carry the scale.
+
+Solved in this pass: the route-path title, the small-text value rows, the
+invisible chart (zero-width line/point styles), the developer phrasing in the
+trend caption, and the chart being limited to temperature.
 
 ### 3.6 Route `/control`
 
@@ -1387,5 +1436,7 @@ pio run -e display-v9
 
 Update by `LLM` in `Freebuff`: the bell modal title and the 41C/45C overheat modals lost their `(fake)`/`(live, fake)` tags, so §"bell" and §"overheat" now quote the current strings.
 
+Update by `opencode/deepseek-v4.1-flash-free` in `opencode`: §3.5 rewritten for the chamber detail rebuild (word header instead of the route path, five 144×144 value tiles, explicit v9 chart styles, empty-trend state).
+
 ---
-Content generated by `LLM` in `Freebuff`.
+Content generated by `opencode/deepseek-v4.1-flash-free` in `opencode`.

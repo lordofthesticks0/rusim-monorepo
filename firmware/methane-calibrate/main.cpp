@@ -12,15 +12,17 @@ const int SENSOR_PINS[NUM_SENSORS] = {A0, A1, A2, A3};
 const float RL[NUM_SENSORS] = {1000.0, 1000.0, 1000.0, 1000.0};
 const float VCC = 5; // MEASURE your Mega's 5V pin with a multimeter!
 
-// --- CALIBRATION DATA (UPDATE THESE!) ---
-// Point 1: Rs measured in PPM_AIR for each sensor
-const float RS_AIR[NUM_SENSORS] = {6160.3, 5370.7, 8592.1, 7950.2};
+// --- CALIBRATION DATA ---
+// Point 1: Mean Rs from the 10-second clean-air capture (8 samples).
+// Clean-air methane is assumed to be 2 ppm; this was not measured with a
+// reference instrument.
+const float RS_AIR[NUM_SENSORS] = {1007.41f, 2698.94f, 1721.81f, 2231.38f};
 
-// Point 2: Mean Rs from each sensor's own reference-gas exposure.
-const float RS_SPAN[NUM_SENSORS] = {259.8083f, 370.7250f, 382.4533f, 300.8875f};
+// Point 2: Rs from the supplied 390 ppm methane reference reading (time_s 14).
+const float RS_SPAN[NUM_SENSORS] = {212.7f, 393.2f, 338.6f, 673.9f};
 
-const float PPM_AIR = 2.0;   // Assumed background methane
-const float PPM_SPAN[NUM_SENSORS] = {432.0f, 450.0f, 387.0f, 499.0f};
+const float PPM_AIR = 2.0f;
+const float PPM_SPAN[NUM_SENSORS] = {390.0f, 390.0f, 390.0f, 390.0f};
 
 // --- FIELD RECALIBRATION (PPM-space, no Rs needed) ---
 // Output: ppm = CORR_SLOPE[i] * ppm_raw + CORR_OFFSET[i]

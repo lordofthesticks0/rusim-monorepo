@@ -39,9 +39,9 @@
 //   EXPERIMENT lines, so post-login edits on /control take effect without
 //   re-login.
 // - Runs the proven ping-test portal login (trigger -> login page scan
-//   -> POST -> data-fetch verify), then loops ping of 1.1.1.1 plus an
-//   HTTPS fetch. A WALLED fetch in RUN falls back to NEED_CREDS for
-//   re-auth instead of halting.
+//   -> POST -> 204 probe verify), then loops a ping of 1.1.1.1 plus the
+//   plain-HTTP 204 probe every 30 s. A failed probe in RUN falls back to
+//   NEED_CREDS for re-auth instead of halting.
 // - Credentials live in RAM only and are zeroed after use.
 //
 // Wire protocol (must match firmware/display-v9/link_serial.h):
@@ -63,10 +63,11 @@
 
 static const IPAddress kPingTarget(1, 1, 1, 1);
 static const uint8_t kPingCount = 3;
-static const uint32_t kIntervalMs = 5000;
-static const char* kDataUrl = "https://unison.boidu.dev/lyrics?v=dQw4w9WgXcQ";
-// Captive-portal trigger: online networks answer 204 with an empty body;
+// RUN-stage tick: one ping, one portal probe, and one status snapshot.
+static const uint32_t kIntervalMs = 30000;
+// Captive-portal probe: online networks answer 204 with an empty body;
 // walled networks answer 200 (interception page) or a 3xx redirect to login.
+// Plain HTTP, so the check costs one request instead of a TLS handshake.
 static const char* kCaptiveProbeUrl = "http://connectivitycheck.gstatic.com/generate_204";
 
 // --- Supabase real-data fetch (backlog #1) + NTP (backlog #12) ---
@@ -1040,7 +1041,7 @@ bool fetchLoginPage(const String& portalUrl, PageScan& scan) {
 
 // POSTs the credentials to the portal. Returns true when the response looks
 // like an acceptance (redirect or success page), false otherwise. The final
-// word comes from the data-fetch verification, not from here.
+// word comes from the 204 probe, not from here.
 bool postCredentials(const String& pageUrl, const PageScan& scan) {
   String postUrl = resolveAction(pageUrl, scan.formAction);
   String body = "4Tredir=" + urlEncode(scan.redir) +
@@ -1086,33 +1087,30 @@ bool postCredentials(const String& pageUrl, const PageScan& scan) {
   return accepted;
 }
 
-// Fetches the real data URL and reports whether the body is genuine content
-// (true) or the portal's interception page (false).
-bool fetchData() {
-  WiFiClientSecure client;
-  client.setInsecure();  // skip CA verification for this test
+// Lightweight captive-portal liveness check. An authenticated network answers
+// the gstatic generate_204 endpoint with 204 and an empty body; a walled
+// network answers 200 (interception page) or a 3xx redirect. The response body
+// is irrelevant, so this avoids both TLS and body parsing. The status is logged
+// only when it changes, keeping a healthy link quiet in the log.
+bool probeOnline() {
+  WiFiClient client;
   HTTPClient http;
-  http.begin(client, kDataUrl);
-  http.setTimeout(8000);
+  http.begin(client, kCaptiveProbeUrl);
+  http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+  http.setTimeout(5000);
 
-  logf("[HTTP] GET %s", kDataUrl);
   int code = http.GET();
-  logf("[HTTP] status: %d", code);
-
-  bool genuine = false;
-  if (code > 0) {
-    String body = readBody(http);
-    if (extractWindowLocation(body).length() > 0) {
-      logf("[HTTP] body is the portal interception page (WALLED)");
-    } else {
-      genuine = true;
-      logf("[HTTP] body is genuine content (AUTHENTICATED): %s", body.c_str());
-    }
-  } else {
-    logf("[HTTP] error: %s", http.errorToString(code).c_str());
-  }
   http.end();
-  return genuine;
+
+  static bool haveLast = false;
+  static int lastCode = 0;
+  if (!haveLast || code != lastCode) {
+    const char* state = code == 204 ? "online" : (code > 0 ? "walled" : "error");
+    logf("[PORTAL] probe status %d (%s)", code, state);
+    haveLast = true;
+    lastCode = code;
+  }
+  return code == 204;
 }
 
 // --- NTP (backlog #12): UTC via pool.ntp.org. Call after DHCP. ---
@@ -2229,7 +2227,7 @@ bool doLogin() {
   String portalUrl = fetchPortalUrl();
   if (portalUrl.length() == 0) {
     logf("[LOGIN] No interception. Checking whether we are already through...");
-    if (fetchData()) {
+    if (probeOnline()) {
       logf("[LOGIN] Already authenticated, skipping POST.");
       return true;
     }
@@ -2245,8 +2243,8 @@ bool doLogin() {
 
   postCredentials(portalUrl, scan);
 
-  logf("[LOGIN] Verifying with a real data fetch...");
-  bool ok = fetchData();
+  logf("[LOGIN] Verifying with the captive-portal probe...");
+  bool ok = probeOnline();
   if (ok) {
     logf("[LOGIN] SUCCESS: port is authenticated.");
   } else {
@@ -2267,7 +2265,7 @@ void setup() {
 
   logf("network-master (production WT32 portal + rusim-line peer)");
   logf("Ping target: 1.1.1.1");
-  logf("Data URL: %s", kDataUrl);
+  logf("Captive probe: %s", kCaptiveProbeUrl);
   logf("Login is entered on the web page (port 80), kept in RAM only.");
 
   pinMode(TEST_LED_PIN, OUTPUT);
@@ -2364,7 +2362,7 @@ void loop() {
           lastAuthProbeMs = millis();
           logf("[LOGIN] no login submitted; probing for existing session...");
           String portalUrl = fetchPortalUrl();
-          if (portalUrl.length() == 0 && fetchData()) {
+          if (portalUrl.length() == 0 && probeOnline()) {
             logf("[LOGIN] session already valid; releasing display gate.");
             haveVerdict = true;
             lastVerdict = true;
@@ -2419,10 +2417,10 @@ void loop() {
       // Declare the fresh verdict every cycle so /info stays live.
       link_emit_net();
 
-      // The data fetch is the portal verdict: WALLED means the session
+      // The 204 probe is the portal verdict: no 204 means the session
       // expired, so pause the loop and re-auth via the display.
-      if (!fetchData()) {
-        logf("[LOGIN] session walled mid-run, waiting for a new login");
+      if (!probeOnline()) {
+        logf("[LOGIN] portal probe failed mid-run, waiting for a new login");
         stage = STAGE_NEED_CREDS;
         stageAtMs = 0;
         break;

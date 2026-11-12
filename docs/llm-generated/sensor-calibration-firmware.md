@@ -153,54 +153,52 @@ in span gas. `setup()` fits one exponent per sensor:
 curve_exp[i] = log10(PPM_SPAN[i] / PPM_AIR) / log10(RS_AIR[i] / RS_SPAN[i])
 ```
 
-with `PPM_AIR = 2.0` (assumed background methane) and a separate reference
-concentration `PPM_SPAN[i]` for each sensor. At runtime:
+with `PPM_AIR = 2.0` (assumed clean-air background methane) and a separate
+reference concentration `PPM_SPAN[i]` for each sensor. At runtime:
 
 ```
 rsToPpmRaw = PPM_AIR * (RS_AIR[i] / rs) ^ curve_exp[i]
 ```
 
-The exponent is per sensor because sensor-to-sensor spread in `RS_AIR` is large;
-the values in the source range from about 5370 to 8592 ohms. Note that the fit
-needs `RS_AIR[i] > RS_SPAN[i]` for a positive exponent, which holds for all four
-current entries.
+The exponent is per sensor because sensor-to-sensor spread in `RS_AIR` is large.
+The fit needs `RS_AIR[i] > RS_SPAN[i]` for a positive exponent, which holds for
+all four current entries.
 
 ### Reference-data refit
 
-Both this logger and `legacy/slave/new-slave.cpp` use the following points. Only
-`rs_i` samples from sensor `i`'s own reference exposure enter its arithmetic mean;
-the other sensors' simultaneous readings are not calibration points.
+The current logger constants are based on two captures: eight readings in clean
+air from the earlier 10-second serial capture, and one supplied reading per
+sensor in a 390 ppm methane reference. An earlier 300 ppm point was replaced
+because the user said it was not reliable.
 
-| Sensor | Samples | Time range (s) | `RS_AIR` (Ω) | Mean `RS_SPAN` (Ω) | `PPM_SPAN` (ppm) | Fitted exponent |
+| Sensor | Samples | Time range (s) | `RS_AIR` (Ω) | `RS_SPAN` (Ω) | `PPM_SPAN` (ppm) | Fitted exponent |
 |---|---|---|---|---|---|---|
-| 0 | 12 | 1465–1477 | 6160.3 | 259.8083 | 432 | 1.697848 |
-| 1 | 16 | 1991–2009 | 5370.7 | 370.7250 | 450 | 2.026034 |
-| 2 | 15 | 2378–2395 | 8592.1 | 382.4533 | 387 | 1.691932 |
-| 3 | 16 | 2887–2905 | 7950.2 | 300.8875 | 499 | 1.685735 |
+| 0 | 8 air / 1 span | 0–8 / 14 | 1007.41 | 212.7 | 390 | 3.390440 |
+| 1 | 8 air / 1 span | 0–8 / 14 | 2698.94 | 393.2 | 390 | 2.737378 |
+| 2 | 8 air / 1 span | 0–8 / 14 | 1721.81 | 338.6 | 390 | 3.242305 |
+| 3 | 8 air / 1 span | 0–8 / 14 | 2231.38 | 673.9 | 390 | 4.404098 |
 
 The exponents are fitted at boot, not stored as rounded constants. The logged
-`ppm_i` fields came from the old curves and are not reference measurements.
-`CORR_SLOPE` and `CORR_OFFSET` remain identity values: the refit does not add a
-second ppm-space correction.
+`ppm_i` fields in the 390 ppm capture came from the previous curves and are not
+reference measurements. `CORR_SLOPE` and `CORR_OFFSET` remain identity values.
 
 Assumptions and limits:
 
-- The existing clean-air resistances and assumed 2 ppm background are retained.
-  No new air measurements were supplied.
-- The reference concentrations are treated as methane ppm, as supplied by the
-  user. The data do not establish reference-meter accuracy or gas selectivity.
+- Clean air is assumed to be 2 ppm methane; this concentration was not measured
+  with a reference instrument.
+- The span concentration is treated as 390 ppm methane, as supplied by the user.
+  It is a single reading per sensor; the data do not establish reference-gas or
+  reference-meter accuracy.
 - The sensor order, load resistors, supply conditions and warmed-up state must
-  match the calibration setup. The logger uses A0–A3; the slave uses A1/A4/A7/A10.
-- All four reference points are below the documented typical 500–10000 ppm
-  range. A fit through these points does not validate accuracy elsewhere.
-- Sensor 1's resistance falls from 373.1 to 369.6 Ω over its capture, and sensor
-  2 varies from 375.8 to 387.5 Ω. The mean uses every supplied sample rather than
-  selecting a stable subset. Longer stable exposures would improve confidence.
+  match the calibration setup. This logger uses A0–A3.
+- The 390 ppm span point is below the datasheet's typical 500–10000 ppm range.
+  A fit through 2 and 390 ppm does not validate accuracy elsewhere.
+- The clean-air capture was only eight samples over about eight seconds. The
+  390 ppm capture supplied one sample per sensor. Longer captures and a measured
+  air reference would improve confidence.
 
-The slave evaluates the equivalent span-anchored expression
-`PPM_SPAN[i] * (RS_SPAN[i] / rs)^curve_exp[i]` and calculates its 10000 ppm
-cutoff resistance from the same per-sensor span. Its existing invalid-reading
-and ADC-clipping checks remain in place; the logger's range behavior is unchanged.
+These constants update `methane-calibrate` only. The separate legacy slave
+firmware has its own calibration values and is not updated by this change.
 
 **Layer 2, optional linear correction in ppm space.** `CORR_SLOPE` and
 `CORR_OFFSET` apply `ppm = slope * raw + offset` after layer 1. Both are currently
@@ -323,4 +321,4 @@ during every read slot, so it cannot replace the external 4.7 kΩ resistor.
 - `../index.md` — the repository index and the rest of the docs.
 
 ---
-Content generated by `openai/gpt-6.1-sol` in `Zed`.
+Content generated by `openai/gpt-6-luna` in `T3 Code`.

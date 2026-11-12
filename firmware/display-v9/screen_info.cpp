@@ -51,7 +51,7 @@ static lv_obj_t *mk_gauge(lv_obj_t *parent, const char *caption, lv_obj_t **cent
   lv_arc_set_range(arc, 0, 100);
   lv_arc_set_value(arc, 0);
   lv_obj_remove_style(arc, nullptr, LV_PART_KNOB);
-  lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(arc, false);  // gauge only, not a control
   lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_arc_width(arc, 10, LV_PART_MAIN);
   lv_obj_set_style_arc_width(arc, 10, LV_PART_INDICATOR);

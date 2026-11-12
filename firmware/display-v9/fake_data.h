@@ -23,7 +23,9 @@ struct BottleFake {
   bool present;  // reported in the latest live sensor frame
   float sensor[S_COUNT];
   bool sensorNull[S_COUNT];  // true = WT32 failed to fetch this field this cycle
-  float trend[UI_TREND_PTS];  // measured bottle temperatures; NAN = no point
+  // Measured history per sensor, oldest first; NAN = no sample (chart gap).
+  // 5 x 24 floats per bottle, so all 24 capacity slots cost about 11.5 KB.
+  float trend[S_COUNT][UI_TREND_PTS];
 };
 
 struct ClusterFake {
@@ -59,3 +61,6 @@ bool sens_real_active();
 int fake_null_count();
 bool fake_any_null();
 const char *fake_sensor_text(int c, int b, int s, char *out, size_t n);
+// The reading alone, unit omitted ("38.2", "+1.04", "--"). Used by the big
+// number on the chamber detail tiles, where the unit sits in the caption.
+const char *fake_sensor_value_text(int c, int b, int s, char *out, size_t n);

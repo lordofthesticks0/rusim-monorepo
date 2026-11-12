@@ -142,8 +142,10 @@ void model_unchanged(const AppState &before) {
         CHECK(actual.sensorNull[sensor] == expected.sensorNull[sensor]);
         same_float(actual.sensor[sensor], expected.sensor[sensor]);
       }
-      for (int point = 0; point < UI_TREND_PTS; ++point) {
-        same_float(actual.trend[point], expected.trend[point]);
+      for (int sensor = 0; sensor < S_COUNT; ++sensor) {
+        for (int point = 0; point < UI_TREND_PTS; ++point) {
+          same_float(actual.trend[sensor][point], expected.trend[sensor][point]);
+        }
       }
     }
   }
@@ -156,8 +158,10 @@ void unavailable_bottle(int cluster, int bottle) {
     CHECK_AT(value.sensorNull[sensor], position(cluster, bottle, sensor));
     CHECK_AT(std::isnan(value.sensor[sensor]), position(cluster, bottle, sensor));
   }
-  for (int point = 0; point < UI_TREND_PTS; ++point) {
-    CHECK_AT(std::isnan(value.trend[point]), position(cluster, bottle, point));
+  for (int sensor = 0; sensor < S_COUNT; ++sensor) {
+    for (int point = 0; point < UI_TREND_PTS; ++point) {
+      CHECK_AT(std::isnan(value.trend[sensor][point]), position(cluster, bottle, point));
+    }
   }
 }
 
@@ -202,12 +206,20 @@ void check_full_bottle(float temp = 37.5f) {
   near(bottle.sensor[S_TEMP], temp);
 }
 
+// Every sensor keeps its own history, and each history holds exactly one sample
+// after the first applied frame.
 void one_trend_point(float temp) {
   const BottleFake &bottle = g.cluster[0].bottle[0];
-  for (int point = 0; point < UI_TREND_PTS - 1; ++point) {
-    CHECK_AT(std::isnan(bottle.trend[point]), position(0, 0, point));
+  for (int sensor = 0; sensor < S_COUNT; ++sensor) {
+    for (int point = 0; point < UI_TREND_PTS - 1; ++point) {
+      CHECK_AT(std::isnan(bottle.trend[sensor][point]), position(0, 0, point));
+    }
   }
-  near(bottle.trend[UI_TREND_PTS - 1], temp);
+  near(bottle.trend[S_CO2][UI_TREND_PTS - 1], 900.0f);
+  near(bottle.trend[S_CH4][UI_TREND_PTS - 1], 2.3f);
+  near(bottle.trend[S_PRESS][UI_TREND_PTS - 1], 1.2f);
+  near(bottle.trend[S_PH][UI_TREND_PTS - 1], 7.1f);
+  near(bottle.trend[S_TEMP][UI_TREND_PTS - 1], temp);
 }
 
 void test_initial_state_and_no_synthetic_data() {
@@ -287,9 +299,12 @@ void test_malformed_numeric_suffixes_are_not_accepted() {
     CHECK(sens_apply_real());
     CHECK_AT(g.cluster[0].bottle[0].sensorNull[S_TEMP], token);
     CHECK_AT(std::isnan(g.cluster[0].bottle[0].sensor[S_TEMP]), token);
+    // The invalid temperature never enters its history; the valid pH field in
+    // the same frame still records its own sample.
     for (int point = 0; point < UI_TREND_PTS; ++point) {
-      CHECK(std::isnan(g.cluster[0].bottle[0].trend[point]));
+      CHECK_AT(std::isnan(g.cluster[0].bottle[0].trend[S_TEMP][point]), token);
     }
+    near(g.cluster[0].bottle[0].trend[S_PH][UI_TREND_PTS - 1], 7.1f);
   }
   receive("SENS b1 ph=7.1bad ch4=2.3bad t=37oops co2=900bad p=1.2bad\n");
   LinkSensFrame frame;
@@ -341,16 +356,21 @@ void test_trend_contains_only_new_real_samples() {
   LinkSensFrame first;
   CHECK(link_serial_get_sens(&first) == 0);
   CHECK(first.seq != 0);
-  std::array<float, UI_TREND_PTS> before;
-  for (int point = 0; point < UI_TREND_PTS; ++point) {
-    before[point] = g.cluster[0].bottle[0].trend[point];
+  std::array<std::array<float, UI_TREND_PTS>, S_COUNT> before;
+  for (int sensor = 0; sensor < S_COUNT; ++sensor) {
+    for (int point = 0; point < UI_TREND_PTS; ++point) {
+      before[sensor][point] = g.cluster[0].bottle[0].trend[sensor][point];
+    }
   }
   for (int repeat = 0; repeat < 3; ++repeat) {
     host::advance_ms(UI_SENS_APPLY_MS);
     CHECK(!sens_apply_real());
-    for (int point = 0; point < UI_TREND_PTS; ++point) {
-      const float after = g.cluster[0].bottle[0].trend[point];
-      CHECK((std::isnan(before[point]) && std::isnan(after)) || before[point] == after);
+    for (int sensor = 0; sensor < S_COUNT; ++sensor) {
+      for (int point = 0; point < UI_TREND_PTS; ++point) {
+        const float after = g.cluster[0].bottle[0].trend[sensor][point];
+        CHECK((std::isnan(before[sensor][point]) && std::isnan(after)) ||
+              before[sensor][point] == after);
+      }
     }
   }
   LinkSensFrame duplicate;
@@ -363,19 +383,19 @@ void test_trend_contains_only_new_real_samples() {
   CHECK(second.seq == first.seq + 1);
   CHECK(sens_apply_real());
   for (int point = 0; point < UI_TREND_PTS - 2; ++point) {
-    CHECK(std::isnan(g.cluster[0].bottle[0].trend[point]));
+    CHECK(std::isnan(g.cluster[0].bottle[0].trend[S_TEMP][point]));
   }
-  near(g.cluster[0].bottle[0].trend[UI_TREND_PTS - 2], 37.5f);
-  near(g.cluster[0].bottle[0].trend[UI_TREND_PTS - 1], 37.5f);
+  near(g.cluster[0].bottle[0].trend[S_TEMP][UI_TREND_PTS - 2], 37.5f);
+  near(g.cluster[0].bottle[0].trend[S_TEMP][UI_TREND_PTS - 1], 37.5f);
   CHECK(!sens_apply_real());
   full_frame(38.1f);
   CHECK(sens_apply_real());
   for (int point = 0; point < UI_TREND_PTS - 3; ++point) {
-    CHECK(std::isnan(g.cluster[0].bottle[0].trend[point]));
+    CHECK(std::isnan(g.cluster[0].bottle[0].trend[S_TEMP][point]));
   }
-  near(g.cluster[0].bottle[0].trend[UI_TREND_PTS - 3], 37.5f);
-  near(g.cluster[0].bottle[0].trend[UI_TREND_PTS - 2], 37.5f);
-  near(g.cluster[0].bottle[0].trend[UI_TREND_PTS - 1], 38.1f);
+  near(g.cluster[0].bottle[0].trend[S_TEMP][UI_TREND_PTS - 3], 37.5f);
+  near(g.cluster[0].bottle[0].trend[S_TEMP][UI_TREND_PTS - 2], 37.5f);
+  near(g.cluster[0].bottle[0].trend[S_TEMP][UI_TREND_PTS - 1], 38.1f);
 }
 
 void test_disappearing_bottles_are_cleared() {
