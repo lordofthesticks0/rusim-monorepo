@@ -9,7 +9,7 @@ const unsigned long HX711_READY_POLL_MS = 10;
 
 const int SENSORID = 0; // Select the sensor calibration: 0, 1, 2, or 3.
 const float CALIBRATION_FACTORS[4] = {
-  581040.0f, // Sensor 0
+  75200.6f, // Sensor 0
   70802.7743f, // Sensor 1
   82656.645503906f, // Sensor 2
   60223.70030581f  // Sensor 3

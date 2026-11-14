@@ -1,0 +1,35 @@
+--- Terminal on /dev/ttyUSB0 | 115200 8-N-1
+--- Available filters and text transformations: debug, default, direct, hexlify, log2file, nocontrol, printable, send_on_enter, time
+--- More details at https://bit.ly/pio-monitor-filters
+--- Quit: Ctrl+C | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+MH-Z19C 4-sensor PWM CO2 logger started
+{"time_s":0,"raw_0":499.9,"ppm_0":499.9,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":8,"raw_0":499.9,"ppm_0":499.9,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":17,"raw_0":735.8,"ppm_0":735.8,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":26,"raw_0":732.8,"ppm_0":732.8,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":35,"raw_0":726.9,"ppm_0":726.9,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":44,"raw_0":722.8,"ppm_0":722.8,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":53,"raw_0":719.9,"ppm_0":719.9,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":62,"raw_0":716.0,"ppm_0":716.0,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":71,"raw_0":714.0,"ppm_0":714.0,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":80,"raw_0":712.9,"ppm_0":712.9,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":88,"raw_0":711.9,"ppm_0":711.9,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":97,"raw_0":719.9,"ppm_0":719.9,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":106,"raw_0":1101.9,"ppm_0":1101.9,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":115,"raw_0":1756.9,"ppm_0":1756.9,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":124,"raw_0":2367.0,"ppm_0":2367.0,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":133,"raw_0":2838.1,"ppm_0":2838.1,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":142,"raw_0":3194.0,"ppm_0":3194.0,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":151,"raw_0":3445.1,"ppm_0":3445.1,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":160,"raw_0":3622.9,"ppm_0":3622.9,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":169,"raw_0":3721.0,"ppm_0":3721.0,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":178,"raw_0":3758.1,"ppm_0":3758.1,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":187,"raw_0":3774.1,"ppm_0":3774.1,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":195,"raw_0":3813.1,"ppm_0":3813.1,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":204,"raw_0":3838.1,"ppm_0":3838.1,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":213,"raw_0":3848.1,"ppm_0":3848.1,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":222,"raw_0":3850.0,"ppm_0":3850.0,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":231,"raw_0":3891.1,"ppm_0":3891.1,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":240,"raw_0":3941.0,"ppm_0":3941.0,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":249,"raw_0":3985.1,"ppm_0":3985.1,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null,"raw_3":null,"ppm_3":null,"uart_0":null}
+{"time_s":258,"raw_0":4001.1,"ppm_0":4001.1,"raw_1":null,"ppm_1":null,"raw_2":null,"ppm_2":null
