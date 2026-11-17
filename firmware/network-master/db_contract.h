@@ -6,7 +6,7 @@
 // (firmware/tests/db-contract/). Keeping it header-only means the test cannot
 // drift from what ships.
 //
-// Contract summary (docs/llm-generated/network-master-database-plan.md §3):
+// Contract summary (docs/plans-and-audits/network-master-database-plan.md §3):
 //   - push_readings takes ONE named argument, so the body is
 //     {"p_readings":[...]}, never a bare array.
 //   - timestamps are UTC "YYYY-MM-DDTHH:MM:SSZ" at sample time.

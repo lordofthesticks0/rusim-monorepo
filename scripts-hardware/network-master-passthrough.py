@@ -10,7 +10,7 @@ So this hook keeps one raw handle on the display for the whole upload, with
 the modem lines untouched, and hands esptool a pseudoterminal instead. Bytes
 are relayed between the two in both directions for the duration.
 
-See docs/llm-generated/link-serial-protocol.md section 7.
+See docs/link-serial-protocol.md section 7.
 """
 
 import atexit

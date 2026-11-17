@@ -4,7 +4,7 @@
 //
 // This compiles firmware/network-master/db_contract.h unchanged, so it tests
 // the exact parsing and formatting code that ships. It covers the contract
-// cases from docs/llm-generated/network-master-database-plan.md §6 that do not
+// cases from docs/plans-and-audits/network-master-database-plan.md §6 that do not
 // need a server: named p_readings envelope, sparse bottle ids, null vs absent
 // sensors, non-finite rejection, UTC timestamps, scalar acknowledgement and
 // PostgREST error codes.

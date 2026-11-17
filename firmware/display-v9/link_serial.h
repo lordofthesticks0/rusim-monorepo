@@ -9,7 +9,7 @@
 //
 // Protocol: rusim-line v1, peer to peer. One ASCII line per message,
 // '\n' terminated, 1024 bytes maximum. See
-// docs/llm-generated/link-serial-protocol.md for the wire specification.
+// docs/link-serial-protocol.md for the wire specification.
 //
 // Inbound words handled here: HELLO, LOGINREQ, RESULT, NET, DB, LOG, SENS.
 // Outbound words: HELLO, EXPERIMENT (DUMP via W32CMD in debug builds).
@@ -65,7 +65,7 @@ int link_serial_get_db_bottles();
 // Buffered push rows dropped on WT32 queue overflow.
 int link_serial_get_push_drops();
 
-// DB configuration state (network-master-database-plan.md §4).
+// DB configuration state (docs/plans-and-audits/network-master-database-plan.md §4).
 // ready: at least one successful configuration pull since the WT32 booted.
 // A run must not start while this is false.
 bool link_serial_db_ready();
@@ -92,7 +92,7 @@ uint32_t link_serial_get_db_ack_age_ms();
 // --- Real bottle readings (rusim-line "SENS" word) --------------------------
 // The WT32 forwards one parsed legacy-Mega-slave poll as a SENS line: up to
 // LINK_SENS_BOTTLES bottles of valid floats, one line per accepted 30 s round
-// (id ordering, database bottle_id 0..3). docs/llm-generated/
+// (id ordering, database bottle_id 0..3). docs/
 // link-serial-protocol.md §3.1.1 is the wire contract.
 #define LINK_SENS_BOTTLES 4
 #define LINK_SENS_VALS 5

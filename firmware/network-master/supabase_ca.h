@@ -1,7 +1,7 @@
 #pragma once
 
 // Supabase TLS trust bundle for firmware/network-master.
-// Pinned roots (esp-db-sync.md §5): GTS Root R4 (current chain anchor),
+// Pinned roots (docs/plans-and-audits/esp-db-sync.md §5): GTS Root R4 (current chain anchor),
 // GlobalSign Root CA R3 (cross-sign cover), ISRG Root X1 ( plausible move
 // if Supabase changes CA). Passed to WiFiClientSecure::setCACert(), which
 // replaces the trust store, so every root must be listed explicitly here.

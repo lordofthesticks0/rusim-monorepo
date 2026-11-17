@@ -26,11 +26,11 @@
 //   "LOG [SENS]" line, and enqueues the present bottles while an experiment
 //   run is active. Each accepted round is forwarded to the display as one
 //   SENS line, so the data screens show real bottles (node 0). See
-//   docs/llm-generated/migration-plan.md and link-serial-protocol.md.
+//   docs/plans-and-audits/migration-plan.md and link-serial-protocol.md.
 // - Pulls devices/experiments/device_config from Supabase every 30 s and
 //   freezes a run configuration snapshot at each run start. Uploads go to the
 //   push_readings RPC only while a run is active. See
-//   docs/llm-generated/network-master-database-plan.md.
+//   docs/plans-and-audits/network-master-database-plan.md.
 // - Serves the captive portal login page on port 80 (plain HTTP, LAN only).
 //   The username and password are typed on that page. The display shows only
 //   this board's URL as a QR code. Both ends declare their state every 5 s and
@@ -47,7 +47,7 @@
 // Wire protocol (must match firmware/display-v9/link_serial.h):
 //   display -> WT32: HELLO, EXPERIMENT run num dur, DUMP
 //   WT32 -> display: HELLO, LOGINREQ, RESULT OK|FAIL, NET ip up ping, DB ...
-// See docs/llm-generated/link-serial-protocol.md.
+// See docs/link-serial-protocol.md.
 
 #define LINK_LINE_MAX 1024
 #define LINK_GAP_MS 50
@@ -92,7 +92,7 @@ static char dbOwnerEmail[64] = {0};
 static uint32_t lastDbPollMs = 0;
 static const uint32_t kDbPollMs = 30000;
 
-// --- Database contract state (network-master-database-plan.md) -------------
+// --- Database contract state (docs/plans-and-audits/network-master-database-plan.md) -------------
 // All DB responses are bounded; nothing here grows with server data. The
 // session lives in RAM only and is compared against the queue's provisioning
 // identity before every upload.
@@ -234,7 +234,7 @@ static uint32_t ledOffMs = 0;
 static size_t s_pushCount = 0;    // rows held
 static uint32_t s_pushDrops = 0;  // saturating overflow counter
 
-// Sensor poll state (migration-plan.md). One fixed RX frame: no Arduino
+// Sensor poll state (docs/plans-and-audits/migration-plan.md). One fixed RX frame: no Arduino
 // String and no JSON library, because the reply shape is fixed and flash is
 // at ~75 %. IO5/IO17 are the freed display-link pair; the ESP32 UART1
 // defaults (IO9/IO10) are flash pins on this module, so pins are explicit.
@@ -1219,7 +1219,7 @@ static bool pushEnqueueRound(time_t sampleUnix, int experimentId,
   return true;
 }
 
-// --- Legacy Mega slave poll (migration-plan.md) ----------------------------
+// --- Legacy Mega slave poll (docs/plans-and-audits/migration-plan.md) ----------------------------
 //
 // Direct TTL on Serial1: Mega D18 TX -> IO5 RX, Mega D19 RX <- IO17 TX,
 // 9600 8N1, common GND. Request "#1:PING*" (8 bytes, no checksum); the slave
@@ -1444,7 +1444,7 @@ static void sens_poll() {
 
 // --- Supabase device session, configuration pull and upload ----------------
 //
-// HTTP contract (network-master-database-plan.md §3):
+// HTTP contract (docs/plans-and-audits/network-master-database-plan.md §3):
 //   POST /rest/v1/rpc/authenticate  {"p_token":"..."}
 //   GET  /rest/v1/devices?select=device_id,bottle_count,owner_name,owner_email
 //   GET  /rest/v1/device_config?select=bottle_count,owner_name,owner_email,updated_at

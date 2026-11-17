@@ -1,0 +1,29 @@
+# 12. Copies & git state
+
+## Initial commit
+
+All three copies share initial commit `f96fb1b Initial water control system with Arduino and web interface` on branch `main`, tracking `origin/main`. Git user: `DextroColdwood <dextrocoldwood@gmail.com>`.
+
+## Current state
+
+Work has been committed to the repository. The mirror in `legacy/pi/water-control-system/` reflects the committed state (`web_control.py`, `templates/index.html` and the historical `.ino` are tracked; `logs/` is git-ignored). The three on-Pi copies described here are a separate clone of `DextroColdwood/water-control-system` and were last inspected on 2026-10-19/20, before the Pi went offline to this repository.
+
+## Divergence between copies (historical)
+
+### UI
+- **Live** (`~/water-control-system`): redesigned CarPlay/glassmorphism UI — left dock with clock + nav, perf strip, bottle grid, water-ADC drawer, `--font-scale: 1.2`. No system-mode button: `set_mode` is not called anywhere in `templates/index.html`; heater/pump/stirrer are set through `POST /control`.
+- **Desktop copies**: simpler flat blue theme, top header bar, no perf strip, `MODE: AUTO/OFF` toggle in header.
+
+### Firmware (water-level handling)
+- **Current** (`legacy/master/master.cpp`): water-level sensing **enabled** with time-gated debouncing (500ms intervals, 16-sample averaging, threshold 200, 5-check fault limit) → dry-run protection active.
+- Historical state noted bypassed water-level sensing; this has since been fixed.
+
+### `web_control.py`
+Substantially expanded from initial version: resilient serial auto-reconnect, worker threads, CSV logging engine, USB export, network/time routes. Boot defaults send `HEATER_OFF`, `PUMP_OFF`, `STIR:0:10:30` on first connection.
+
+## Local documentation origin
+
+This `raspi-docs/` folder was created on the operator's machine and transferred to the Pi at `~/Documentation`.
+
+---
+Updated at 2026-11-17-23:47.

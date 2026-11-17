@@ -57,7 +57,7 @@ No major calibration issue, only issue being the - noticably difficult to fix - 
 
 ## 5. CH4 sensor
 - [x] tested
-- [ ] calibrated
+- [x] calibrated
 
 All sensors were warmed constantly over 3 days to remove any oxidation over the copper plating
 Calibration seems difficult due to the limited time constraint from using a real rumen sample, sensor seems to be reading 7x lower than the benchmark Mestek brand methane/combustible gas detector.

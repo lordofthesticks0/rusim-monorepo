@@ -1,0 +1,169 @@
+### 2026-10-20
+- `pio device monitor` is an interactive terminal, not a pipe-friendly serial
+  reader. It calls `termios.tcgetattr()` on stdin and dies with
+  `termios.error: (25, 'Inappropriate ioctl for device')` when stdin is not a
+  TTY (agent harness, pipe, service). Fix: configure the port with `stty` and
+  read it with `node:fs`, or use a serial library. Lesson: do not build a
+  non-interactive wrapper on top of an interactive monitor.
+- Opening a USB serial port resets the Mega via DTR, so the first telemetry
+  messages contain the firmware's invalid markers (`-1`, `-999`) while the
+  cache fills. Fix: discard a startup window (default 5 s, `--settle`) and
+  resynchronise to the next newline before parsing. The timer must start on the
+  first telemetry bytes, not on port open: bootloader and `setup()` time can
+  otherwise consume the whole window and the first printed row is still a cache
+  miss. (Found on the bench: a 5 s timer from open expired before the HX711
+  probes finished, so the table began with partial readings.)
+  (`scripts-hardware/read-legacy-slave.ts`)
+- Do not translate the firmware's invalid markers. The user asked for raw
+  values: `-1` and `-999` are printed as sent, not as `n/a`. The wrapper may
+  warm up the stream, but it should not reinterpret sensor data.
+  (`scripts-hardware/read-legacy-slave.ts`)
+
+### 2026-10-08
+- `display-v9` / `network-master` are PlatformIO environments and
+  `firmware/` directories, not git branches. `git branch -a` shows only
+  `master`; the mapping lives in `platformio.ini` (`[env:display-v9]`,
+  `[env:network-master]`) and `firmware/display-v9/`,
+  `firmware/network-master/`. Lesson: check `platformio.ini` + `firmware/`
+  before assuming a name is a branch. (memory-safety audit entry)
+- ESP32 Arduino toolchain defaults to C++11: `std::make_unique` does not
+  exist (`'make_unique' is not a member of 'std'`, only available from C++14
+  onwards). Fix: `std::unique_ptr<T>(new T(...))`. Lesson: use the
+  `new`-wrapping form in firmware, or set `build_flags -std=c++14` first.
+  (display-v9 RAII, provision_ap RAII)
+
+### 2026-10-06
+- Shipped network-master DB/NTP code without compiling: a debug `q1` variable
+  was declared inside the `if (at >= 0)` block but referenced after it, so the
+  build failed (`'q1' was not declared in this scope`). Fix was to delete the
+  variable. Lesson: run `pio run -e network-master` (and `-e display-v9` when
+  the display changes) before reporting done. The project builds from the repo
+  root `platformio.ini`, not from inside `firmware/`.
+- Proposed WT32 IO2 as an interrupt input before stating it is a strapping pin
+  (must be low/floating at boot). User wired it, then had to move the signal
+  to IO14. Fix: lead with the boot constraint, propose a non-strapping pin
+  (IO14/IO32/IO33) first, offer IO2/IO4/IO5/IO12/IO15 only with the warning
+  attached. Lesson: check strapping + peripheral collisions (ETH RMII, UART,
+  touch I2C, USB) before naming any GPIO, and put the safest option first.
+  (network-master INT test, display IO11 -> WT32 IO14, LED IO2)
+
+### 2026-10-05
+- LVGL: `lv_obj_set_pos()` is an offset relative to the object's current
+  alignment, not absolute screen coordinates. `lv_keyboard_create()` aligns
+  itself `LV_ALIGN_BOTTOM_MID` in its constructor, so calling
+  `lv_obj_set_pos(kb, 0, 310)` put the keyboard 310 px below the bottom edge,
+  fully off-screen, while every other widget (default `TOP_LEFT`) positioned
+  fine. Fix: `lv_obj_set_align(kb, LV_ALIGN_TOP_LEFT)` before `set_pos`.
+  Lesson: after creating any LVGL widget, check whether its constructor sets
+  a non-default alignment before positioning it. (display-v9 login gate)
+- `strtok()` hides the information needed to recover a command's arguments.
+  It replaces the first delimiter after the command word with a NUL and keeps
+  the rest of the line only in internal state, so after
+  `char *cmd = strtok(line, " \t")` the arguments are reachable only via a
+  further `strtok(nullptr, ...)`. Reaching them as `cmd + strlen(cmd) + 1`
+  looks correct and is right whenever a delimiter followed the command word,
+  but reads past the end of the line into stale buffer content when it did not
+  (`CREDS` with no arguments, against a `s_line` that still held a longer
+  previous command). Fix: capture `strlen(line)` before tokenizing and compare
+  `cmd + strlen(cmd)` against `line + lineLen` first. Lesson: whenever pointer
+  arithmetic depends on a delimiter existing, check that it exists rather
+  than assuming. (display-v9 `CREDS` command)
+- A handler registered through `WebServer::on()` takes no arguments
+  (`std::function<void()>`), so handlers cannot receive the server they are
+  registered on. Writing `void handle(WebServer&)` fails to compile with a
+  candidate list that looks unrelated to the mistake. Fix: reach the singleton
+  through a file-scope accessor. Note that `WebServer::arg()` returns a
+  `String`, so it needs `.c_str()` for `strcmp`. (display-v9 `provision_ap`)
+- `lv_qrcode` is a subclass of `lv_canvas`, so `LV_USE_CANVAS` must be 1 or the
+  widget's base class does not exist. Enabling `LV_USE_QRCODE` alone fails to
+  link in a way that does not name the canvas. The canvas buffer is
+  `ceil(size/8) * size` bytes because the format is `LV_COLOR_FORMAT_I1`, so a
+  300 px code costs 11.4 KB of `LV_MEM_SIZE` — check that against the pool
+  before sizing the widget. (display-v9 `/setup` QR)
+- `lv_qrcode_update()` rejects an empty payload and needs valid data to draw,
+  so "clear the code" means encoding a placeholder (a single space), not
+  skipping the call. A stale QR left on screen still scans. (display-v9
+  `/setup` QR)
+- A WIFI: QR payload must not end in a newline. `echo "WIFI:T:nopass;S:x;;" |
+  qrencode` fails on both iOS and Android; `echo -n` works. Relatedly, a
+  third-party scanner that displays the raw `WIFI:` text instead of offering to
+  join the network is expected behaviour, not a bug in the payload. (display-v9
+  `/setup` QR)
+- The WIFI: `T:` token is `WPA` for **every** passphrase network, not `WPA2`.
+  The phone negotiates WPA2 vs WPA3 during the join; the QR never names a
+  version. `T:WPA2` is not a legal token and fails unpredictably across
+  handsets. `T:nopass` is the open-network form and requires `P` to be absent.
+  Guess the token from the network's security type and you will ship a code
+  that reads on one phone and silently does nothing on another. (display-v9
+  `/setup` QR)
+- A cloaked SSID requires `H:true` in the WIFI: payload. Worse, cloaked
+  networks are the weak point of camera-app support: iOS in particular is
+  documented as not supporting hidden SSIDs from a WIFI: QR. Make one build-time
+  constant drive both the radio and the payload field so they cannot disagree,
+  and expose a flag to broadcast. (display-v9 `provision_ap`)
+- The argument that removing a Wi-Fi passphrase removes typing does not hold
+  when a QR code carries the passphrase. Reasoning "a passphrase would have to
+  be read off the screen and typed into the phone" is wrong if the passphrase
+  is in the code being scanned; check what the QR actually contains before
+  trading away encryption. (display-v9 `provision_ap`)
+- Tracking "which of two QR payloads is on screen" with a state enum needs the
+  enum poked to the *wrong* value to force a repaint, and any path that changes
+  the payload without going through that one gets missed — e.g. an idle timeout
+  leaving a stale join code on screen. Track the painted payload string and
+  compare it instead. Same class of bug as caching with an invalidation that
+  has to be remembered at every call site. (display-v9 `/setup` QR)
+- Size a payload buffer for the worst case of its configurable inputs, not the
+  default. An 80-byte buffer held the MAC-derived QR payload (57 bytes) but
+  truncated a 63-char `PROVISION_AP_PASSWORD` override, and a truncated WIFI:
+  payload is rejected by the phone with no diagnostic. Put the size in a shared
+  constant so the header, the screen, and the serial command cannot disagree.
+  (display-v9 `provision_ap`)
+- Do not install or enable a new system service to work around a hardware or
+  driver failure without confirming the approach first. On the Pi 3B
+  `brcmfmac43430`, NetworkManager's `nmcli device wifi hotspot` fails with
+  `key setting validation failed`; hostapd brought the AP up, but the user
+  wanted a same-LAN HTTP download instead. The hostapd package was left
+  installed and masked, not purged. Check whether a simpler LAN service fits
+  before changing the radio. (water-control-system hotspot)
+- "No UI" for a download endpoint means the HTTP response is the file, not an
+  HTML index or login page. Keep the kiosk-side QR, but do not add a web page
+  on the download port. (water-control-system port 7514)
+
+---
+Model credit is unnecessary here.
+
+### 2026-10-24
+- The WT32-ETH01 has no USB port. Flashing uses a USB-UART adapter on 5V, GND,
+  RX and TX only, with `IO0` jumpered to GND during the upload and a power
+  cycle afterwards to run. That drill is the normal one, not a workaround for
+  the `PASSTH` tunnel. Do not write that the adapter auto-resets the board or
+  that the tunnel "loses a reset path" the adapter has: there is no RTS/DTR
+  reset on either path, so bootloader entry is manual in both cases.
+- A host serial open can reset a board and silently destroy a runtime-only
+  tunnel. The Sunton display's USB is a CH340 on UART0 (`GPIO43`/`GPIO44`), and
+  pyserial's `open()` drives DTR/RTS and reboots it within 50 ms, even with
+  `dtr=False, rts=False` set before `open()`; `dsrdtr=True` or `os.open()` plus
+  termios does not. Check for a fresh `ESP-ROM` banner before blaming the link.
+  `--before no_reset` does not help: it skips esptool's explicit reset sequence,
+  not the reset done by the serial library while opening the port.
+- When a helper starts returning raw bytes instead of a yes/no, move the marker
+  comparison with it. A caller that tested a capitalised marker
+  (`b"passthrough ON"`) against lowered output never matched, so a working
+  tunnel was reported as "did not confirm" and the upload was cancelled before
+  esptool ran. Lowercase both sides in one shared helper, and print the bytes
+  actually received on failure: the log showed the confirmation was there.
+  (scripts-hardware `network-master-passthrough.py`)
+
+### 2026-10-31
+- Built a throwaway test harness for the re-ask change in
+  `legacy/pi/captive-portal-login.sh`: a Python `http.server` fake portal with
+  four modes and a pty driver, then ran seven scenarios and kept adding cases
+  (a server that dies after the POST) after the changed path already worked.
+  The user stopped the run and had the harness deleted. The change is one
+  loop; `bash -n` plus one run of the changed path was enough to hand back.
+  Lesson: size the verification to the change. For a one-off shell script, do
+  not grow a harness or keep re-running scenarios unless the user asks, and do
+  not turn the harness into a section of the documentation.
+
+---
+Updated at 2026-11-17-23:47.

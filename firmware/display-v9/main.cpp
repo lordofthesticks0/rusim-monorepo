@@ -1,7 +1,7 @@
 
 /*******************************************************************************
  * Display UI (LVGL v9.6, real WT32 sensor feed)
- * Sunton 800x480 ST7262 + GT911 touch. See docs/llm-generated/display-docs.md.
+ * Sunton 800x480 ST7262 + GT911 touch. See docs/display-docs.md.
  *
  * LVGL v9.6 uses firmware/display-v9/lv_conf.h. Rendering and the display
  * flush callback are configured explicitly for RGB565 below.

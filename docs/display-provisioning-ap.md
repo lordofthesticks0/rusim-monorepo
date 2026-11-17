@@ -1,0 +1,13 @@
+# Retired: display-hosted Wi-Fi provisioning
+
+The display no longer creates a Wi-Fi access point or serves a credential form.
+The display-side `provision_ap` implementation has been removed.
+
+Login credentials are entered on the web page served by the WT32-ETH01 at
+`http://<WT32-IP>/`. The display's `/setup` QR encodes that address after the
+WT32 reports it over `rusim-line`. See [`network-master.md`](network-master.md)
+for the WT32 login page and security considerations, and
+[`display-docs.md`](display-docs.md) for the display's setup route.
+
+---
+Updated at 2026-11-17-23:47.

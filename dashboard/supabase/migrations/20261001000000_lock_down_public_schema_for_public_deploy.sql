@@ -21,7 +21,7 @@
 -- inside the function could never accumulate. The throttle therefore lives
 -- in the client backoff (src/auth.ts) plus a deployment-level edge limit /
 -- Turnstile on the login path (see pre-public checklist in
--- docs/llm-summary/security-report.md), not in a DB table.
+-- docs/plans-and-audits/security-report.md), not in a DB table.
 --
 -- The five `public` tables that already have RLS enabled with zero policies
 -- (device_status_events, node_status_events, chamber_status_events,

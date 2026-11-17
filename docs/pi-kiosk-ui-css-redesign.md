@@ -1,0 +1,31 @@
+# Raspberry Pi kiosk UI CSS redesign
+
+The page is a Chromium kiosk UI on a Raspberry Pi 3B. Its HTML and JavaScript were left unchanged. The CSS was rewritten to follow the good-css rules while keeping the same classes, IDs and visual structure.
+
+The redesigned snapshot was stored as `legacy/pi/main_ui.html` and was removed
+on 2026-10-20 in favour of the live mirror at
+[`legacy/pi/water-control-system/templates/index.html`](../legacy/pi/water-control-system/templates/index.html)
+(see [pi-water-control-system-mirror.md](pi-water-control-system-mirror.md)).
+The snapshot remains in git history at commit `0e6f68f`, so the rules below
+describe a design that exists but is **not deployed to the Pi**. The live page
+still uses the original iOS-style CSS.
+
+Changes:
+
+- Colors are written in `oklch()` and derived with `color-mix(in oklch, ...)`. No second hex or `rgba()` color is hardcoded for tints, borders or shadows.
+- Spacing and offsets use logical properties (`inline-size`, `block-size`, `padding-inline`, `margin-block`, `inset`, and similar).
+- Fluid type and spacing use `clamp()`.
+- Motion that moves or scales is guarded by `@media (prefers-reduced-motion: no-preference)`. Fades stay outside that query.
+- Hover rules are inside `@media (hover: hover) and (pointer: fine)`.
+- Focus uses `:focus-visible` with an outline. No `outline: none`.
+- Pressable elements have `:active` states.
+- Overflow that does not scroll uses `overflow: clip`.
+- Backdrop blur and heavy glass effects were removed for the Raspberry Pi 3B. Surfaces are solid or lightly translucent with simpler shadows.
+- Reset rules from good-css are included (`box-sizing`, `min-width: 0`, font smoothing, tap highlight removal).
+- Tabular numbers are applied to changing numeric values.
+- Inline styles were removed from the markup and replaced with small classes.
+
+Browser support: the CSS uses features supported by the Chromium version shipped with Raspberry Pi OS. `oklch()`, `color-mix()`, `clamp()`, logical properties, `:has()`-free selectors, and `dvh` are all available there.
+
+---
+Updated at 2026-11-17-23:47.

@@ -5,7 +5,7 @@
 
 All documentation is written in English to improve LLM accuracy and comprehension. If you require translation, please point your agent at this repo.
 
-All documentation is written by humans. AI-generated documentation should always be stored in the `docs/llm-generated/` directory, with clear descriptions of the generated content and what model was used.
+All documentation lives in `docs/`. Agent-written documents close with an `Updated at YYYY-MM-DD-HH:MM.` footer; `docs/hardware.md` and `docs/calibration.md` are human-owned and must not be edited by agents.
 
 If you are a human and need a quick start, see the [index](docs/index.md).
 
@@ -19,9 +19,9 @@ The firmware will eventually push data to the database.
 
 ### 3. [Website](dashboard/)
 
-The dashboard is a React Single-Page Application with TypeScript and the Bun runtime to provide a remote semi-realtime monitoring of the ongoing experiment. See [website documentation](docs/llm-generated/dashboard.md) for more details. All dashboard code should not exit the `dashboard/` directory.
+The dashboard is a React Single-Page Application with TypeScript and the Bun runtime to provide a remote semi-realtime monitoring of the ongoing experiment. See [website documentation](docs/dashboard.md) for more details. All dashboard code should not exit the `dashboard/` directory.
 
-Data is pulled from the database. There are two tables in the schema as described in the [database documentation](docs/llm-generated/database.md).
+Data is pulled from the database. There are two tables in the schema as described in the [database documentation](docs/database.md).
 
 For access, notify me if you want env files.
 
@@ -29,8 +29,8 @@ For access, notify me if you want env files.
 - [x] Verify sensors work - See [calibration documentation](docs/calibration.md)
 - [ ] Calibrate sensors - See [calibration documentation](docs/calibration.md)
 - [ ] PCB redesign - See [PCB documentation](docs/hardware.md)
-- [x] Make sure website is up and running - See [website documentation](docs/llm-generated/dashboard.md)
-- [ ] Harden database and security - See [database documentation](docs/llm-generated/database.md)
+- [x] Make sure website is up and running - See [website documentation](docs/dashboard.md)
+- [ ] Harden database and security - See [database documentation](docs/database.md)
 - [ ] Integrate to data collection system
 - [ ] Write final reports
 
@@ -51,12 +51,12 @@ bun run dev-db # Note: env is required for running the script
 
 **Ask for env variables.**
 
-See the [dashboard documentation](docs/llm-generated/dashboard.md)
+See the [dashboard documentation](docs/dashboard.md)
 
 
 ### 2. Database
 
-The database is managed by [Supabase](https://supabase.com/). See the [database documentation](docs/llm-generated/database.md) for more information regarding the schema. 
+The database is managed by [Supabase](https://supabase.com/). See the [database documentation](docs/database.md) for more information regarding the schema. 
 
 Schema is intentionally simple as the ESP32 has a limited processing power.
 
