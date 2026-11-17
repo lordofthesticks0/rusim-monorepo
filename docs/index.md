@@ -34,6 +34,7 @@ document is the source of truth for anything measured on real hardware.
 | [`firmware/methane-calibrate/`](../firmware/methane-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §4 |
 | [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate/) | ATmega328 Uno | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §3 |
 | [`firmware/tests/water-level/`](../firmware/tests/water-level/) | Arduino Uno | [water-level-test.md](llm-generated/water-level-test.md) |
+| [`firmware/tests/pwm-pins-readout/`](../firmware/tests/pwm-pins-readout/) | Mega 2560 | [pwm-pins-readout.md](llm-generated/pwm-pins-readout.md) |
 | [`firmware/tests/display-sensors/`](../firmware/tests/display-sensors/) | Native host (no hardware) | [display-docs.md §8](llm-generated/display-docs.md#8-verify-without-hardware-signals): real model/parser and USB command regression tests |
 | [`firmware/temp-probe/`](../firmware/temp-probe/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §5 |
 | [`firmware/co2-calibrate/`](../firmware/co2-calibrate/) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) §2 |
@@ -49,6 +50,7 @@ document is the source of truth for anything measured on real hardware.
 | [migration-notes.md](llm-generated/migration-notes.md) | LVGL v8 to v9 changes and the required code edits |
 | [sensor-calibration-firmware.md](llm-generated/sensor-calibration-firmware.md) | The four sensor calibration programs |
 | [water-level-test.md](llm-generated/water-level-test.md) | Standalone Uno sketch for reading a water level sensor on A0 |
+| [pwm-pins-readout.md](llm-generated/pwm-pins-readout.md) | Mega 2560 JSON PWM readout of D4-D7 by software polling, with 5000 ppm decode |
 | [wt32-eth01-captive-recon.md](llm-generated/wt32-eth01-captive-recon.md) | Captive portal recon firmware |
 | [network-master.md](llm-generated/network-master.md) | Production WT32 firmware: WT32-hosted portal login page, database configuration pull, run snapshots and sensor upload |
 | [link-serial-protocol.md](llm-generated/link-serial-protocol.md) | `rusim-line` v1 wire spec: wiring, line rules, credential-free command set, log forwarding, `PASSTH`, RS485 follow-on |
