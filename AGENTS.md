@@ -35,9 +35,7 @@ The following rules are mandatory for all agents.
 ### Firmware
 - Scope firmware-related work to `firmware/`. 
 - Read `docs/hardware.md` before making firmware changes. This documentation relies on human testing and input. Data may be stale or incorrect.
-- Load the `memory-safety-patterns` skill before working on firmware. If unavailable, inform the user and install it using:
-  `bunx skills add https://github.com/wshobson/agents --skill memory-safety-patterns`
-- Put one-off or temporary tests in `firmware/tests/`.
+- Put one-off or temporary tests in `firmware/tests/`. 
 - Adjust the relevant PlatformIO environment configuration when necessary to accommodate firmware changes.
 
 ### Dashboard
