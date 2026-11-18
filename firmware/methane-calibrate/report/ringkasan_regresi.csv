@@ -1,0 +1,5 @@
+﻿Sensor,Persamaan kalibrasi,a,b,R2 (5 titik),R2 (3 titik terukur),MAPE 5 titik (%),MAPE 3 titik terukur (%),Eksponen firmware n
+Sensor 0,ppm = 1.278 x (Rs/Ro)^-3.745,1.278,-3.745,0.9969,0.9980,6.85,9.90,3.211
+Sensor 1,ppm = 0.135 x (Rs/Ro)^-9.031,0.135,-9.031,0.9899,0.9985,19.51,27.44,6.043
+Sensor 2,ppm = 1.611 x (Rs/Ro)^-3.697,1.611,-3.697,0.9973,0.9987,8.03,9.49,3.280
+Sensor 3,ppm = 0.2436 x (Rs/Ro)^-4.092,0.2436,-4.092,0.9932,0.9989,21.43,27.14,2.938

@@ -49,6 +49,8 @@ documented. Test sketches in `firmware/tests/` are not subsystems.
 | [compile-commands.md](compile-commands.md) | `compile_commands.json` and `gen-compile-db.sh`: the clangd compilation database, regeneration, and which errors it cannot remove |
 | [display-docs.md](display-docs.md) | The `display-v9` UI: real WT32 sensor model, unavailable-data semantics, USB controls, hold-to-confirm |
 | [sensor-calibration-firmware.md](sensor-calibration-firmware.md) | The five sensor calibration programs |
+| [methane-calibration-report.md](methane-calibration-report.md) | Script that builds methane calibration charts and tables from `results.txt` |
+| [pressure-calibration-plot.md](pressure-calibration-plot.md) | Script that builds an interactive (hover) HTML chart from `firmware/pressure-calibrate/results.txt`, with the mean of each stable pressure step |
 | [wt32-eth01-captive-recon.md](wt32-eth01-captive-recon.md) | Captive portal recon firmware |
 | [network-master.md](network-master.md) | Production WT32 firmware: WT32-hosted portal login page, database configuration pull, run snapshots and sensor upload |
 | [link-serial-protocol.md](link-serial-protocol.md) | `rusim-line` v1 wire spec: wiring, line rules, credential-free command set, log forwarding, `PASSTH`, RS485 follow-on |
@@ -188,4 +190,4 @@ These describe boards rather than this project's code.
   and is indexed in section 3c.
 
 ---
-Updated at 2026-11-20-12:05.
+Updated at 2026-11-20-15:36.

@@ -1,3 +1,18 @@
+### 2026-11-17
+- Asked for a graph of `firmware/pressure-calibrate/results.txt`, the agent
+  generated a static PNG. The user wanted an HTML chart where each point can be
+  read with the cursor. For data charts, produce a self-contained HTML file with
+  hover tooltips (no external libraries, so it works offline) and do not
+  generate image files unless asked. Remove image files the agent created by
+  mistake.
+
+### 2026-11-10
+- A 70-second serial capture continued after conclusive database logs had
+  arrived, and the user stopped it. Use 5–10-second captures, inspect the
+  output, and extend only when another observation is needed. After
+  interruption, explicitly close PASSTH and confirm the display has resumed
+  normal operation; process cleanup may not have run.
+
 ### 2026-10-20
 - `pio device monitor` is an interactive terminal, not a pipe-friendly serial
   reader. It calls `termios.tcgetattr()` on stdin and dies with
@@ -166,4 +181,4 @@ Model credit is unnecessary here.
   not turn the harness into a section of the documentation.
 
 ---
-Updated at 2026-11-17-23:47.
+Updated at 2026-11-20-15:36.

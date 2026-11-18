@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kalibrasi sensor tekanan</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 16px; color: #222; background: #fff; }
+  h1 { font-size: 1.1rem; margin: 0 0 4px; }
+  p.sub { margin: 0 0 8px; color: #666; font-size: .85rem; }
+  #wrap { position: relative; width: 100%; height: 70vh; min-height: 320px; }
+  canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+  #tip { position: absolute; pointer-events: none; display: none; background: rgba(255,255,255,.96);
+         border: 1px solid #999; border-radius: 4px; padding: 6px 8px; font-size: .8rem;
+         line-height: 1.4; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+  .key { display: inline-block; width: 12px; height: 3px; margin-right: 6px; vertical-align: middle; }
+  #legend { font-size: .85rem; margin-top: 6px; }
+  #legend span { margin-right: 16px; }
+  table { border-collapse: collapse; margin-top: 14px; font-size: .85rem; }
+  th, td { border: 1px solid #ccc; padding: 4px 10px; text-align: right; }
+  th { background: #f3f3f3; }
+  h2 { font-size: 1rem; margin: 18px 0 0; }
+  p.note { color: #666; font-size: .8rem; margin: 4px 0 0; max-width: 60em; }
+</style>
+</head>
+<body>
+<h1>Kalibrasi sensor tekanan (HX711) - hasil pembacaan serial</h1>
+<p class="sub">491 sampel, min -188 Pa, maks 4199 Pa. Arahkan kursor ke grafik untuk melihat nilai tiap titik.</p>
+<div id="wrap"><canvas id="c"></canvas><div id="tip"></div></div>
+<div id="legend">
+  <span><i class="key" style="background:#9ab7d3"></i>Data mentah</span>
+  <span><i class="key" style="background:#c0392b"></i>Median bergerak (9 sampel)</span>
+  <span><i class="key" style="background:#2e7d32"></i>Rata-rata kelas stabil (pita hijau)</span>
+</div>
+<h2>Rata-rata tekanan tiap kelas saat stabil</h2>
+<table><thead><tr><th>Kelas</th><th>Sampel</th><th>n</th><th>Rata-rata (Pa)</th><th>Simpangan baku (Pa)</th><th>Min &ndash; Maks (Pa)</th><th>Drift (Pa/sampel)</th></tr></thead><tbody><tr><td>1</td><td>131&ndash;170</td><td>40</td><td><b>895.1</b></td><td>34.7</td><td>785 &ndash; 961</td><td>-1.12</td></tr><tr><td>2</td><td>196&ndash;228</td><td>33</td><td><b>2224.8</b></td><td>33.9</td><td>2185 &ndash; 2336</td><td>-1.91</td></tr><tr><td>3</td><td>251&ndash;305</td><td>55</td><td><b>3412.7</b></td><td>16.3</td><td>3378 &ndash; 3448</td><td>+0.61</td></tr><tr><td>4</td><td>321&ndash;425</td><td>105</td><td><b>3922.7</b></td><td>149.3</td><td>3641 &ndash; 4183</td><td>-4.79</td></tr></tbody></table>
+<p class="note">Rata-rata dihitung dari data mentah di dalam rentang sampel stabil. Drift adalah kemiringan
+garis regresi: makin dekat 0, makin datar kelasnya.</p>
+<script>
+const RAW = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 3.0, -1.0, 13.0, 79.0, -44.0, 0.0, 1.0, -0.0, -0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.0, -1.0, -1.0, 1.0, 1.0, 1.0, -0.0, -0.0, 33.0, 37.0, 70.0, 129.0, 28.0, 24.0, 0.0, -0.0, -0.0, 0.0, 11.0, 88.0, 58.0, -54.0, -123.0, -167.0, -105.0, -116.0, -151.0, -188.0, -150.0, -150.0, -169.0, -147.0, -107.0, -38.0, 6.0, 32.0, 49.0, 49.0, -17.0, -58.0, -129.0, 7.0, 47.0, 50.0, 45.0, 64.0, 19.0, -15.0, -8.0, -6.0, -12.0, -10.0, -32.0, -76.0, -92.0, -117.0, -67.0, -120.0, -129.0, -126.0, -132.0, -133.0, -110.0, -103.0, -114.0, -107.0, -120.0, -161.0, -186.0, -149.0, -165.0, -143.0, -77.0, 47.0, 195.0, 293.0, 373.0, 451.0, 511.0, 565.0, 592.0, 568.0, 627.0, 620.0, 658.0, 635.0, 645.0, 672.0, 684.0, 679.0, 691.0, 724.0, 742.0, 743.0, 761.0, 775.0, 763.0, 799.0, 802.0, 809.0, 807.0, 814.0, 840.0, 859.0, 866.0, 864.0, 866.0, 873.0, 870.0, 871.0, 858.0, 864.0, 878.0, 905.0, 921.0, 909.0, 918.0, 917.0, 920.0, 928.0, 932.0, 925.0, 931.0, 929.0, 922.0, 908.0, 894.0, 887.0, 896.0, 885.0, 870.0, 919.0, 961.0, 946.0, 919.0, 910.0, 909.0, 878.0, 860.0, 860.0, 886.0, 893.0, 895.0, 896.0, 868.0, 880.0, 785.0, 802.0, 868.0, 827.0, 865.0, 868.0, 871.0, 873.0, 973.0, 1638.0, 1865.0, 1888.0, 1924.0, 1950.0, 1919.0, 1968.0, 2000.0, 2030.0, 2029.0, 2054.0, 2061.0, 2083.0, 2099.0, 2111.0, 2135.0, 2152.0, 2167.0, 2176.0, 2193.0, 2209.0, 2226.0, 2239.0, 2256.0, 2261.0, 2263.0, 2264.0, 2256.0, 2260.0, 2252.0, 2240.0, 2271.0, 2240.0, 2336.0, 2239.0, 2217.0, 2225.0, 2195.0, 2209.0, 2201.0, 2194.0, 2194.0, 2189.0, 2186.0, 2187.0, 2209.0, 2209.0, 2206.0, 2198.0, 2204.0, 2185.0, 2206.0, 2200.0, 2222.0, 2314.0, 2298.0, 2333.0, 2330.0, 2452.0, 3038.0, 3312.0, 3324.0, 3311.0, 3303.0, 3321.0, 3332.0, 3311.0, 3303.0, 3331.0, 3329.0, 3330.0, 3347.0, 3321.0, 3406.0, 3378.0, 3386.0, 3398.0, 3397.0, 3394.0, 3416.0, 3392.0, 3413.0, 3392.0, 3389.0, 3396.0, 3399.0, 3393.0, 3405.0, 3405.0, 3409.0, 3408.0, 3410.0, 3388.0, 3399.0, 3404.0, 3413.0, 3439.0, 3444.0, 3448.0, 3425.0, 3429.0, 3417.0, 3418.0, 3410.0, 3413.0, 3426.0, 3406.0, 3407.0, 3411.0, 3409.0, 3406.0, 3411.0, 3405.0, 3398.0, 3410.0, 3427.0, 3435.0, 3447.0, 3441.0, 3437.0, 3433.0, 3428.0, 3424.0, 3422.0, 3423.0, 3420.0, 3419.0, 3414.0, 3415.0, 3416.0, 3413.0, 3420.0, 3519.0, 3657.0, 3771.0, 3870.0, 3957.0, 4037.0, 4117.0, 4165.0, 4175.0, 4177.0, 4199.0, 4195.0, 4183.0, 4158.0, 4150.0, 4143.0, 4137.0, 4124.0, 4124.0, 4117.0, 4115.0, 4146.0, 4125.0, 4115.0, 4093.0, 4100.0, 4084.0, 4072.0, 4088.0, 4061.0, 4066.0, 4068.0, 4071.0, 4108.0, 4104.0, 4101.0, 4098.0, 4104.0, 4064.0, 4048.0, 4059.0, 4057.0, 4028.0, 4149.0, 4048.0, 4018.0, 4025.0, 4021.0, 3989.0, 3994.0, 3988.0, 3983.0, 3975.0, 3984.0, 3983.0, 3965.0, 3950.0, 3933.0, 3920.0, 3918.0, 3910.0, 3902.0, 3872.0, 3921.0, 3934.0, 3953.0, 3917.0, 3902.0, 3925.0, 3905.0, 3900.0, 3892.0, 3912.0, 3906.0, 3919.0, 3886.0, 3899.0, 3865.0, 3856.0, 3835.0, 3854.0, 3841.0, 3828.0, 3807.0, 3794.0, 3787.0, 3752.0, 3792.0, 3739.0, 3722.0, 3718.0, 3700.0, 3786.0, 3827.0, 3856.0, 3818.0, 3785.0, 3774.0, 3753.0, 3735.0, 3749.0, 3792.0, 3788.0, 3749.0, 3772.0, 3741.0, 3727.0, 3735.0, 3736.0, 3700.0, 3683.0, 3690.0, 3687.0, 3677.0, 3641.0, 3686.0, 3699.0, 3692.0, 3667.0, 3622.0, 3552.0, 3754.0, 3600.0, 3548.0, 3513.0, 3529.0, 3494.0, 3394.0, 3397.0, 3386.0, 2343.0, 352.0, 15.0, 7.0, -32.0, -2.0, 4.0, -18.0, -5.0, -14.0, 39.0, 63.0, 28.0, 58.0, 60.0, 47.0, 43.0, 28.0, 41.0, 5.0, -40.0, -7.0, -3.0, -50.0, 20.0, 11.0, 11.0, 11.0, 11.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0];
+const MED = [0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -0.0, -0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.0, -0.0, -0.0, 1.0, 1.0, 1.0, 28.0, 28.0, 28.0, 28.0, 28.0, 24.0, 11.0, 11.0, 11.0, 0.0, -0.0, -0.0, -0.0, -54.0, -105.0, -116.0, -123.0, -150.0, -150.0, -150.0, -150.0, -150.0, -150.0, -147.0, -107.0, -38.0, -17.0, -17.0, -17.0, 6.0, 7.0, 32.0, 45.0, 45.0, 19.0, 19.0, 19.0, 19.0, 19.0, -6.0, -8.0, -10.0, -12.0, -15.0, -32.0, -67.0, -76.0, -92.0, -117.0, -120.0, -120.0, -120.0, -120.0, -120.0, -120.0, -120.0, -120.0, -120.0, -120.0, -143.0, -143.0, -143.0, -143.0, -143.0, -77.0, 47.0, 195.0, 293.0, 373.0, 451.0, 511.0, 565.0, 568.0, 592.0, 620.0, 627.0, 635.0, 645.0, 658.0, 672.0, 679.0, 684.0, 691.0, 724.0, 742.0, 743.0, 761.0, 763.0, 775.0, 799.0, 802.0, 807.0, 809.0, 814.0, 840.0, 859.0, 864.0, 866.0, 866.0, 866.0, 866.0, 870.0, 871.0, 873.0, 878.0, 905.0, 909.0, 917.0, 918.0, 920.0, 921.0, 925.0, 925.0, 925.0, 925.0, 925.0, 922.0, 908.0, 896.0, 896.0, 896.0, 896.0, 896.0, 910.0, 910.0, 910.0, 910.0, 910.0, 909.0, 893.0, 893.0, 893.0, 886.0, 880.0, 880.0, 880.0, 880.0, 868.0, 868.0, 868.0, 868.0, 868.0, 868.0, 868.0, 871.0, 873.0, 973.0, 1638.0, 1865.0, 1888.0, 1919.0, 1924.0, 1950.0, 1968.0, 2000.0, 2029.0, 2030.0, 2054.0, 2061.0, 2083.0, 2099.0, 2111.0, 2135.0, 2152.0, 2167.0, 2176.0, 2193.0, 2209.0, 2226.0, 2239.0, 2256.0, 2256.0, 2256.0, 2256.0, 2260.0, 2260.0, 2260.0, 2256.0, 2252.0, 2240.0, 2240.0, 2239.0, 2225.0, 2217.0, 2209.0, 2201.0, 2195.0, 2194.0, 2194.0, 2194.0, 2194.0, 2194.0, 2198.0, 2198.0, 2204.0, 2204.0, 2206.0, 2206.0, 2206.0, 2206.0, 2222.0, 2298.0, 2314.0, 2330.0, 2333.0, 2452.0, 3038.0, 3303.0, 3311.0, 3311.0, 3311.0, 3312.0, 3321.0, 3321.0, 3329.0, 3329.0, 3330.0, 3330.0, 3331.0, 3347.0, 3378.0, 3386.0, 3394.0, 3394.0, 3397.0, 3394.0, 3394.0, 3396.0, 3396.0, 3394.0, 3396.0, 3396.0, 3399.0, 3399.0, 3405.0, 3405.0, 3405.0, 3405.0, 3405.0, 3408.0, 3409.0, 3410.0, 3413.0, 3425.0, 3425.0, 3425.0, 3425.0, 3425.0, 3425.0, 3418.0, 3417.0, 3413.0, 3411.0, 3410.0, 3410.0, 3409.0, 3407.0, 3407.0, 3409.0, 3410.0, 3410.0, 3411.0, 3427.0, 3433.0, 3433.0, 3433.0, 3433.0, 3433.0, 3428.0, 3424.0, 3423.0, 3422.0, 3420.0, 3419.0, 3419.0, 3419.0, 3419.0, 3419.0, 3420.0, 3519.0, 3657.0, 3771.0, 3870.0, 3957.0, 4037.0, 4117.0, 4165.0, 4175.0, 4175.0, 4175.0, 4175.0, 4175.0, 4158.0, 4150.0, 4143.0, 4137.0, 4137.0, 4125.0, 4124.0, 4124.0, 4117.0, 4115.0, 4115.0, 4100.0, 4093.0, 4088.0, 4084.0, 4072.0, 4072.0, 4072.0, 4072.0, 4088.0, 4098.0, 4098.0, 4098.0, 4098.0, 4098.0, 4064.0, 4064.0, 4059.0, 4057.0, 4048.0, 4048.0, 4028.0, 4025.0, 4021.0, 4018.0, 3994.0, 3989.0, 3988.0, 3984.0, 3983.0, 3983.0, 3975.0, 3965.0, 3950.0, 3933.0, 3920.0, 3920.0, 3920.0, 3920.0, 3918.0, 3917.0, 3917.0, 3917.0, 3917.0, 3917.0, 3912.0, 3906.0, 3906.0, 3905.0, 3905.0, 3900.0, 3899.0, 3892.0, 3886.0, 3865.0, 3856.0, 3854.0, 3841.0, 3835.0, 3828.0, 3807.0, 3794.0, 3792.0, 3787.0, 3752.0, 3752.0, 3752.0, 3752.0, 3786.0, 3785.0, 3785.0, 3785.0, 3785.0, 3785.0, 3785.0, 3785.0, 3774.0, 3772.0, 3753.0, 3749.0, 3749.0, 3749.0, 3741.0, 3736.0, 3735.0, 3727.0, 3700.0, 3690.0, 3687.0, 3687.0, 3687.0, 3686.0, 3686.0, 3677.0, 3677.0, 3667.0, 3667.0, 3622.0, 3600.0, 3552.0, 3548.0, 3529.0, 3513.0, 3494.0, 3397.0, 3394.0, 3386.0, 2343.0, 352.0, 15.0, 7.0, 4.0, -2.0, -2.0, -2.0, -2.0, 4.0, 28.0, 39.0, 43.0, 43.0, 43.0, 43.0, 41.0, 41.0, 28.0, 5.0, 5.0, 5.0, 5.0, 5.0, 11.0, 11.0, 11.0, 11.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 11.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0];
+const BANDS = [{"k": 1, "start": 131, "end": 170, "n": 40, "mean": 895.075, "sd": 34.74846427154399, "min": 785.0, "max": 961.0, "slope": -1.1181050656660412}, {"k": 2, "start": 196, "end": 228, "n": 33, "mean": 2224.818181818182, "sd": 33.85581056614816, "min": 2185.0, "max": 2336.0, "slope": -1.9057486631016043}, {"k": 3, "start": 251, "end": 305, "n": 55, "mean": 3412.7454545454543, "sd": 16.31543030365016, "min": 3378.0, "max": 3448.0, "slope": 0.6111832611832612}, {"k": 4, "start": 321, "end": 425, "n": 105, "mean": 3922.714285714286, "sd": 149.331182938468, "min": 3641.0, "max": 4183.0, "slope": -4.7917375077752435}];
+const N = RAW.length;
+const M = { l: 62, r: 18, t: 16, b: 46 };
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const tip = document.getElementById("tip");
+let W = 0, H = 0, hover = -1;
+
+// Y range: data range plus 5 % padding so the lines do not touch the frame.
+const yMinRaw = Math.min(...RAW), yMaxRaw = Math.max(...RAW);
+const pad = (yMaxRaw - yMinRaw) * 0.05 || 1;
+const yMin = yMinRaw - pad, yMax = yMaxRaw + pad;
+
+const px = i => M.l + (N > 1 ? (i / (N - 1)) * (W - M.l - M.r) : 0);   // index -> pixel X
+const py = v => H - M.b - ((v - yMin) / (yMax - yMin)) * (H - M.t - M.b); // value -> pixel Y
+
+// Pick "round" tick values (1, 2, 5 x 10^n) so labels are easy to read.
+function niceTicks(min, max, count) {
+  const step0 = (max - min) / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const norm = step0 / mag;
+  const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+  const out = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) out.push(Math.round(v / step) * step);
+  return out;
+}
+
+function line(data, color, width) {
+  ctx.beginPath();
+  data.forEach((v, i) => (i ? ctx.lineTo(px(i), py(v)) : ctx.moveTo(px(i), py(v))));
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = "round"; ctx.stroke();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.fillStyle = "#444"; ctx.strokeStyle = "#e3e3e3"; ctx.lineWidth = 1;
+
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const v of niceTicks(yMin, yMax, 8)) {
+    const y = Math.round(py(v)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(W - M.r, y); ctx.stroke();
+    ctx.fillText(v, M.l - 8, y);
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (const s of niceTicks(1, N, Math.max(4, Math.floor(W / 90)))) {
+    const x = Math.round(px(s - 1)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, M.t); ctx.lineTo(x, H - M.b); ctx.stroke();
+    ctx.fillText(s, x, H - M.b + 6);
+  }
+  ctx.fillText("Nomor sampel (tidak ada timestamp di log)", (M.l + W - M.r) / 2, H - 18);
+  ctx.save(); ctx.translate(14, (M.t + H - M.b) / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText("Tekanan (Pa)", 0, 0); ctx.restore();
+
+  if (yMin < 0 && yMax > 0) { // zero reference line
+    ctx.strokeStyle = "#888"; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(M.l, py(0)); ctx.lineTo(W - M.r, py(0)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.strokeStyle = "#444"; ctx.strokeRect(M.l + 0.5, M.t + 0.5, W - M.l - M.r, H - M.t - M.b);
+
+  // Stable windows: green band, dashed mean line and a "K<n>: mean" label.
+  for (const b of BANDS) {
+    const x0 = px(b.start - 1), x1 = px(b.end - 1);
+    ctx.fillStyle = "rgba(46,125,50,0.12)"; ctx.fillRect(x0, M.t, x1 - x0, H - M.t - M.b);
+    ctx.strokeStyle = "#2e7d32"; ctx.lineWidth = 1.5; ctx.setLineDash([6, 3]);
+    ctx.beginPath(); ctx.moveTo(x0, py(b.mean)); ctx.lineTo(x1, py(b.mean)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#1b5e20"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    ctx.fillText("K" + b.k + ": " + b.mean.toFixed(0) + " Pa", (x0 + x1) / 2, py(b.mean) - 6);
+  }
+
+  line(RAW, "#9ab7d3", 1.2);
+  line(MED, "#c0392b", 2);
+
+  if (hover >= 0) {
+    const x = px(hover);
+    ctx.strokeStyle = "#555"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(x, M.t); ctx.lineTo(x, H - M.b); ctx.stroke(); ctx.setLineDash([]);
+    for (const [v, c] of [[RAW[hover], "#3b78b0"], [MED[hover], "#c0392b"]]) {
+      ctx.beginPath(); ctx.arc(x, py(v), 4.5, 0, 2 * Math.PI);
+      ctx.fillStyle = c; ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+  }
+}
+
+function resize() {
+  const r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  W = r.width; H = r.height;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+
+canvas.addEventListener("pointermove", e => {
+  const r = canvas.getBoundingClientRect(), x = e.clientX - r.left;
+  const i = Math.round(((x - M.l) / (W - M.l - M.r)) * (N - 1));
+  if (i < 0 || i >= N) return leave();
+  hover = i; draw();
+  const b = BANDS.find(b => i + 1 >= b.start && i + 1 <= b.end);
+  tip.innerHTML = "<b>Sampel " + (i + 1) + "</b><br>Mentah: " + RAW[i] + " Pa<br>Median: " + MED[i] + " Pa" +
+    (b ? "<br>Kelas " + b.k + " (rata-rata " + b.mean.toFixed(1) + " Pa)" : "");
+  tip.style.display = "block";
+  const tx = px(i) + 14 + tip.offsetWidth > W ? px(i) - 14 - tip.offsetWidth : px(i) + 14;
+  tip.style.left = tx + "px"; tip.style.top = Math.max(M.t, e.clientY - r.top - 50) + "px";
+});
+function leave() { hover = -1; tip.style.display = "none"; draw(); }
+canvas.addEventListener("pointerleave", leave);
+window.addEventListener("resize", resize);
+resize();
+</script>
+</body>
+</html>

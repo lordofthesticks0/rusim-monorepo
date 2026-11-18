@@ -1,0 +1,6 @@
+﻿Sensor,Status data,Konsentrasi referensi CH4 (ppm),Jumlah sampel,Rs rata-rata (ohm),Ro baseline udara (ohm),Rs/Ro,Tegangan dari Rs (V),Pembacaan sensor rata-rata (ppm),Simpangan baku sensor (ppm),Selisih sensor - referensi (ppm),Galat relatif (%)
+Sensor 0,Terukur,1470,12,138.19,914.2,0.15116,4.3929,1724.95,20.48,254.95,17.34
+Sensor 0,Terukur,1707,13,135.35,914.2,0.14806,4.4039,1844.86,8.86,137.86,8.08
+Sensor 0,Interpolasi (bukan pengukuran),3000,0,123.72,914.2,0.13533,4.4495,3019.81,,19.81,0.66
+Sensor 0,Interpolasi (bukan pengukuran),4500,0,110.21,914.2,0.12056,4.5036,4382.87,,-117.13,-2.60
+Sensor 0,Terukur,6064,8,96.14,914.2,0.10516,4.5615,5804.07,22.18,-259.93,-4.29
