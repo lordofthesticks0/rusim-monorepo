@@ -5,11 +5,8 @@
 
 All documentation is written in English to improve LLM accuracy and comprehension. If you require translation, please point your agent at this repo.
 
-All documentation lives in `docs/`. Agent-written documents close with an `Updated at YYYY-MM-DD-HH:MM.` footer; `docs/hardware.md` and `docs/calibration.md` are human-owned and must not be edited by agents.
-
-If you are a human and need a quick start, see the [index](docs/index.md).
-
-If you are an AI agent, see the [guidelines](AGENTS.md).
+All documentation lives in `docs/`. Feel free to check it.
+Need a quick start? See the [index](docs/index.md).
 
 ### 2. [MCU code](firmware/)
 
