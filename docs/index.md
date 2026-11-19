@@ -39,6 +39,7 @@ documented. Test sketches in `firmware/tests/` are not subsystems.
 | [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate) | ATmega328 Uno | [sensor-calibration-firmware.md](sensor-calibration-firmware.md) §3 |
 | [`firmware/temp-probe/`](../firmware/temp-probe) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](sensor-calibration-firmware.md) §5 |
 | [`firmware/co2-calibrate/`](../firmware/co2-calibrate) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](sensor-calibration-firmware.md) §2 |
+| [`firmware/ph-calibrate/`](../firmware/ph-calibrate) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](sensor-calibration-firmware.md) §6 |
 
 ### Firmware documents
 
@@ -47,7 +48,7 @@ documented. Test sketches in `firmware/tests/` are not subsystems.
 | [platformio-environments.md](platformio-environments.md) | `platformio.ini`: environment table, source filters, display build flags, commands, fixed defects |
 | [compile-commands.md](compile-commands.md) | `compile_commands.json` and `gen-compile-db.sh`: the clangd compilation database, regeneration, and which errors it cannot remove |
 | [display-docs.md](display-docs.md) | The `display-v9` UI: real WT32 sensor model, unavailable-data semantics, USB controls, hold-to-confirm |
-| [sensor-calibration-firmware.md](sensor-calibration-firmware.md) | The four sensor calibration programs |
+| [sensor-calibration-firmware.md](sensor-calibration-firmware.md) | The five sensor calibration programs |
 | [wt32-eth01-captive-recon.md](wt32-eth01-captive-recon.md) | Captive portal recon firmware |
 | [network-master.md](network-master.md) | Production WT32 firmware: WT32-hosted portal login page, database configuration pull, run snapshots and sensor upload |
 | [link-serial-protocol.md](link-serial-protocol.md) | `rusim-line` v1 wire spec: wiring, line rules, credential-free command set, log forwarding, `PASSTH`, RS485 follow-on |
@@ -186,4 +187,4 @@ These describe boards rather than this project's code.
   and is indexed in section 3c.
 
 ---
-Updated at 2026-11-18-00:12.
+Updated at 2026-11-19-11:52.

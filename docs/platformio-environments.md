@@ -53,6 +53,7 @@ flashing script relies on (see `flash-factory-tool.md`).
 | `methane-calibrate` | `megaatmega2560` | atmelavr | 115200 | `methane-calibrate/` | none |
 | `pressure-calibrate` | `uno` | atmelavr | 115200 | `pressure-calibrate/` | `robtillaart/HX711@^0.6.5` |
 | `temp-probe` | `megaatmega2560` | atmelavr | 115200 | `temp-probe/` | `paulstoffregen/OneWire@^2.3.8`, `milesburton/DallasTemperature@^4.0.6` |
+| `ph-calibrate` | `megaatmega2560` | atmelavr | 115200 | `ph-calibrate/` | none |
 | `display-v9` | `esp32-s3-devkitc-1` | espressif32 | 115200 | `display-v9/` | LVGL 9.6.0, GFX 1.2.8, TAMC_GT911 1.0.2 |
 | `display-sim` | native | (none) | (n/a) | `display-v9/` minus `main.cpp`, `link_serial.cpp` | LVGL 9.6.0, SDL2 |
 | `wt32-eth01_captive-recon` | `wt32-eth01` | espressif32 | 115200 | `wt32-eth01_captive-recon/` | (core only) |
@@ -150,11 +151,11 @@ each one produced a build failure rather than a warning.
    `-I firmware/display`, but `firmware/display/` was never committed. The build
    failed with "Nothing to build". The environment has been removed;
    `[env:display-v9]` supersedes it.
-The configuration has 15 `[env:*]` sections: 11 firmware subsystems
-(`co2-calibrate`, `methane-calibrate`, `pressure-calibrate`, `temp-probe`,
-`display-v9`, `display-sim`, `wt32-eth01_captive-recon`, `motor-driver`,
-`network-master`, `legacy-slave`, `legacy-master`) and four that build code in
-`firmware/tests/`.
+The configuration has 16 `[env:*]` sections: 12 firmware subsystems
+(`co2-calibrate`, `methane-calibrate`, `ph-calibrate`, `pressure-calibrate`,
+`temp-probe`, `display-v9`, `display-sim`, `wt32-eth01_captive-recon`,
+`motor-driver`, `network-master`, `legacy-slave`, `legacy-master`) and four that
+build code in `firmware/tests/`.
 
 `network-master` is the production WT32 environment. Credentials, network
 status, DB state and experiment state travel over `rusim-line` v1 on UART0
@@ -175,4 +176,4 @@ portal reconnaissance.
 - `calibration.md` — human-recorded calibration results.
 
 ---
-Updated at 2026-11-18-00:12.
+Updated at 2026-11-19-11:52.

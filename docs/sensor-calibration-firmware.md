@@ -1,6 +1,6 @@
 # Sensor calibration firmware
 
-Scope: four small programs in `firmware/` that read sensors and produce values
+Scope: five small programs in `firmware/` that read sensors and produce values
 for calibration. Each is a standalone PlatformIO environment with no shared
 code between them.
 
@@ -10,6 +10,7 @@ code between them.
 | `pressure-calibrate/` | `pressure-calibrate` | ATmega328 Uno | Read the HX710B pressure sensor in Pa |
 | `methane-calibrate/` | `methane-calibrate` | ATmega2560 Mega Mini | Read four TGS2611 sensors in ppm |
 | `temp-probe/` | `temp-probe` | ATmega2560 Mega Mini | Read one DS18B20 on D22, with bus diagnostics |
+| `ph-calibrate/` | `ph-calibrate` | ATmega2560 Mega Mini | Read four PH-402C probes and print volts and pH |
 
 None of these programs write to the database, accept commands, or talk to the
 display. They print to serial and nothing else. Recorded results belong in
@@ -327,7 +328,90 @@ failures trigger another `begin()`.
 The internal pull-up is a diagnostic only. It is 20-50 kΩ, and OneWire clears it
 during every read slot, so it cannot replace the external 4.7 kΩ resistor.
 
-## 6. Related documents
+## 6. `ph-calibrate`
+
+`firmware/ph-calibrate/main.cpp`. Reads four PH-402C / PH-4502C probe modules on
+the Mega Mini's A0-A3 and prints one JSON line per second. Each probe is reported
+as an averaged ADC count, the corresponding voltage, and a pH value.
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `NUM_PROBES` | 4 | Probes read per sweep |
+| `PROBE_PINS` | `A0, A1, A2, A3` | Analog input per probe, in index order |
+| `ADC_SAMPLES` | 16 | `analogRead()` samples averaged per reading |
+| `ADC_SAMPLE_GAP_MS` | 1 | Gap between samples |
+| `SWEEP_INTERVAL_MS` | 1000 | Pause after one full four-probe sweep |
+| `ADC_REF_V` | 5.0 | ADC reference, the Mega's 5 V rail |
+| `ADC_MAX_COUNT` | 1023 | Full-scale 10-bit count |
+| `PH_ANCHOR_COUNT` | 512 | ADC count that reads pH 7.00 (2.500 V) |
+| `PH_ANCHOR_VALUE` | 7.0 | pH at the anchor count |
+| `PH_PER_COUNT` | 14 / 1023 | pH change per count; the 0-5 V span covers 0-14 pH |
+| `PH_SIGN` | -1 | `-1`: higher voltage gives lower pH (measured polarity); `+1` inverts |
+
+### Wiring
+
+Per probe: module `VCC` to 5 V, module `GND` to GND, module `PO` to the matching
+analog pin. The BNC shield goes to the module's dedicated probe ground. The
+module's `DO` comparator output and `TO` temperature output are not read.
+
+### Linear conversion (temporary)
+
+The map is linear and shared by all four probes. It is a temporary assumption,
+not a fit to measured data. The three-point piecewise fit used by
+`convertPhVoltage()` in `legacy/slave/new-slave.cpp` was replaced by this map.
+The old table is kept as a comment in the source for reference.
+
+```
+ph = 7.00 + PH_SIGN * (count - 512) * (14 / 1023)
+```
+
+- The anchor is pH 7.00 at 512 counts (2.500 V), which is the midpoint of the
+  0-5 V output.
+- The slope covers 14 pH over the full 1023-count span. This follows
+  `hardware.md` §5.5, which gives the PO output as 0-5 V for pH 0-14.
+- `PH_SIGN` is `-1`, so a higher voltage gives a lower pH. That is the polarity
+  of the earlier measured table. Set it to `+1` if a probe reads the other way.
+- The result is clamped to 0-14 and rounded to two decimals.
+
+The slope is not measured. A real probe may not be linear across 0-14 pH, and
+the module's output span may differ from the datasheet. Check the anchor first:
+a pH 7 buffer should give a count near 512. Re-check in pH 4.01 and 9.18 buffers
+before trusting the other readings.
+
+A reading is rejected when the count is 0 or at/above 1023 (0 V or the 5 V rail),
+or when the result is not finite. This catches a floating input and a shorted
+input instead of printing a plausible-looking number.
+
+### Sampling and output
+
+`readAverageCount()` sums 16 `analogRead()` samples with a 1 ms gap and returns
+the mean count. Voltage is `count * (5.0 / 1023.0)`, the same scale the legacy
+slave uses.
+
+```json
+{"time_s":12,"raw_0":812,"v_0":3.969,"ph_0":2.89,"raw_1":801,"v_1":3.915,"ph_1":3.04,"raw_2":0,"v_2":null,"ph_2":null,"raw_3":795,"v_3":3.886,"ph_3":3.13}
+```
+
+- `raw_<i>` is the averaged count, printed with no decimals.
+- `v_<i>` is volts to three decimals, or `null` when rejected.
+- `ph_<i>` is pH to two decimals, or `null` when rejected.
+- `time_s` is `millis() / 1000`, that is, uptime since boot, not a wall clock.
+- `raw_<i>` is always printed, even for a rejected reading, so a dead channel is
+  still visible. `0` raw means the input is at ground; `1023` means it is at the
+  5 V rail.
+
+There is no command parser and no persistence. To capture a calibration session,
+log the serial output to a file on the host, exactly as for `methane-calibrate`.
+
+### Correctness limits
+
+The probe and module are specified to ±0.1 pH at 25 °C. `calibration.md` §4
+records roughly ±0.3 pH on the legacy rig, so treat the two-decimal output as
+resolution, not accuracy. The conversion does not apply temperature compensation;
+`TO` is ignored, so readings drift with temperature. The module's output range
+and the ADC share the 5 V rail, so a noisy or low 5 V supply moves every reading.
+
+## 7. Related documents
 
 - `platformio-environments.md` — build environments for these programs and their
   known gaps.
@@ -336,4 +420,4 @@ during every read slot, so it cannot replace the external 4.7 kΩ resistor.
 - `index.md` — the repository index and the rest of the docs.
 
 ---
-Updated at 2026-11-18-00:12.
+Updated at 2026-11-19-12:27.
