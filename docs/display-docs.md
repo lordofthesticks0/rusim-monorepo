@@ -221,11 +221,13 @@ the display. A display `HELLO` makes the WT32 re-send `NET`/`DB`, `SENS`
 (a frame fresh enough to be called current) and `RESULT OK` if it is running.
 
 **Real sensor values.** `link_serial` stores each accepted `SENS` line as one
-`LinkSensFrame` with a `seq` counter. A 5 s lv_timer (`on_sens_timer`,
-`UI_SENS_APPLY_MS`) calls `sens_apply_real()`, which copies new frames into
+`LinkSensFrame` with a `seq` counter. A 1 s lv_timer (`on_sens_timer`,
+`UI_SENS_APPLY_MS`) calls `sens_apply_real()`; the WT32 sends a frame about
+every 5 s, so a frame reaches the screen within about 1 s. It copies new frames into
 node 0 (`UI_REAL_CLUSTER`) bottle slots 0..3 — columns match `SensorId` order,
-absent bottles and `nan` become NULL flags, and the temp trend ring gains one
-point per applied frame. Each stored frame receives the incremented sequence
+absent bottles and `nan` become NULL flags for that frame only (trend history is kept and shows a gap), and each trend ring shifts one
+point per `UI_TREND_STEP_MS` (30 s), so its 24 points cover 12 minutes; between
+steps the newest point is overwritten with the live value. Each stored frame receives the incremented sequence
 number; otherwise later frames would be mistaken for duplicates and ignored.
 Missing fields start as NAN, not zero, and numeric suffixes are rejected.
 All nodes start offline; only node 0 currently receives real frames. A frame
@@ -323,4 +325,4 @@ Branch on the existing flag instead of adding a new one, mark debug UI
 with a `DEBUG:` prefix, and never enable it in a production flash.
 
 ---
-Updated at 2026-11-18-00:12.
+Updated at 2026-11-19-15:44.

@@ -70,7 +70,7 @@ direct GND. The display's `PASSTH ON` tunnel (§7) is the other quick check.
 ### 3.1.1 `SENS` sensor values
 
 The WT32 parses the Mega slave JSON itself; the display never sees the raw
-frame. One accepted 30 s poll leaves the poll path as exactly one `SENS` line
+frame. One accepted 5 s poll leaves the poll path as exactly one `SENS` line
 with up to four `b<i>` groups (`i` = 1..4):
 
 ```
@@ -352,7 +352,7 @@ with this port.
    `RESULT OK`; display reboot mid-run re-raises `/setup` and replies to
    `HELLO` with experiment state.
 6. **Mega slave:** Mega powered from the same ground, WT32 running. Expect
-   one `[SENS]` line per 30 s with values that match the JSON the Mega prints
+   one `[SENS]` line per 30 s (the display receives `SENS` every 5 s) with values that match the JSON the Mega prints
    on its own USB at the same time. Pull the Mega's TX wire: the ESP logs a
    timeout, the display link stays up, and readings resume when the wire
    returns.
@@ -360,4 +360,4 @@ with this port.
    `display-sim`, `network-master`.
 
 ---
-Updated at 2026-11-18-00:12.
+Updated at 2026-11-19-15:38.

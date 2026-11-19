@@ -22,12 +22,14 @@
 //   Serial is therefore both the link and the log sink: every log line is
 //   emitted as "LOG <text>" and the display re-prints it on its own USB.
 // - Polls the legacy Mega slave on Serial1 (IO5 RX / IO17 TX, 9600 8N1) once
-//   per 30 s with "#1:PING*", logs the four-bottle JSON reply as one
-//   "LOG [SENS]" line, and enqueues the present bottles while an experiment
-//   run is active. Each accepted round is forwarded to the display as one
-//   SENS line, so the data screens show real bottles (node 0). See
+//   every 5 s (first poll right after boot) with "#1:PING*". Each accepted
+//   round is forwarded to the display as one "SENS" line; once per 30 s the
+//   reply is also logged as one "LOG [SENS]" line and the present bottles are
+//   enqueued while an experiment run is active. The SENS lines feed the data
+//   screens with real bottles (node 0). See
 //   docs/plans-and-audits/migration-plan.md and link-serial-protocol.md.
-// - Pulls devices/experiments/device_config from Supabase every 30 s and
+// - Pulls devices/experiments/device_config from Supabase once per 30 s
+//   network cycle (after the ping and 204 probe, see kIntervalMs) and
 //   freezes a run configuration snapshot at each run start. Uploads go to the
 //   push_readings RPC only while a run is active. See
 //   docs/plans-and-audits/network-master-database-plan.md.
@@ -39,8 +41,8 @@
 //   EXPERIMENT lines, so post-login edits on /control take effect without
 //   re-login.
 // - Runs the proven ping-test portal login (trigger -> login page scan
-//   -> POST -> 204 probe verify), then loops a ping of 1.1.1.1 plus the
-//   plain-HTTP 204 probe every 30 s. A failed probe in RUN falls back to
+//   -> POST -> 204 probe verify), then loops one 30 s cycle: ping of 1.1.1.1,
+//   NET line, plain-HTTP 204 probe, DB pass. A failed probe in RUN falls back to
 //   NEED_CREDS for re-auth instead of halting.
 // - Credentials live in RAM only and are zeroed after use.
 //
@@ -63,7 +65,8 @@
 
 static const IPAddress kPingTarget(1, 1, 1, 1);
 static const uint8_t kPingCount = 3;
-// RUN-stage tick: one ping, one portal probe, and one status snapshot.
+// RUN-stage network cycle period, measured from the END of the previous
+// cycle's DB pass: ping, status snapshot, portal probe, then the DB pass.
 static const uint32_t kIntervalMs = 30000;
 // Captive-portal probe: online networks answer 204 with an empty body;
 // walled networks answer 200 (interception page) or a 3xx redirect to login.
@@ -89,8 +92,12 @@ static int dbBottleCount = -1;  // -1 unknown, else bottle_count from devices
 // char arrays, never heap Strings: truncated at 63 chars + NUL.
 static char dbOwnerName[64] = {0};
 static char dbOwnerEmail[64] = {0};
-static uint32_t lastDbPollMs = 0;
-static const uint32_t kDbPollMs = 30000;
+// One network cycle per kIntervalMs, run by the RUN stage as a single
+// sequence: ping -> NET line -> 204 probe -> DB pass. The DB pass never starts
+// on its own timer; the cycle requests it after the probe succeeds.
+static uint32_t netCycleEndMs = 0;      // millis() when the last DB pass ended
+static bool netCycleNow = true;         // true = next cycle is due immediately
+static bool dbPassRequested = false;    // set by the cycle, consumed by DB_PASS_IDLE
 
 // --- Database contract state (docs/plans-and-audits/network-master-database-plan.md) -------------
 // All DB responses are bounded; nothing here grows with server data. The
@@ -241,12 +248,17 @@ static uint32_t s_pushDrops = 0;  // saturating overflow counter
 static const int kSensRxPin = 5;
 static const int kSensTxPin = 17;
 static const uint32_t kSensBaud = 9600;
-static const uint32_t kSensPollMs = 30000;  // one round per 30 s
+static const uint32_t kSensPollMs = 5000;   // one Mega poll per 5 s (display feed)
+// Cadence of the "slow" consumers: the [SENS] log line, the idle-round counter
+// and the database push queue. This is the old 30 s poll period, kept so that
+// polling faster for the display does not multiply uploaded rows.
+static const uint32_t kSensSlowMs = 30000;
 static const uint32_t kSensReplyMs = 1500;  // 50 ms capture + ~310 ms line time
 static const size_t kSensFrameCap = 513;    // 512-byte frame + NUL
 static const size_t kSensBottles = 4;
-// A round older than three poll ages is never forwarded to the display, so
-// values frozen by a dead slave cannot be presented as current.
+// A round older than this is never forwarded to the display, so values frozen
+// by a dead slave cannot be presented as current. Deliberately much longer
+// than kSensPollMs so one or two missed polls do not blank the screen.
 static const uint32_t kSensMaxWireAgeMs = 90000;
 
 // nullMask bits, matching PushRow below.
@@ -261,6 +273,8 @@ static char sensRx[kSensFrameCap];
 static size_t sensRxLen = 0;
 static bool sensRxOverflow = false;
 static uint32_t lastSensPollMs = 0;
+static uint32_t s_sensSlowMs = 0;      // millis() of the last slow-cadence round
+static bool s_sensSlowSeen = false;    // false until the first accepted round
 static uint32_t sensRoundsOk = 0;    // rounds with a parseable frame
 static uint32_t sensRoundsFail = 0;  // timeouts, overlong or non-JSON frames
 static uint32_t sensLastReplyMs = 0;
@@ -441,7 +455,7 @@ static void link_emit_truth() {
 // of fake data. The display parses the same values this file logs as
 // "[SENS]"; the wire adds nothing new. `s_sensLast` keeps the last accepted
 // round so the HELLO snapshot re-sends values to a late-booting display;
-// otherwise a display that boots between 30 s polls would wait for the next
+// otherwise a display that boots between polls would wait for the next
 // round with a blank data screen.
 //
 // Wire: "SENS b<i> ph=<f> ch4=<f> t=<f> co2=<f> p=<f> b<next> ...". A sensor
@@ -1349,6 +1363,18 @@ static void sens_report_round() {
   // Idle rounds stay log-only: no experiment-0 samples and no uploads. A
   // requested run that could not start (DB configuration never pulled) is
   // counted but not queued, so nothing is mislabelled later.
+  //
+  // Polling runs every kSensPollMs for the display, but queueing and logging
+  // stay at kSensSlowMs: only the first accepted round and then one per
+  // kSensSlowMs pass this gate, so the database sees the same row rate as
+  // before the poll was sped up.
+  sensRoundsOk++;
+  const bool slowDue =
+      !s_sensSlowSeen || (millis() - s_sensSlowMs) >= kSensSlowMs;
+  if (!slowDue) return;
+  s_sensSlowSeen = true;
+  s_sensSlowMs = millis();
+
   if (runActive) {
     BottleSample batch[kSensBottles];
     size_t nb = 0;
@@ -1387,12 +1413,12 @@ static void sens_report_round() {
     }
     pos += (size_t)w;
   }
-  sensRoundsOk++;
   logf("[SENS] %s", line);
 }
 
-// One request/reply round, gated to one every 30 s. The wait is blocking for
-// at most 1.5 s, so the display link is pulled from inside it: a link line
+// One request/reply round, gated to one every kSensPollMs. The first round is
+// due immediately after boot (see setup()). The wait is blocking for at most
+// 1.5 s, so the display link is pulled from inside it: a link line
 // arriving during the reply would otherwise sit in the FIFO.
 static void sens_poll() {
   if (millis() - lastSensPollMs < kSensPollMs) return;
@@ -2049,10 +2075,11 @@ static bool sbPushOneRound() {
   return false;
 }
 
-// Ends a pass. The 30 s cadence is measured from the END of a pass, so a slow
-// or failing pass cannot immediately chain into another one.
+// Ends a pass and starts the cycle's wait. The period is measured from the END
+// of the pass, so a slow or failing pass cannot immediately chain into another
+// cycle.
 static void dbPassFinish() {
-  lastDbPollMs = millis();
+  netCycleEndMs = millis();
   link_emit_db();
   dbPass = DB_PASS_IDLE;
 }
@@ -2065,8 +2092,8 @@ static void dbPassFinish() {
 static void dbPassTick() {
   switch (dbPass) {
     case DB_PASS_IDLE:
-      if (millis() - lastDbPollMs < kDbPollMs) return;
-      lastDbPollMs = millis();
+      if (!dbPassRequested) return;  // the RUN cycle starts passes, not a timer
+      dbPassRequested = false;
       ensureNtpSync();
       if (!ntpSynced) {
         dbFault = DB_FAULT_CLOCK;
@@ -2213,12 +2240,6 @@ static void dbPassTick() {
   }
 }
 
-// Makes the next pass due immediately (used after login and on demand).
-static void dbPassForce() {
-  lastDbPollMs = millis() - kDbPollMs;
-  if (dbPass == DB_PASS_IDLE) dbPassTick();
-}
-
 // Returns true on authenticated, false otherwise. The caller emits RESULT and
 // wipes the working pair.
 bool doLogin() {
@@ -2286,7 +2307,8 @@ void setup() {
   Serial1.begin(kSensBaud, SERIAL_8N1, kSensRxPin, kSensTxPin);
   logf("[SENS] UART1 on IO%d RX / IO%d TX, %u 8N1", kSensRxPin, kSensTxPin,
        (unsigned)kSensBaud);
-  lastSensPollMs = millis();
+  // Make the first poll due now instead of kSensPollMs after boot.
+  lastSensPollMs = millis() - kSensPollMs;
 
   WiFi.onEvent(onEthEvent);
 
@@ -2318,7 +2340,7 @@ void loop() {
   // Served after the link so a slow web request cannot delay the UART.
   webServer.handleClient();
   // Sensor rounds run in every stage, including while the portal gate is
-  // open; the poll has its own 30 s gate and does not depend on the network.
+  // open; the poll has its own 5 s gate and does not depend on the network.
   sens_poll();
   // At most one HTTPS operation per iteration, after the link and the sensor
   // poll have been serviced. A slow DB read delays the next step, not the UART.
@@ -2368,7 +2390,7 @@ void loop() {
             lastVerdict = true;
             link_emit_result(true);
             stage = STAGE_RUN;
-            stageAtMs = 0;
+            netCycleNow = true;
           }
         }
       }
@@ -2382,9 +2404,8 @@ void loop() {
       link_emit_result(ok);
       clearCreds();
       if (ok) {
-        dbPassForce();
         stage = STAGE_RUN;
-        stageAtMs = 0;
+        netCycleNow = true;  // first full cycle right after login
       } else {
         logf("[LOGIN] will wait for a corrected login on the web page");
         stage = STAGE_NEED_CREDS;
@@ -2401,8 +2422,10 @@ void loop() {
         stageAtMs = millis();
         break;
       }
-      if (millis() - stageAtMs < kIntervalMs) break;
-      stageAtMs = millis();
+      // The previous cycle's DB pass must finish before the next cycle starts.
+      if (dbPass != DB_PASS_IDLE || dbPassRequested) break;
+      if (!netCycleNow && millis() - netCycleEndMs < kIntervalMs) break;
+      netCycleNow = false;
 
       logf("[ETH] Assigned IP: %s", ETH.localIP().toString().c_str());
 
@@ -2429,6 +2452,7 @@ void loop() {
            "queued=%u drops=%u",
            expNum, durationH, expRunning ? 1 : 0, dbLatest, dbBottleCount,
            ntpSynced ? 1 : 0, (unsigned)s_pushCount, (unsigned)s_pushDrops);
+      dbPassRequested = true;  // last step of the cycle: config pull + upload
       break;
     }
   }

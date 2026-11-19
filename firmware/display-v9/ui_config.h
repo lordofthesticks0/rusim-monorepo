@@ -39,11 +39,15 @@
 #define UI_SLEEP_MS 60000
 
 
-// Real SENS frames land at their own ~30 s cadence; this apply timer copies
-// new frames into the model and refreshes labels. It also doubles as the
-// staleness watcher: a frame older than UI_SENS_STALE_MS has the whole node
-// shown as NULL/offline until the slave answers again.
-#define UI_SENS_APPLY_MS 5000
+// Real SENS frames land at the WT32's ~5 s poll cadence; this apply timer
+// copies new frames into the model and refreshes labels, so a frame reaches
+// the screen within about 1 s. It also doubles as the staleness watcher: a
+// frame older than UI_SENS_STALE_MS has the whole node shown as NULL/offline
+// until the slave answers again.
+#define UI_SENS_APPLY_MS 1000
+// The trend ring gains one point per UI_TREND_STEP_MS, not per frame, so its
+// UI_TREND_PTS points keep covering 12 minutes however fast frames arrive.
+#define UI_TREND_STEP_MS 30000UL
 #define UI_SENS_STALE_MS (3UL * 30000UL)
 // Cluster that receives the legacy Mega rig's four real bottles.
 #define UI_REAL_CLUSTER 0

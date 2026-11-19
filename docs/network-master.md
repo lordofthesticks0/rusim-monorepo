@@ -77,8 +77,12 @@ mandatory; two USB grounds are not a substitute.
 ### 2.3 Mega slave poll behaviour
 
 - `sens_poll()` is called from `loop()` before the stage switch, so it runs in
-every state, including while the portal gate is open. One round per 30 s
-(`kSensPollMs`).
+every state, including while the portal gate is open. One round per 5 s
+(`kSensPollMs`). The first round is due immediately at boot, not 5 s later.
+- Every accepted round is forwarded to the display as a `SENS` line. Only one
+accepted round per 30 s (`kSensSlowMs`) is logged as `[SENS]`, counted as an
+idle round, or enqueued for the database, so the upload row rate does not
+depend on the poll period.
 - Each round drains stale RX bytes, writes `#1:PING*` (8 bytes), and reads
 until `\n`, a full buffer, or 1500 ms (`kSensReplyMs`: 50 ms capture window
 plus about 310 ms of line time for a ~500-byte reply). A frame that does not
@@ -143,7 +147,7 @@ acks. Full rules: `link-serial-protocol.md` §2.
 | `RESULT` | `OK` / `FAIL` | after every login attempt, plus the HELLO snapshot in RUN |
 | `NET` | `ip=<str> up=<0\|1> [ping=<n\|->]` | every heartbeat and ETH event |
 | `DB` | `latest=<n\|-> time=<0\|1> bottles=<n\|-> drops=<n> ready=<0\|1> aexp=<n\|-> adur=<n\|-> asrc=<db\|local\|-> pexp=<n\|-> pdur=<n\|-> cfgmax=<n\|-> queued=<n> reads=<ms\|-> ack=<ms\|-> state=<word>` | every heartbeat and after each DB pass |
-| `SENS` | `b<i> ph=<f\|nan> ch4=<f\|nan> t=<f\|nan> co2=<f\|nan> p=<f\|nan> ...` (groups only for bottles the slave reported) | every accepted 30 s poll + once in the HELLO snapshot |
+| `SENS` | `b<i> ph=<f\|nan> ch4=<f\|nan> t=<f\|nan> co2=<f\|nan> p=<f\|nan> ...` (groups only for bottles the slave reported) | every accepted 5 s poll + once in the HELLO snapshot |
 | `LOG` | `<text>` | every diagnostic line |
 
 `DB latest=0` means "no experiments yet" (the display maps it to -1), `-`
@@ -192,10 +196,15 @@ WAIT_IP -> NEED_CREDS -> LOGIN -> RUN
 - `LOGIN`: `doLogin()` (§5) uses the RAM-only pair collected by the web form,
   then emits `RESULT OK`/`FAIL`. Success moves to `RUN`; failure returns to
   `NEED_CREDS` and the page offers a retry.
-- `RUN`: every 30 s prints the IP, pings `1.1.1.1` 3x, runs the 204 probe,
-  the DB/push pass, and emits `NET` + `DB`. A probe that does not return 204
-  falls back to `NEED_CREDS` for re-auth. A ping failure alone does not
-  trigger re-auth.
+- `RUN`: one network cycle every 30 s (`kIntervalMs`), always in this order:
+  print the IP, ping `1.1.1.1` 3x, emit `NET`, run the 204 probe, then request
+  the DB/push pass (which emits `DB` when it ends). The DB pass has no timer of
+  its own; only this cycle starts it. The 30 s is measured from the end of the
+  previous DB pass, and a new cycle does not start while a pass is still
+  running. The first cycle runs immediately after login. A probe that does not
+  return 204 skips the DB pass and falls back to `NEED_CREDS` for re-auth. A
+  ping failure alone does not trigger re-auth. Before login (`NEED_CREDS`) no
+  DB pass runs; the separate 30 s already-authenticated probe there is unchanged.
 
 `loop()` is non-blocking between stage ticks: it pulls and dispatches link
 lines before anything else, then checks `millis()` gates. The database pass is
@@ -205,7 +214,7 @@ returns so the link, heartbeat and sensor poll are serviced before the next
 step. A 10 s socket timeout therefore delays the UART once, not for the whole
 pass. `doLogin()` still blocks for its duration; the UART FIFO absorbs a
 heartbeat and the next iteration drains it. The sensor poll blocks for at most
-1.5 s once per 30 s and services the display link during that wait. The queue has a
+1.5 s once per 5 s and services the display link during that wait. The queue has a
 single owner: every pass step runs in `loop()`, so no lock or task handoff is
 needed.
 
@@ -428,4 +437,4 @@ LOG [LOGIN] will wait for a corrected pair from the web form
 - `hardware.md` — board pinouts (read-only reference).
 
 ---
-Updated at 2026-11-18-00:12.
+Updated at 2026-11-19-15:52.

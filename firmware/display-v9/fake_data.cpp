@@ -21,6 +21,8 @@ static void clear_bottle(BottleFake &b) {
 static bool s_realSeen = false;
 static bool s_staleShown = true;
 static uint32_t s_lastSeq = 0;
+static uint32_t s_trendMs = 0;      // millis() of the last trend shift
+static bool s_trendSeen = false;    // false until the first trend point
 
 bool sens_apply_real() {
   LinkSensFrame f;
@@ -30,6 +32,7 @@ bool sens_apply_real() {
   if (ageMs < 0 || (uint32_t)ageMs > UI_SENS_STALE_MS) {
     if (s_staleShown) return false;
     s_staleShown = true;
+    s_trendSeen = false;
     cl.online = false;
     for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) clear_bottle(cl.bottle[b]);
     Serial.println("[SENS] unavailable: node 0 values cleared");
@@ -40,24 +43,38 @@ bool sens_apply_real() {
   s_staleShown = false;
   s_lastSeq = f.seq;
 
+  // Frames arrive every ~5 s but the trend advances every UI_TREND_STEP_MS.
+  // Between steps the newest slot is overwritten, so the chart's right edge
+  // always shows the live value without compressing the time window.
+  const bool trendStep = !s_trendSeen || (millis() - s_trendMs) >= UI_TREND_STEP_MS;
   bool anyPresent = false;
   for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) {
     BottleFake &bt = cl.bottle[b];
-    if (b >= LINK_SENS_BOTTLES || !f.present[b]) {
+    if (b >= LINK_SENS_BOTTLES) {  // slot the link can never report
       clear_bottle(bt);
       continue;
     }
-    bt.present = true;
-    anyPresent = true;
+    // A bottle missing from one frame is stored as NULL for that frame only.
+    // Its trend history is kept, and the gap shows as a missing chart point,
+    // exactly like a single "nan" sensor value.
+    const bool have = f.present[b];
+    bt.present = have;
+    if (have) anyPresent = true;
     for (int s = 0; s < S_COUNT; s++) {
-      float v = f.value[b][s];
+      float v = have ? f.value[b][s] : NAN;
       bt.sensorNull[s] = !isfinite(v);
       bt.sensor[s] = bt.sensorNull[s] ? NAN : v;
       // Every sensor keeps its own trend, so the detail screen can chart any of
       // them. A NULL field moves in as a gap, never as an interpolated value.
-      for (int i = 0; i < UI_TREND_PTS - 1; i++) bt.trend[s][i] = bt.trend[s][i + 1];
+      if (trendStep) {
+        for (int i = 0; i < UI_TREND_PTS - 1; i++) bt.trend[s][i] = bt.trend[s][i + 1];
+      }
       bt.trend[s][UI_TREND_PTS - 1] = bt.sensor[s];
     }
+  }
+  if (trendStep) {
+    s_trendSeen = true;
+    s_trendMs = millis();
   }
   cl.online = anyPresent;
   if (!s_realSeen) Serial.println("[SENS] real WT32 feed active");
@@ -69,6 +86,7 @@ void fake_init() {
   s_realSeen = false;
   s_staleShown = true;
   s_lastSeq = 0;
+  s_trendSeen = false;
   g.loggedIn = false;
   g.experimentRunning = false;
   g.experimentStartMs = 0;

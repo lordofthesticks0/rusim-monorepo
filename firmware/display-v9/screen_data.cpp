@@ -252,7 +252,8 @@ static void build_trend_card(lv_obj_t *parent, int c, int b, int s) {
 
   // The card's border and padding leave 748x140 of content.
   char title[64];
-  snprintf(title, sizeof(title), "%s trend, last 24 polls", SENSOR_CHART_NAME[s]);
+  snprintf(title, sizeof(title), "%s trend, last %lu min", SENSOR_CHART_NAME[s],
+           (unsigned long)(UI_TREND_PTS * UI_TREND_STEP_MS / 60000UL));
   ui_mk_label(card, title, 0, 0, 748, UI_COL_DIM, &lv_font_montserrat_14);
   char axis[40];
   axis_caption(s, axis, sizeof(axis));
