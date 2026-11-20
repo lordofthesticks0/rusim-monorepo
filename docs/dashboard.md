@@ -19,7 +19,7 @@ There is no UI framework, no state library, and no chart library. The chart is h
 | File | Lines | Responsibility |
 |---|---|---|
 | `index.tsx` | 5 | Mounts `<App/>` into `#root`, imports the stylesheet |
-| `src/App.tsx` | 1145 | Everything visible: login screen, all three views, all components, all chart math |
+| `src/App.tsx` | 1343 | Everything visible: login screen, all three views, all components, all chart math |
 | `src/data.ts` | 278 | Every Supabase read, the auth RPCs, and the non-numbering domain logic |
 | `src/chambers.ts` | 58 | Maps stored 0-based bottle ids to displayed chamber numbers and splits current presence |
 | `src/history.ts` | 132 | Pure history helpers: reading sort, experiment/chamber selection, per-point details, chamber grouping, selection toggle |
@@ -28,7 +28,8 @@ There is no UI framework, no state library, and no chart library. The chart is h
 | `src/auth.ts` | 110 | Session lifecycle: localStorage persistence, expiry timer, retry backoff |
 | `src/supabase.ts` | 72 | Client construction, schema pinning, session header injection |
 | `src/csv.ts` | 95 | RFC 4180 CSV serialisation and download |
-| `src/styles.css` | 281 | All styling: framed-sheet tokens, shell, presence strip, KPI strip, charts, tables, states |
+| `src/styles.css` | 423 | All styling: design tokens, shell, presence strip, KPI strip, charts, tables, states, and the motion layer (§5.10) |
+| `src/motion.ts` | 95 | Motion helpers: the sliding tab and nav indicator (`useIndicator`) and the once-per-visit entrance flag (`useEntranceOnce`) |
 | `scripts/dev-db.ts` | 697 | Dev-only database seeding and token provisioning |
 | `supabase/migrations/*.sql` | 17 files | Schema, authentication, lockdown |
 | `netlify.toml` | 23 | Build config and security headers |
@@ -312,21 +313,23 @@ The consequence is a worst-case latency of 5m30s for a device that samples every
 
 The default view, reached by the "Monitoring" nav tab.
 
-**Shell** — a tinted L-frame (sidebar + 48px top bar on a green-grey ground) with the work on a white sheet inset 8px from the right and bottom edges, 16px radius, 1px edge, no shadow. The sidebar names the product (RuSim / Telemetry with a chamber mark), scopes to `Device {id}` with owner, and holds the three views (Monitoring, Experiment history, Compare) with a grey-pill active state. The top bar holds the page name, a freshness stamp (`Data loaded · Updated …`), and the near-black `Refresh data` primary. Sign out lives at the sidebar bottom with the session expiry. On a phone the frame disappears: the sidebar folds behind a Menu button and the sheet becomes the screen.
+**Shell** — a tinted L-frame (sidebar + 56px top bar on an off-white ground) with the work on a white sheet inset 8px from the right and bottom edges, 10px radius, 1px edge, no shadow. The sidebar names the product (RuSim / Telemetry with a chamber mark), scopes to `Device {id}` with owner, and holds the three views (Monitoring, Experiment history, Compare). The active view sits on a white pill with a 2px magenta bar; the pill slides between items when the view changes. The top bar holds a breadcrumb (`Device {id} / {view}`), a freshness stamp (`Data loaded · Updated …`) whose green dot pulses twice when a load succeeds, and the black `Refresh data` primary, whose icon spins while a load runs. Sign out lives at the sidebar bottom with the session expiry. Below 860px the frame disappears: the sidebar becomes a drawer (at most 320px wide) behind a menu button, with a dimmed backdrop that closes it, and the sheet becomes the screen.
+
+**Title** — the view name as the page heading, with a one-line summary under it. On Monitoring a line above the heading names the live experiment (`Live experiment Experiment 999`).
 
 **Empty state** — when no experiment looks live, the body is replaced by a panel headed `No live experiment` pointing at Experiment history. The poll keeps running, so starting an experiment repopulates the view.
 
 **Preview flag** — `DEV_FORCE_LIVE_EXPERIMENT` in `monitoring.ts` is temporarily `1` so Monitoring can be reviewed without a device. When no real experiment is live, the view shows synthetic fresh data for experiment 999 (`generateSyntheticLiveReadings`: 12 samples per chamber at 5-minute intervals, latest 2 minutes ago, chambers 7 and 19 disconnected, one null sensor) with a `Preview` notice. History always shows real data. Set the flag to `0` before deploying.
 
-**Chamber presence strip** — one cell per configured chamber (`bottleCount` cells, 24 on the dev device), each labelled with its display number. Connected cells are white; disconnected cells (absent from the newest sample) take the warning tint. The selected chamber carries a 2px accent underline. Clicking a cell selects that chamber. This is the product's signature element: it shows the whole device at the latest sample at a glance.
+**Chamber presence strip** — one cell per configured chamber (`bottleCount` cells, 24 on the dev device), each labelled with its two-digit display number and a small status dot. Connected cells are white with a green dot; disconnected cells (absent from the newest sample) take a striped amber tint with an amber dot. The selected chamber is filled black. Clicking a cell selects that chamber. The strip has 24 columns on a desktop, 12 below 1100px and 6 below 480px. This is the product's signature element: it shows the whole device at the latest sample at a glance.
 
 **Disconnection notice** — rendered only when a latest sample exists *and* at least one configured chamber is missing from it. With the default dev configuration (24 configured, chambers 1–8 reporting) this reads: "Disconnected at …: chambers Chamber 9, Chamber 10, … Chamber 24 sent no data."
 
-**Five KPI cells as parameter tabs** — pH, Temp, CO2, CH4, Pressure, read from the selected chamber's newest sample in the active experiment, in one container split by 1px dividers (no icons, no tiles). Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as a grey dash at label size. Selecting a cell switches the chart below to that parameter (the selected cell carries a 2px accent rule).
+**Five KPI cells as parameter tabs** — pH, Temperature, CO₂, CH₄, Pressure (`PARAMETER_DISPLAY`; stored and exported names stay `PARAMETER_NAMES`), read from the selected chamber's newest sample in the active experiment, in one container split by 1px dividers. Each cell shows its label, unit, value, and a sparkline of the chamber's last 40 samples of that parameter (real rows, gaps kept). Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as a grey dash. Selecting a cell switches the chart below to that parameter; a 2px magenta bar slides under the selected cell and its sparkline turns magenta. The strip has five columns on a desktop, three below 1100px and two below 860px.
 
 **Status line** — chamber, connection state (`Disconnected` / `Concluded` / `Live` / `No data`), sample count, and latest sample time, in one 12px line under the KPI strip.
 
-**One chart** — plotting the selected chamber's rows for the **active experiment only**, headed `{parameter} readings` with the record count. The line is 2px in the chart teal with round y ticks and 3–5 gridlines; a `null` breaks the line. Each sample is a focusable point; hovering, focusing or clicking shows a tooltip above the point with timestamp and value. Fewer than two rows renders "Not enough data for chart."
+**One chart** — plotting the selected chamber's rows for the **active experiment only**, headed `Chamber {n} · {parameter}` with the record count. The line is 2px in magenta (`--chart-1`) over a soft area fill, with round y ticks and gridlines; a `null` breaks both the line and the fill. Each sample is a focusable point; hovering, focusing or clicking shows a dashed vertical guide and a tooltip with value and timestamp. Fewer than two rows renders "Not enough data for chart."
 
 ### 5.6 Live vs concluded is inferred, never stored
 
@@ -373,13 +376,56 @@ The export is deliberately of what is on screen rather than a fresh query, and t
 
 Reached by the "Compare" nav tab. Overlays up to four chamber series on one chart; chambers may come from different experiments.
 
-**Selection** — a panel headed `Chambers to compare` with an Experiment select, a Chamber select (all configured chambers), an `Add chamber` button, and `Clear all`. Each added series becomes a chip with a colour dot, its label (`Experiment 3 · Chamber 5`), and a remove button. The header shows `n of 4`. The rules live in `compare.ts`: `MAX_COMPARE_SERIES` is 4, the same experiment and chamber cannot be added twice, but the same chamber in different experiments can. `Add chamber` is disabled at the cap or on a duplicate. Colours are assigned by position in the selection list (`--chart-1` teal, `--chart-2` saturated blue, `--chart-3` saturated orange, `--chart-4` saturated pink), so removing a middle chip shifts later colours.
+**Selection** — a panel headed `Chambers to compare` with an Experiment select, a Chamber select (all configured chambers), an `Add chamber` button, and `Clear all`. Each added series becomes a chip with a colour dot, its label (`Experiment 3 · Chamber 5`), and a remove button. The header shows `n of 4`. The rules live in `compare.ts`: `MAX_COMPARE_SERIES` is 4, the same experiment and chamber cannot be added twice, but the same chamber in different experiments can. `Add chamber` is disabled at the cap or on a duplicate. Colours are assigned by position in the selection list (`--chart-1` magenta, `--chart-2` blue, `--chart-3` green, `--chart-4` amber), so removing a middle chip shifts later colours.
 
 **Data** — each distinct experiment in the selection is fetched once via `fetchExperimentReadings` and cached in `readingsByExperiment`; the chart filters each cache entry with `selectChamberReadings`. Compare uses real data only (the synthetic preview experiment 999 never appears in the experiment list) and does not poll.
 
 **Chart** — `CompareChart` draws all series on one SVG with a shared y-axis (ticks computed from the flattened rows of every series) and x aligned by sample order (first sample to first sample, each series stretched across the plot width). The x labels come from the longest series. Each series is a 2px line in its colour with the same focusable points as the single-series charts; the tooltip above a point shows the series label, timestamp, and value. A legend lists each series with its colour dot and sample count. Fewer than two rows in every series renders "Not enough data for chart."
 
 ---
+
+### 5.10 Visual design and motion
+
+The look was redesigned with the `design-taste-frontend` skill. Its scripts dealt the palette and the type pairing for a software product. The rest of that skill targets marketing sites (heroes, photographs, one section per screen), so only the parts that fit an operational dashboard were applied.
+
+**Tokens** (`:root` in `styles.css`):
+
+| Role | Value |
+|---|---|
+| Ground (frame) | `#f7f7f5` off-white |
+| Sheet and panels | `#ffffff`, 1px `#e3e3de` edge |
+| Ink / muted | `#000000` / `#666662` |
+| Accent | `#d0106f` magenta: selection, focus ring, the main chart line |
+| Primary button | black with white text |
+| Chart series | `--chart-1` magenta, `--chart-2` blue `#1a5fd0`, `--chart-3` green `#0f8a6a`, `--chart-4` amber `#b86200` |
+| Type | Chivo (text and headings), Chivo Mono (ids, units, chamber numbers), from Google Fonts in `index.html` |
+| Radii | 4px controls, 6px panels, 10px sheet |
+
+Status colours stay semantic: green for live and connected, amber for disconnected, red for errors.
+
+**Motion.** Every motion answers a click, a hover, or new data, and none is driven by scrolling. Only `transform` and `opacity` animate, apart from colour changes and the SVG point radius.
+
+| Motion | Trigger | Duration | Where |
+|---|---|---|---|
+| Title rises out of a line mask, then the summary and content fade up 12px | First screen of the visit (login or dashboard), once | ~1.1 s in total | `.is-entering`, `useEntranceOnce()` |
+| Login sensor traces draw left to right | Login entrance | 900 ms, 80 ms apart | `.sensor-row path.draw` |
+| New view settles in (fade, 6px rise) | Switching view | 260 ms | `.view-swap.is-swapping` |
+| Nav pill slides to the active view | Switching view | 240 ms | `.nav-indicator`, `useIndicator(…, "box")` |
+| Bar slides under the selected KPI cell or tab | Selecting a parameter or a History/Compare tab | 240 ms | `.tab-bar`, `useIndicator(…, "bar")` |
+| Chart line draws, then area and points fade in | New chamber or parameter (not on a poll) | 900 ms | `.chart-line.draw`, keyed on `drawKey` |
+| Compare series draw one after another | New series or parameter | 900 ms, 90 ms apart | `CompareChart()` |
+| KPI value ticks up into its slot | Value or chamber changes | 320 ms | `.tick`, keyed on chamber and value |
+| Sparklines draw | Chamber changes | 900 ms, 60 ms apart | `Sparkline()` |
+| Status dot ring pulses twice | A load succeeds | 1.2 s × 2 | `.status-dot.pulse`, keyed on `loadedAt` |
+| Refresh icon spins; a thin bar slides while loading | Loading | 1 s / 1.1 s loops | `.is-busy`, `.loading-line` |
+| Buttons step 1px up on hover and press 1px down at 98.5% | Pointer | 150 / 90 ms | `.btn` |
+| Chamber cells lift 1px; rows and table rows tint; row chevrons nudge 3px | Pointer | 150 ms | `.presence-cell`, `.row-button`, `tbody tr` |
+| Tooltip pops in | Point hovered or focused | 140 ms | `.chart-tooltip-inner` |
+| Phone drawer slides in over a fading backdrop | Menu button | 200 ms | `.sidebar.open`, `.backdrop` |
+
+Hover motion applies only to a fine pointer (`@media (hover: hover) and (pointer: fine)`), so a phone never keeps a stuck hover state. Under `prefers-reduced-motion: reduce` every animation is off and only colour transitions remain, so all content is visible at once.
+
+**How the sliding indicator works.** `useIndicator()` receives the container through a callback ref, finds the child marked `aria-selected="true"` or `aria-current="page"`, and writes its offset and size to CSS variables on the one indicator element. Only `transform` animates. A bar uses a 100px element scaled with `scaleX(width / 100)`; the nav pill takes its size directly and only moves. The first placement, and any placement after a resize, jumps without a transition (`.is-jump`), so the indicator travels only when the selection changes. A callback ref is used because the KPI strip unmounts and mounts again when the view or the loading state changes.
 
 ## 6. From a row to a chart point
 
@@ -430,21 +476,21 @@ The pen lifts on every null and re-anchors with a new `M`, so gaps render as sep
 
 ### 6.3 Rendering
 
-```jsx
-<div className="gridlines"><i /><i /><i /><i /></div>
-<svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label={`${parameterLabel(parameter)} reading chart`}>
-  <path d={chartPath(points)} />
-</svg>
-<div className="axis">{labels.map(...)}</div>
-```
+`Chart()` and `CompareChart()` draw everything in one `<svg>`. The `viewBox` width is the chart's measured pixel width (`useMeasuredWidth`, a `ResizeObserver`), so one SVG unit is one screen pixel: axis text stays 11px on a phone instead of shrinking with the drawing. `chartGeometry(width)` sets the plot margins and the height: 260px, or 200px below 560px of width. `createChartPoints()` above only decides which samples are null; the renderers place points with their own `toX`/`toY` from the y ticks.
 
-Four dashed horizontal gridlines, the SVG absolutely positioned over them, and `vector-effect: non-scaling-stroke` keeping the 3px stroke constant despite the deliberately non-uniform `preserveAspectRatio="none"`.
+Inside the SVG, from back to front:
 
-`createTimeLabels` picks five evenly-spaced **indexes** and renders `HH:MM` for each, so the axis reads as a time axis while actually being a sample axis.
+1. Gridlines and y tick labels from `createYTicks()`.
+2. The area fill (`chartAreaPath()`): one closed shape per unbroken run of samples, filled with a vertical gradient of the line colour, so a gap in the data is also a gap in the fill. Single-chamber charts only.
+3. A dashed vertical guide at the active point.
+4. The line (`chartPath()`).
+5. The focusable points.
+
+`createTimeLabels` picks evenly spaced **indexes** (five, or three on charts under 480px wide) and renders `HH:MM` for each, so the axis reads as a time axis while actually being a sample axis.
 
 ### 6.4 What the chart is not
 
-No zoom, no crosshair. Both the Monitoring and History charts have focusable points with a bare-text tooltip above the point (timestamp and value only). Values are read from the KPI strip (Monitoring) or the y ticks and tooltips (History).
+No zoom and no panning. Both the Monitoring and History charts have focusable points with a tooltip (value and timestamp; Compare also names the series). Values are read from the KPI strip (Monitoring) or the y ticks and tooltips (History).
 
 ---
 
@@ -561,11 +607,13 @@ Migration `20260930172000` populates experiment 0 (24 samples, 5-minute gap, 8 o
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Referrer containment |
 | `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | HTTPS-only |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | Feature denial |
-| `Content-Security-Policy` | `default-src 'self'`; `script-src 'self'`; `connect-src 'self' https://*.supabase.co wss://*.supabase.co`; `object-src 'none'`; `base-uri 'self'`; `frame-ancestors 'none'` | The important one |
+| `Content-Security-Policy` | `default-src 'self'`; `script-src 'self'`; `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`; `font-src 'self' https://fonts.gstatic.com`; `img-src 'self' data:`; `connect-src 'self' https://*.supabase.co wss://*.supabase.co`; `object-src 'none'`; `base-uri 'self'`; `frame-ancestors 'none'` | The important one |
 
 The stated motivation: session tokens live in localStorage, so any XSS equals session theft. The CSP permits only self-hosted scripts and only Supabase as a connect target.
 
 `style-src 'unsafe-inline'` is the one relaxation, needed because the stylesheet is a single imported file with inline style attributes on chart elements.
+
+Google Fonts is the one outside origin for styles and fonts. `index.html` loads the Chivo and Chivo Mono stylesheet from `fonts.googleapis.com` (allowed by `style-src`), and that stylesheet loads the font files from `fonts.gstatic.com` (allowed by `font-src`). Without both entries the browser blocks the fonts and the page falls back to the system font. Scripts are still self-hosted only; neither Google origin may serve a script.
 
 ### 10.2 The legacy `public` schema
 
@@ -609,7 +657,7 @@ The truncation notice only appears in the *detail* pane, so a vanished experimen
 
 ### 12.2 The chart heading says "Across experiments" (fixed)
 
-The Monitoring chart is filtered to the active experiment (`selectMonitoringReadings()`). The heading now reads `{parameter} readings` (for example `CH4 (ppm) readings`), so it no longer describes the previous behaviour.
+The Monitoring chart is filtered to the active experiment (`selectMonitoringReadings()`). The heading now reads `Chamber {n} · {parameter}` (for example `Chamber 1 · CH₄ (ppm)`), so it no longer describes the previous behaviour.
 
 ### 12.3 Dead code
 
@@ -691,9 +739,9 @@ Open items:
 | Session token | 64 hex / 256 bits | `sha256(uuid ‖ uuid)` |
 | Server `max_rows` | 1,000 | `supabase/config.toml` |
 | Exposed schemas | `["device_data"]` | `supabase/config.toml` |
-| Chart viewBox | `0 0 800 220` | `Chart()` in `App.tsx` |
-| Chart plot band | y ∈ [30, 190] | `createChartPoints()` in `App.tsx` |
-| Flat-series y | 110 | `createChartPoints()` in `App.tsx` |
+| Chart viewBox | `0 0 {measured width} 260` (200 under 560px) | `chartGeometry()` in `App.tsx` |
+| Chart plot band | y ∈ [10, height − 30], x ∈ [56, width − 8] | `chartGeometry()` in `App.tsx` |
+| Flat-series y | 110 (only its null-ness is used by the renderers) | `createChartPoints()` in `App.tsx` |
 | localStorage key | `rusim.device_session` | `auth.ts:5` |
 | Session header | `x-device-session` | `supabase.ts:33` |
 
@@ -729,4 +777,4 @@ The Compare tab overlays up to four (experiment, chamber) series on one chart wi
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Updated at 2026-11-18-00:12.
+Updated at 2026-11-20-12:40.

@@ -275,8 +275,8 @@ static void handle_db(const char *args) {
 //
 // A line whose tail is missing (or a master-side bug) reads the missing
 // bottles as absent, which the UI renders as NULL — the same view as a poll
-// failure. The next 30 s round overwrites everything, so no half-fed frame
-// outlives its poll.
+// failure. The next accepted 5 s poll replaces the whole frame, so no
+// half-fed frame outlives its poll.
 static void handle_sens(char *args) {
   LinkSensFrame f = {};
   for (int b = 0; b < LINK_SENS_BOTTLES; b++) {

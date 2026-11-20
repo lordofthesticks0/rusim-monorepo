@@ -91,8 +91,8 @@ uint32_t link_serial_get_db_ack_age_ms();
 
 // --- Real bottle readings (rusim-line "SENS" word) --------------------------
 // The WT32 forwards one parsed legacy-Mega-slave poll as a SENS line: up to
-// LINK_SENS_BOTTLES bottles of valid floats, one line per accepted 30 s round
-// (id ordering, database bottle_id 0..3). docs/
+// LINK_SENS_BOTTLES bottle groups of floats (invalid sensors as nan), one line
+// per accepted 5 s poll; bottle i maps to database bottle_id i-1. docs/
 // link-serial-protocol.md §3.1.1 is the wire contract.
 #define LINK_SENS_BOTTLES 4
 #define LINK_SENS_VALS 5

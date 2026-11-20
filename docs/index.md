@@ -75,7 +75,8 @@ documented. Test sketches in `firmware/tests/` are not subsystems.
 | [`dashboard/src/csv.ts`](../dashboard/src/csv.ts) | RFC 4180 export of an experiment's readings |
 | [`dashboard/src/types/domain.ts`](../dashboard/src/types/domain.ts) | Domain types shared across the app |
 | [`dashboard/src/types/database.ts`](../dashboard/src/types/database.ts) | Generated from the live database |
-| [`dashboard/src/styles.css`](../dashboard/src/styles.css) | All styling |
+| [`dashboard/src/styles.css`](../dashboard/src/styles.css) | All styling and the motion layer |
+| [`dashboard/src/motion.ts`](../dashboard/src/motion.ts) | Sliding indicator and once-per-visit entrance hooks |
 | [`dashboard/scripts/dev-db.ts`](../dashboard/scripts/dev-db.ts) | Local Postgres bootstrap, migrations, seeding, token application |
 | [`dashboard/supabase/migrations/`](../dashboard/supabase/migrations) | Applied in filename order |
 | [`dashboard/supabase/seed.sql`](../dashboard/supabase/seed.sql) | Development seed data |
@@ -187,4 +188,4 @@ These describe boards rather than this project's code.
   and is indexed in section 3c.
 
 ---
-Updated at 2026-11-19-11:52.
+Updated at 2026-11-20-12:05.

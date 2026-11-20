@@ -18,10 +18,10 @@
     "semantic_hash": "9650c5a8b43e5d07fd9ad8f6ff928b66"
   },
   "dashboard/src/App.tsx": {
-    "mtime": 1794934002.2514222,
-    "seen": 1794937121.7130523,
-    "ast_hash": "be2c65a739e7c44162354b97c2885ef7",
-    "semantic_hash": "be2c65a739e7c44162354b97c2885ef7"
+    "mtime": 1795150823.2941847,
+    "seen": 1795156546.4196467,
+    "ast_hash": "13d7c619f5c7aa907352617b10ce1cf1",
+    "semantic_hash": ""
   },
   "dashboard/src/auth.ts": {
     "mtime": 1790830385.3368845,
@@ -126,16 +126,16 @@
     "semantic_hash": "b81beebeb94487f7413df5062a501025"
   },
   "firmware/display-v9/link_serial.cpp": {
-    "mtime": 1794302675.03836,
-    "seen": 1794933030.6583226,
-    "ast_hash": "f4ffe9fad3a021689a3598ffaaa04e2b",
-    "semantic_hash": "f4ffe9fad3a021689a3598ffaaa04e2b"
+    "mtime": 1795080058.3451777,
+    "seen": 1795156546.4196885,
+    "ast_hash": "cd5a52645e007c5f276156455bfdffc0",
+    "semantic_hash": ""
   },
   "firmware/display-v9/link_serial.h": {
-    "mtime": 1794934594.343102,
-    "seen": 1794937121.7138405,
-    "ast_hash": "d763f91a2201b8bcdf8aeee2b7b73d34",
-    "semantic_hash": "d763f91a2201b8bcdf8aeee2b7b73d34"
+    "mtime": 1795080050.5816913,
+    "seen": 1795156546.4196894,
+    "ast_hash": "048f0af26dcfaa4f821af8afff8ebb7c",
+    "semantic_hash": ""
   },
   "firmware/display-v9/lv_conf.h": {
     "mtime": 1794302613.6442912,
@@ -432,9 +432,9 @@
     "semantic_hash": ""
   },
   "dashboard/index.html": {
-    "mtime": 1793765307.437567,
-    "seen": 1794285266.7459893,
-    "ast_hash": "cb5acfc7a04abc2eef11c644b0579c23",
+    "mtime": 1795150588.9447834,
+    "seen": 1795156546.419751,
+    "ast_hash": "cf725912a835fd8bb100d594af3a07be",
     "semantic_hash": ""
   },
   "docs/calibration.md": {
@@ -450,9 +450,9 @@
     "semantic_hash": ""
   },
   "docs/index.md": {
-    "mtime": 1795063988.5441322,
-    "seen": 1795075634.8295045,
-    "ast_hash": "ef869175a0dcd7ae16e378b86375fda6",
+    "mtime": 1795150935.6207225,
+    "seen": 1795156546.419768,
+    "ast_hash": "b9da163539bc8d127fd674bda60a9841",
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/templates/index.html": {
@@ -486,10 +486,10 @@
     "semantic_hash": "b08df680ef632c81670ed413ce759bec"
   },
   "dashboard/src/compare.ts": {
-    "mtime": 1793768689.2289896,
-    "seen": 1794933030.658259,
-    "ast_hash": "c6c6b337b7ad4e3ef188a4acf0a096c8",
-    "semantic_hash": "c6c6b337b7ad4e3ef188a4acf0a096c8"
+    "mtime": 1795150593.2634125,
+    "seen": 1795156546.4196527,
+    "ast_hash": "a66d0189bc550637c040d96035359d7c",
+    "semantic_hash": ""
   },
   "legacy/pi/water-control-system/flask_cli.py": {
     "mtime": 1793946388.9256334,
@@ -708,9 +708,9 @@
     "semantic_hash": ""
   },
   "docs/dashboard.md": {
-    "mtime": 1794935642.8130763,
-    "seen": 1795075634.829488,
-    "ast_hash": "b4e6b436d432e15d947144e9887bf08d",
+    "mtime": 1795151420.070742,
+    "seen": 1795156546.4197576,
+    "ast_hash": "2076fddecdfbfcba119427943b178414",
     "semantic_hash": ""
   },
   "docs/database.md": {
@@ -1023,6 +1023,12 @@
     "mtime": 1794934225.8713331,
     "seen": 1795075634.8295693,
     "ast_hash": "0e9a7e1d68fe5db6e269a9b281ae5a96",
+    "semantic_hash": ""
+  },
+  "dashboard/src/motion.ts": {
+    "mtime": 1795150503.7746556,
+    "seen": 1795156546.419661,
+    "ast_hash": "c82ae83480c0bdc6c2a2d42c0f3e9da8",
     "semantic_hash": ""
   }
 }
