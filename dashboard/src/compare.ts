@@ -14,9 +14,9 @@ import { formatExperimentId } from "./types/domain";
 export const MAX_COMPARE_SERIES = 4;
 
 /**
- * Series colours, in selection order. The first is the chart teal; the other
- * three are saturated blue, orange, and pink so overlapping series stand off
- * from each other and from the teal on a white sheet.
+ * Series colours, in selection order, read from the `--chart-1` to `--chart-4`
+ * tokens in styles.css: the magenta accent first, then blue, green, and amber,
+ * so overlapping series stand off from each other on a white sheet.
  */
 export const COMPARE_SERIES_COLORS = [
   "var(--chart-1)",
