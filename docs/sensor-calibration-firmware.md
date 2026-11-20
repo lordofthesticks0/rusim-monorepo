@@ -99,6 +99,24 @@ measure the chamber. See `hardware.md` §5.3.
 The sensor also needs about a minute of preheat after power-up before its output
 is meaningful.
 
+### Plotting a serial capture
+
+`firmware/co2-calibrate/plot_co2.py` builds a standalone HTML chart from a JSONL
+serial capture such as `firmware/co2-calibrate/co2.txt`:
+
+```bash
+python firmware/co2-calibrate/plot_co2.py
+```
+
+The default output is `firmware/co2-calibrate/co2-fluctuation.html`. Open it in
+a browser; hover or move a touch pointer over the chart to read the ppm values
+at each sample. The chart plots only `pins[].ppm`, labeled by the pin recorded
+in each row, against `uptime_ms`. Its min, mean and max summaries use available
+ppm values; null readings remain gaps and are not treated as zero. The HTML has
+no external dependencies. This reader supports the older `pins[]` log shape in
+`co2.txt`; the current `main.cpp` emits `ppm_0` through `ppm_3` instead, so do
+not treat the old capture as output from the current firmware.
+
 ## 3. `pressure-calibrate`
 
 `firmware/pressure-calibrate/main.cpp`. Reads an HX710B through the HX711 library
@@ -420,4 +438,4 @@ and the ADC share the 5 V rail, so a noisy or low 5 V supply moves every reading
 - `index.md` — the repository index and the rest of the docs.
 
 ---
-Updated at 2026-11-19-12:27.
+Updated at 2026-11-20-15:36.

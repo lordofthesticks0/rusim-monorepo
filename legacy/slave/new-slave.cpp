@@ -77,6 +77,22 @@ const float PH_V_401[NUM_BOTTLES] = {4.120f, 4.160f, 4.160f, 4.160f};
 const float PH_V_686[NUM_BOTTLES] = {3.833f, 3.833f, 3.833f, 3.833f};
 const float PH_V_918[NUM_BOTTLES] = {3.620f, 3.630f, 3.630f, 3.630f};
 
+// One ADC conversion is ~4.9 mV, which is ~0.05 pH here, and the probe buffer
+// is noisy. Average a burst and drop the highest and lowest sample so a single
+// switching spike cannot move the result. The samples are spread over 100 ms
+// (20 x 5 ms), which is a whole number of 50 Hz and 60 Hz cycles, so mains hum
+// averages to zero instead of aliasing into the reading. The first conversion
+// after the multiplexer moves is discarded, exactly as in updateAllMethane().
+const int   PH_SAMPLES      = 20;
+const int   PH_SAMPLE_GAP_MS = 5;
+// Voltages outside the calibrated span plus this margin are reported as
+// invalid (-1) instead of being clamped to 0 or 14. 0.15 V is roughly 1.5 pH
+// of headroom past each calibration point.
+const float PH_V_MARGIN = 0.15f;
+
+float ph_v_min[NUM_BOTTLES];
+float ph_v_max[NUM_BOTTLES];
+
 // ==========================================
 // 6. SENSOR OBJECTS & CACHED TELEMETRY
 // ==========================================
@@ -92,6 +108,7 @@ bool pressInitialized[NUM_BOTTLES]  = {false, false, false, false};
 
 // Latest valid readings sent immediately upon Master "#1:PING*"
 float cachedPh[NUM_BOTTLES]      = {-1.0f, -1.0f, -1.0f, -1.0f};
+float cachedPhV[NUM_BOTTLES]     = {-1.0f, -1.0f, -1.0f, -1.0f};
 float cachedMethane[NUM_BOTTLES] = {-1.0f, -1.0f, -1.0f, -1.0f};
 float cachedTemp[NUM_BOTTLES]    = {-999.0f, -999.0f, -999.0f, -999.0f};
 long  cachedCo2[NUM_BOTTLES]     = {-1, -1, -1, -1};
@@ -262,11 +279,13 @@ void updatePressure(int idx) {
 // ==========================================
 // Piecewise linear pH conversion, mirroring the Pi's old convert_ph_voltage():
 // acidic segment (4.01..6.86) above v_686, alkaline segment (6.86..9.18) at or
-// below it. 0 V and the 5 V rail are invalid, matching the Pi's guard, and a
-// NaN input fails the same test. Result is clamped to 0..14 and rounded to two
-// decimals, which is the value the Pi used to compute and the CSV records.
+// below it. A voltage outside the calibrated span plus PH_V_MARGIN is reported
+// as invalid (-1) rather than clamped, so a loose probe or an EMI spike reads
+// as a fault instead of a full-scale 0.00 or 14.00. The test is written as
+// !(v > min) so a NaN input is rejected too. Valid results are rounded to two
+// decimals, which is what the Pi computed and what the CSV records.
 float convertPhVoltage(float v, int idx) {
-  if (!(v > 0.0f) || v >= 5.0f) return -1.0f;
+  if (!(v > ph_v_min[idx]) || v > ph_v_max[idx]) return -1.0f;
   float ph;
   if (v > PH_V_686[idx]) {
     const float slope = (6.86f - 4.01f) / (PH_V_686[idx] - PH_V_401[idx]);
@@ -280,11 +299,34 @@ float convertPhVoltage(float v, int idx) {
   return roundf(ph * 100.0f) / 100.0f;
 }
 
+float readPhVoltage(int idx) {
+  // Discard the first conversion after the multiplexer moves: the
+  // sample-and-hold capacitor still holds the previous channel's voltage.
+  (void)analogRead(PIN_PH[idx]);
+
+  long sum = 0;
+  int  lo  = 1024;
+  int  hi  = -1;
+  for (int s = 0; s < PH_SAMPLES; s++) {
+    int raw = analogRead(PIN_PH[idx]);
+    sum += raw;
+    if (raw < lo) lo = raw;
+    if (raw > hi) hi = raw;
+    delay(PH_SAMPLE_GAP_MS);
+    serviceMasterPing();
+  }
+
+  // Trimmed mean: one high and one low sample are dropped.
+  const float rawAvg = (sum - lo - hi) / float(PH_SAMPLES - 2);
+  return rawAvg * (5.0f / 1023.0f);
+}
+
 void updatePhAndTemp() {
   for (int i = 0; i < NUM_BOTTLES; i++) {
-    int phRaw = analogRead(PIN_PH[i]);
-    // Raw 0 is 0 V, which convertPhVoltage() rejects along with the 5 V rail.
-    cachedPh[i] = convertPhVoltage(phRaw * (5.0f / 1023.0f), i);
+    const float v = readPhVoltage(i);
+    cachedPhV[i] = v;
+    cachedPh[i] = convertPhVoltage(v, i);
+    serviceMasterPing();
   }
 
   unsigned long now = millis();
@@ -353,6 +395,7 @@ void sendTelemetryJson(Stream &port) {
     JsonObject bottle = bottles.createNestedObject();
     bottle["id"]      = i + 1;
     bottle["ph"]      = cachedPh[i];
+    bottle["ph_v"]    = cachedPhV[i];
     bottle["methane"] = cachedMethane[i];
     bottle["temp"]    = cachedTemp[i];
     bottle["co2"]     = cachedCo2[i];
@@ -375,6 +418,9 @@ void setup() {
     pinMode(PIN_METHANE[i], INPUT);
     pinMode(PIN_PH[i], INPUT);
     pinMode(PIN_CO2_PWM[i], INPUT);
+
+    ph_v_min[i] = min(PH_V_918[i], PH_V_686[i]) - PH_V_MARGIN;
+    ph_v_max[i] = max(PH_V_401[i], PH_V_686[i]) + PH_V_MARGIN;
 
     ch4_cal_ok[i] = fitExponent(RS_AIR[i], PPM_AIR, RS_SPAN[i], PPM_SPAN[i], curve_exp[i]);
     if (ch4_cal_ok[i]) {
