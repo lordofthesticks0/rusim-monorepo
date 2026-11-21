@@ -7,7 +7,8 @@ compile_commands.json
 .env
 .zed/
 .backup/
-.agents
+.agents/
+.claude/
 *.env
 .opencode
 .cache/
