@@ -56,6 +56,10 @@
 #define UI_OVERHEAT_WARN_C 41.0f
 #define UI_OVERHEAT_TRIP_C 45.0f
 
+// Degree sign + C. The built-in Montserrat fonts include U+00B0 (but not
+// U+00B7, U+2026 or U+2212, so those characters must not be used in UI text).
+#define UI_DEG_C "\xC2\xB0" "C"
+
 #define FW_VERSION "v9.6-0.2.0"
 
 // Debug: general debug-build gate. Default ON for now; disable per-build
@@ -68,15 +72,40 @@
 
 // Palette (light background). UI_COL_TEXT is the primary foreground, so it is
 // near-black here; UI_COL_CARD doubles as the button fill and is white.
+// Colour meaning: UI_COL_ACCENT = tappable or selected, UI_COL_OK = running or
+// healthy, UI_COL_WARN = needs attention, UI_COL_ALARM = fault only. Idle and
+// off states use UI_COL_IDLE, never red. Text colours pass WCAG 4.5:1 on both
+// UI_COL_CARD and UI_COL_BG (docs/plans-and-audits/lvgl-ui-ux-audit.md, A4).
 #define UI_COL_BG 0xEEF2F7
 #define UI_COL_CARD 0xFFFFFF
 #define UI_COL_ACCENT 0x2C6E9B
-#define UI_COL_OK 0x1E8E4E
-#define UI_COL_WARN 0xB87314
+#define UI_COL_OK 0x17773F
+#define UI_COL_WARN 0x8F5A0C
 #define UI_COL_ALARM 0xC0392B
 #define UI_COL_DIM 0x5B6472
 #define UI_COL_TEXT 0x1B2330
-// Fill for the raised status bar, which must read as separate from UI_COL_BG.
+// Fill of an idle/off hold button (white icon on it is 6:1).
+#define UI_COL_IDLE 0x5B6472
+// Status bar fill; a 1 px UI_COL_LINE divider separates it from the page.
 #define UI_COL_BAR 0xDCE3EC
-// Fill for a button that is present but not usable (offline node).
+// Neutral 1 px border for cards and chart grid lines.
+#define UI_COL_LINE 0xC9D1DC
+// Fill for a button that is present but not usable (offline node, disabled).
 #define UI_COL_CARD_OFF 0xD5DBE3
+// Text on a disabled control (deliberately low contrast).
+#define UI_COL_DISABLED 0x97A1AE
+// Opaque modal backdrop. Opaque, so nothing under it is alpha-blended.
+#define UI_COL_SCRIM 0x2A313C
+
+// Layout grid. Status bar on top, content below; every page uses a 16 px
+// outer margin, a title row of UI_TITLE_H and cards from UI_PAGE_TOP down to
+// UI_PAGE_BOTTOM (content coordinates).
+#define UI_BAR_H 48
+#define UI_CONTENT_H (480 - UI_BAR_H)
+#define UI_MARGIN 16
+#define UI_PAGE_TOP 56
+#define UI_PAGE_BOTTOM (UI_CONTENT_H - UI_MARGIN)
+
+// Status-bar link chip: the WT32 counts as gone after this much silence
+// (it pushes NET/DB/SENS lines at least every few seconds).
+#define UI_LINK_SILENT_MS 15000UL

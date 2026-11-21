@@ -498,5 +498,42 @@ while no other sensor does; `N0/C2` in the bell list; `↵` as the back icon.
    (A6, A7) together with the in-place update refactor from 2.3, since both
    touch every screen builder.
 
+
+## 7. Implementation status (2026-11-21)
+
+Implemented in `firmware/display-v9/` unless listed below. Verified with
+`pio run -e display-v9 -e display-sim`, the host tests
+(`firmware/tests/display-sensors/run_tests.py`, 16 of 17 pass; the failing
+"trend / one point per new frame" test also fails on the commit before this
+work) and simulator screenshots (`SIM_SHOTS`, `display-sim.md`). Not yet
+checked on the panel.
+
+| Finding | Status |
+|---|---|
+| 2.1 Re-login stops run | Fixed: login success no longer touches run state |
+| 2.2 Reboot reports stopped | Fixed: EXPERIMENT boot gate + run adoption from `aexp`/`adur` (start time unknown, shown as such) |
+| 2.3 Full rebuild per frame | Fixed: every route updates in place |
+| 2.4 Experiment number reset | Fixed: suggestion only while idle, on DB change, never after an operator choice |
+| 2.5 Fake controls | Fixed: labelled "Display only" / "Not connected yet" |
+| 2.6 Wake tap | Fixed: waking touch swallowed. Timeout stays 60 s (locked decision) |
+| 3.1 Bell always red | Fixed: counts online nodes only |
+| 3.2 Wrong duration | Fixed: frozen/DB duration shown; duration locked while running |
+| 3.3 Home skips warnings | Fixed: shared status line on `/home` |
+| 3.4 Back skips a level | Fixed |
+| 3.5 Touch targets | Partly: tabs 100 × 40 with hit area to 48 px, steppers ≥ 56 × 52, back 56 × 40. The bar height limits tabs to about 6.5 mm |
+| 3.6 Stepper repeat | Fixed: auto-repeat; experiment number accelerates to steps of 10 |
+| 3.7 Pressed feedback | Fixed |
+| 3.8 Colour-only hold state | Fixed: grey idle, state in words, hold hints, stirrer icon changed |
+| 3.9, 3.10 Developer tools | Kept for now (decision 2026-11-21) |
+| 3.11 LOGINREQ yanks route | Fixed: modal + chip; returns to the previous route |
+| 3.12 No link status | Fixed: status-bar link chip |
+| 4.1 Clock | Removed; the bar shows the link chip, pages have titles |
+| 4.2–4.4, 4.6–4.11 | Fixed |
+| 4.5 Trend chart | Partly: auto-ranged Y axis, min/max and "Now", no dots, selected NULL stays red. The 12 min window and the wipe after a 90 s outage are unchanged (`backlog.md`) |
+| A1–A12 | Implemented (§15 of `display-docs.md`). A5 uses the built-in Montserrat 40 instead of a digits-only subset |
+
+Added at the same time on request: **Stirrers** and **Water pump** hold
+buttons on `/control` (display only; transport in `backlog.md`).
+
 ---
-Updated at 2026-11-21-13:58.
+Updated at 2026-11-21-14:22.

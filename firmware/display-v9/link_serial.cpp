@@ -22,6 +22,15 @@ static bool s_expRunning = false;
 static int s_expNum = 0;
 static bool s_expValid = false;
 static bool s_expLogged = false;
+// Boot gate: a freshly booted display does not know whether the WT32 is in the
+// middle of a run, so it must not declare "run=0" (which stops the run) before
+// the WT32 has reported its state. EXPERIMENT stays silent until the UI has
+// seen the first DB line and called link_serial_exp_release().
+static bool s_expGate = true;
+static bool s_firstDbSeen = false;
+static bool s_firstDbPending = false;
+// millis() of the last complete line from the WT32; 0 = never.
+static uint32_t s_lastRxMs = 0;
 
 static bool s_loginReq = false;
 static bool s_loginReqPending = false;
@@ -104,6 +113,7 @@ static void write_line(const char *line) {
 static void emit_hello() { write_line("HELLO"); }
 
 static void emit_experiment() {
+  if (s_expGate) return;
   char line[64];
   snprintf(line, sizeof(line), "EXPERIMENT run=%d num=%d dur=%d",
            s_expRunning ? 1 : 0, s_expNum, s_durationH);
@@ -262,6 +272,10 @@ static void handle_db(const char *args) {
   strncpy(s_dbState, stateRaw, sizeof(s_dbState) - 1);
   s_dbState[sizeof(s_dbState) - 1] = '\0';
   s_dbStampMs = millis();
+  if (!s_firstDbSeen) {
+    s_firstDbSeen = true;
+    s_firstDbPending = true;
+  }
   (void)parse_age(args, "reads", s_dbReadSeen, s_dbReadAge0);
   (void)parse_age(args, "ack", s_dbAckSeen, s_dbAckAge0);
 }
@@ -336,6 +350,8 @@ static void handle_log(const char *payload) {
 }
 
 static void handle_line(char *line) {
+  s_lastRxMs = millis();
+  if (s_lastRxMs == 0) s_lastRxMs = 1;  // 0 is reserved for "never"
   // LOG is the only word whose payload may contain spaces; handle it first.
   if (strncmp(line, "LOG ", 4) == 0) {
     handle_log(line + 4);
@@ -394,6 +410,9 @@ void link_serial_init() {
   delay(20);
   while (Serial1.available()) Serial1.read();
   s_lastBeatMs = millis();
+  s_expGate = true;
+  s_firstDbSeen = false;
+  s_firstDbPending = false;
   Serial.printf("[LINK] line link on Serial1 RX=%d TX=%d %d 8N1 (rusim-line v1)\n",
                 LINK_UART_RX_PIN, LINK_UART_TX_PIN, LINK_UART_BAUD);
   emit_hello();
@@ -455,6 +474,29 @@ void link_serial_set_exp_state(bool running, int expNum, int durationH) {
 }
 
 void link_serial_emit_experiment() { emit_experiment(); }
+
+bool link_serial_take_first_db() {
+  bool v = s_firstDbPending;
+  s_firstDbPending = false;
+  return v;
+}
+
+void link_serial_exp_release() {
+  if (!s_expGate) return;
+  s_expGate = false;
+  s_lastBeatMs = millis();
+  Serial.println("[LINK] WT32 state known, EXPERIMENT released");
+  if (s_expValid) emit_experiment();
+}
+
+bool link_serial_exp_released() { return !s_expGate; }
+
+uint32_t link_serial_rx_age_ms() {
+  if (s_lastRxMs == 0) return 0xFFFFFFFFu;
+  return millis() - s_lastRxMs;
+}
+
+bool link_serial_login_requested() { return s_loginReq; }
 
 
 

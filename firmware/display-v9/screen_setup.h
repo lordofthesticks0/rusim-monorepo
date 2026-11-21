@@ -9,3 +9,4 @@
 #include <lvgl.h>
 void screen_setup_show(lv_obj_t *parent);
 void screen_setup_poll();  // call each loop(): master requests + results
+void screen_setup_hide();

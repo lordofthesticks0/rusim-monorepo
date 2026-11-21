@@ -94,6 +94,9 @@ void fake_init() {
   g.durationH = UI_DURATION_DEFAULT_H;
   g.tempSetpointC = UI_TEMP_DEFAULT_C;
   g.stirrerOn = false;
+  g.pumpOn = false;
+  g.expNumUserSet = false;
+  g.runStartUnknown = false;
   g.postEnabled = true;
   // SENS contains bottle temperatures, not a separate chamber measurement.
   g.chamberTempC = NAN;
@@ -121,6 +124,26 @@ int fake_null_count() {
 
 bool fake_any_null() { return fake_null_count() > 0; }
 
+int fake_bottle_null_count(int c, int b) {
+  int n = 0;
+  for (int s = 0; s < S_COUNT; s++)
+    if (g.cluster[c].bottle[b].sensorNull[s]) n++;
+  return n;
+}
+
+int fake_alarm_count_node(int c) {
+  if (!g.cluster[c].online) return 0;
+  int n = 0;
+  for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) n += fake_bottle_null_count(c, b);
+  return n;
+}
+
+int fake_alarm_count() {
+  int n = 0;
+  for (int c = 0; c < UI_CLUSTERS; c++) n += fake_alarm_count_node(c);
+  return n;
+}
+
 const char *fake_sensor_value_text(int c, int b, int s, char *out, size_t n) {
   const BottleFake &bt = g.cluster[c].bottle[b];
   if (bt.sensorNull[s] || !isfinite(bt.sensor[s])) {
@@ -134,7 +157,7 @@ const char *fake_sensor_value_text(int c, int b, int s, char *out, size_t n) {
       snprintf(out, n, "%.0f", v);
       break;
     case S_PRESS:
-      snprintf(out, n, "%+.2f", v);
+      snprintf(out, n, "%.2f", v);
       break;
     case S_PH:
       snprintf(out, n, "%.2f", v);

@@ -1,7 +1,9 @@
 #pragma once
 
-// Shared round hold-to-confirm button. Used by /control (stirrer, run) and
-// /home (run). Replaces the old lv_switch + lv_bar hold pairs.
+// Shared round hold-to-confirm button (2000 ms, progress ring). Used by
+// /control (run, stirrers, water pump) and /home (run). On = UI_COL_OK fill,
+// off/idle = UI_COL_IDLE fill; red is reserved for faults. Callers show the
+// state in words next to the button, because colour alone is not enough.
 #include <lvgl.h>
 
 typedef void (*UiHoldFn)(void *user);

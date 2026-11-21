@@ -51,7 +51,7 @@ static void hold_commit(HoldBtnCtx *ctx) {
   ctx->completed = true;
   ctx->state = !ctx->state;
   if (ctx->btn != nullptr) {
-    lv_obj_set_style_bg_color(ctx->btn, lv_color_hex(ctx->state ? UI_COL_OK : UI_COL_ALARM),
+    lv_obj_set_style_bg_color(ctx->btn, lv_color_hex(ctx->state ? UI_COL_OK : UI_COL_IDLE),
                               LV_PART_MAIN);
   }
   if (ctx->timer != nullptr) {
@@ -170,7 +170,7 @@ lv_obj_t *ui_hold_button_create(lv_obj_t *parent, int x, int y, int size,
   lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(btn, initial ? lv_color_hex(UI_COL_OK) : lv_color_hex(UI_COL_ALARM),
+  lv_obj_set_style_bg_color(btn, initial ? lv_color_hex(UI_COL_OK) : lv_color_hex(UI_COL_IDLE),
                            LV_PART_MAIN);
 
   HoldBtnCtx *ctx = new HoldBtnCtx();
@@ -204,7 +204,7 @@ void ui_hold_button_set_state(lv_obj_t *btn, bool on) {
   if (btn == nullptr) return;
   HoldBtnCtx *ctx = (HoldBtnCtx *)lv_obj_get_user_data(btn);
   if (ctx != nullptr) ctx->state = on;
-  lv_obj_set_style_bg_color(btn, on ? lv_color_hex(UI_COL_OK) : lv_color_hex(UI_COL_ALARM),
+  lv_obj_set_style_bg_color(btn, on ? lv_color_hex(UI_COL_OK) : lv_color_hex(UI_COL_IDLE),
                            LV_PART_MAIN);
 }
 

@@ -1,5 +1,10 @@
 # LVGL UI redesign (`display-v9`)
 
+> **Superseded as-built record (2026-11-21).** The layout, colours, status bar
+> and refresh model described below were replaced by the implementation of
+> `lvgl-ui-ux-audit.md`. Current layout and rules: `../display-docs.md` §3,
+> §4 and §15. This file is kept for the history of the decisions.
+
 Working document for the UI redesign. Every state and tab the `display-v9` build
 has today gets its own section. The **As built** block records what the code does
 now, so a redesign can be argued against facts. The **Redesign** table under each
@@ -1435,4 +1440,4 @@ pio run -e display-v9
 ```
 
 ---
-Updated at 2026-11-17-23:47.
+Updated at 2026-11-21-14:22.

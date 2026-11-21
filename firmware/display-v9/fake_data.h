@@ -40,7 +40,14 @@ struct AppState {
   int expNum;
   int durationH;
   float tempSetpointC;
-  bool stirrerOn;
+  bool stirrerOn;  // display-only until the stirrer transport exists (backlog)
+  bool pumpOn;     // display-only until the water pump transport exists (backlog)
+  // True once the operator picked the experiment number (stepper or USB EXP).
+  // The DB "next free id" suggestion never overrides it; cleared on run start.
+  bool expNumUserSet;
+  // True when the run was adopted from the WT32 after a display reboot, so the
+  // start time (and therefore elapsed time) is not known on this display.
+  bool runStartUnknown;
   bool postEnabled;
   float chamberTempC;  // NAN until a separate chamber measurement is available
   ClusterFake cluster[UI_CLUSTERS];
@@ -58,9 +65,15 @@ void fake_init();  // initializes controls; all measured values start unavailabl
 bool sens_apply_real();
 // True while the applied WT32 sensor feed is live.
 bool sens_real_active();
+// Every NULL field in every capacity slot (120 at boot). Diagnostics only.
 int fake_null_count();
+// NULL fields that count as alerts: only bottles on nodes that are online.
+// Slots on offline nodes are "not connected", not faults. Drives the bell.
+int fake_alarm_count();
+int fake_alarm_count_node(int c);  // same rule, one node
+int fake_bottle_null_count(int c, int b);
 bool fake_any_null();
 const char *fake_sensor_text(int c, int b, int s, char *out, size_t n);
-// The reading alone, unit omitted ("38.2", "+1.04", "--"). Used by the big
+// The reading alone, unit omitted ("38.2", "1.04", "--"). Used by the big
 // number on the chamber detail tiles, where the unit sits in the caption.
 const char *fake_sensor_value_text(int c, int b, int s, char *out, size_t n);

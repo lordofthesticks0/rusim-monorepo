@@ -26,6 +26,18 @@ void link_serial_set_exp_state(bool running, int expNum, int durationH) {
   s_durationH = durationH;
 }
 void link_serial_emit_experiment() {}
+// The sim has no WT32: report one (empty) first DB line so the UI releases
+// the boot gate, and a link that has never been heard from.
+static bool s_firstDb = true;
+bool link_serial_take_first_db() {
+  bool v = s_firstDb;
+  s_firstDb = false;
+  return v;
+}
+void link_serial_exp_release() {}
+bool link_serial_exp_released() { return true; }
+uint32_t link_serial_rx_age_ms() { return 0xFFFFFFFFu; }
+bool link_serial_login_requested() { return false; }
 bool link_serial_take_result(int &out) {
   if (s_result == LINK_RESULT_NONE) return false;
   out = s_result;
