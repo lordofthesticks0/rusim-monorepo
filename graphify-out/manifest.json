@@ -1,542 +1,536 @@
 {
   "dashboard/index.tsx": {
-    "mtime": 1792652495.5578544,
-    "seen": 1795233883.7098496,
-    "ast_hash": "6212c703f71cbdc5805706200780ed69",
+    "mtime": 1790171585.0117533,
+    "seen": 1795252950.2983007,
+    "ast_hash": "684fcdcc410ada0d076f0fb9df78ab63",
     "semantic_hash": ""
   },
   "dashboard/package.json": {
-    "mtime": 1792652495.5578544,
-    "seen": 1795233883.7098496,
-    "ast_hash": "fba96027b870eb367174f4edbe3a09d5",
+    "mtime": 1792058374.0192862,
+    "seen": 1795252950.2983072,
+    "ast_hash": "f94a6f1a8dbfa0d09592841b6c67373e",
     "semantic_hash": ""
   },
   "dashboard/scripts/dev-db.ts": {
-    "mtime": 1792988462.8730361,
-    "seen": 1795233883.7098496,
-    "ast_hash": "b1ebe72079dd81c262473205231427d3",
+    "mtime": 1792834881.5953887,
+    "seen": 1795252950.2983098,
+    "ast_hash": "9650c5a8b43e5d07fd9ad8f6ff928b66",
     "semantic_hash": ""
   },
   "dashboard/src/App.tsx": {
-    "mtime": 1795161542.1331165,
-    "seen": 1795233883.7098496,
-    "ast_hash": "10e969805b20683e519af8e09cc635a9",
+    "mtime": 1795235264.200674,
+    "seen": 1795252950.2983115,
+    "ast_hash": "15bcd7ae2125a5bc8708596a7abbd460",
     "semantic_hash": ""
   },
   "dashboard/src/auth.ts": {
-    "mtime": 1792652495.5578544,
-    "seen": 1795233883.7098496,
-    "ast_hash": "9e2d59ef82d2e2e580ee8680e4cb9277",
+    "mtime": 1795234631.1496646,
+    "seen": 1795252950.2983127,
+    "ast_hash": "1b026aabe975e11b8bfb6967b9e45a67",
     "semantic_hash": ""
   },
   "dashboard/src/chambers.ts": {
-    "mtime": 1792988462.8748622,
-    "seen": 1795233883.7098496,
-    "ast_hash": "4c6b3138c50a33e4b96a2a76f6755a15",
+    "mtime": 1792834881.5953887,
+    "seen": 1795252950.2983136,
+    "ast_hash": "4f74e9200bb2bc3bc2de5987c98c23fc",
     "semantic_hash": ""
   },
   "dashboard/src/csv.test.ts": {
-    "mtime": 1794290682.2214408,
-    "seen": 1795233883.7098496,
-    "ast_hash": "2b3f853474684e6190de2159a8bfadc7",
+    "mtime": 1794284834.8750074,
+    "seen": 1795252950.298318,
+    "ast_hash": "985d098fee1488080959b1d2a857baad",
     "semantic_hash": ""
   },
   "dashboard/src/csv.ts": {
-    "mtime": 1792988462.875937,
-    "seen": 1795233883.7098496,
-    "ast_hash": "87331592096d2f150b0b24ea7be8e122",
+    "mtime": 1792834881.5983887,
+    "seen": 1795252950.2983186,
+    "ast_hash": "3a32f7d33a269b9b438d05f896751f24",
     "semantic_hash": ""
   },
   "dashboard/src/data.ts": {
-    "mtime": 1794290682.2224424,
-    "seen": 1795233883.7098496,
-    "ast_hash": "a0ea2c46717630333b530540016919bc",
+    "mtime": 1795235260.9966648,
+    "seen": 1795252950.2983193,
+    "ast_hash": "1450f2c2a4a928502fa96bcb99aacccc",
     "semantic_hash": ""
   },
   "dashboard/src/history.test.ts": {
-    "mtime": 1792988462.8775067,
-    "seen": 1795233883.7098496,
-    "ast_hash": "596ff63e75a4d78a9eafe66cbfd77fa5",
+    "mtime": 1792834881.5983887,
+    "seen": 1795252950.298324,
+    "ast_hash": "2e3f76889bb5b9c05a32c8b330103a5b",
     "semantic_hash": ""
   },
   "dashboard/src/history.ts": {
-    "mtime": 1792652495.5578544,
-    "seen": 1795233883.7098496,
-    "ast_hash": "cd1891c0dc0fa1ed4cac3bbc0754c57f",
+    "mtime": 1792058374.0222862,
+    "seen": 1795252950.2983253,
+    "ast_hash": "032654056c2a10055223d343c7a7c79d",
     "semantic_hash": ""
   },
   "dashboard/src/monitoring.test.ts": {
-    "mtime": 1793779314.2728367,
-    "seen": 1795233883.7098496,
-    "ast_hash": "c9c615b6ebdc982333164c4864c6d200",
+    "mtime": 1793766909.0934994,
+    "seen": 1795252950.298326,
+    "ast_hash": "26809f119d0f49416fa1c457a7d8579a",
     "semantic_hash": ""
   },
   "dashboard/src/monitoring.ts": {
-    "mtime": 1793779314.273837,
-    "seen": 1795233883.7098496,
-    "ast_hash": "f824cecc6c984b659108932b777f1db8",
+    "mtime": 1793768134.0165274,
+    "seen": 1795252950.298327,
+    "ast_hash": "938645b518a5b60b81d4ac84fa76ca53",
     "semantic_hash": ""
   },
   "dashboard/src/supabase.ts": {
-    "mtime": 1794975602.953862,
-    "seen": 1795233883.7098496,
-    "ast_hash": "100586ce44020dc7b6ad93307dbdd1da",
+    "mtime": 1794934002.2523828,
+    "seen": 1795252950.2983296,
+    "ast_hash": "5759ba493afa63880e42f59843d0b03b",
     "semantic_hash": ""
   },
   "dashboard/src/types/database.ts": {
-    "mtime": 1792652495.573498,
-    "seen": 1795233883.7098496,
-    "ast_hash": "37b5a91d70a03316513f7e1f71ec3938",
+    "mtime": 1790818333.534511,
+    "seen": 1795252950.2983303,
+    "ast_hash": "20ff976648d4ca92c0aa51be9c011a23",
     "semantic_hash": ""
   },
   "dashboard/src/types/domain.ts": {
-    "mtime": 1792988462.8775067,
-    "seen": 1795233883.7108603,
-    "ast_hash": "c7b1f266d2a27f035d5f96d7056cd3d5",
+    "mtime": 1792834881.5993886,
+    "seen": 1795252950.298331,
+    "ast_hash": "cec21566c5f2656b9a75643d082b4693",
     "semantic_hash": ""
   },
   "dashboard/tsconfig.json": {
-    "mtime": 1792652495.5891097,
-    "seen": 1795233883.7108603,
-    "ast_hash": "d45713f9f4314dd4af31765b7e3682e1",
+    "mtime": 1790171585.0127432,
+    "seen": 1795252950.298332,
+    "ast_hash": "b5033ca2784e67c9fc2dbd55f1bbec8d",
     "semantic_hash": ""
   },
   "dashboard/vite.config.ts": {
-    "mtime": 1792652495.5891097,
-    "seen": 1795233883.7108603,
-    "ast_hash": "f58d3d8efa2d341e9cf803692984ce65",
+    "mtime": 1790171585.0127432,
+    "seen": 1795252950.298333,
+    "ast_hash": "bfdb1be23b6f7f8ac9714199033fd7c3",
     "semantic_hash": ""
   },
   "firmware/co2-calibrate/main.cpp": {
-    "mtime": 1794838130.1756961,
-    "seen": 1795233883.7108603,
-    "ast_hash": "eda74b6ec4857f0893bf7a86b6f19b3a",
+    "mtime": 1794645220.5340228,
+    "seen": 1795252950.2983336,
+    "ast_hash": "34ff80c546f16048f4fae3c2fe3ad728",
     "semantic_hash": ""
   },
   "firmware/display-v9/fake_data.cpp": {
-    "mtime": 1795147793.4001544,
-    "seen": 1795233883.7108603,
-    "ast_hash": "fd56fdb9fd0227c2b0ab30f8a23cb40e",
+    "mtime": 1795245381.9265964,
+    "seen": 1795252950.2983348,
+    "ast_hash": "eb07f02f9acb069e756a956920ac0bc5",
     "semantic_hash": ""
   },
   "firmware/display-v9/fake_data.h": {
-    "mtime": 1794838130.1756961,
-    "seen": 1795233883.7108603,
-    "ast_hash": "494a257064adae2af6cac057391e4b6f",
+    "mtime": 1795245381.9268124,
+    "seen": 1795252950.2983356,
+    "ast_hash": "b1e6080c2343f04680c0acab4ca1409c",
     "semantic_hash": ""
   },
   "firmware/display-v9/link_serial.cpp": {
-    "mtime": 1795161542.1391187,
-    "seen": 1795233883.7108603,
-    "ast_hash": "b5c8fa3d4feebd928cd9c524038f2315",
+    "mtime": 1795244916.4596884,
+    "seen": 1795252950.2983363,
+    "ast_hash": "3a18a9ab77e8078b30c8dc37cee9cb28",
     "semantic_hash": ""
   },
   "firmware/display-v9/link_serial.h": {
-    "mtime": 1795161542.140118,
-    "seen": 1795233883.7108603,
-    "ast_hash": "1261f10372ed7296561c2ba6b6f52dbb",
+    "mtime": 1795244916.460099,
+    "seen": 1795252950.298337,
+    "ast_hash": "42233d367546591e4a6d533c1528be5f",
     "semantic_hash": ""
   },
   "firmware/display-v9/lv_conf.h": {
-    "mtime": 1794838130.1756961,
-    "seen": 1795233883.7108603,
-    "ast_hash": "142f9cf83749986221bdcdbf8cda2033",
+    "mtime": 1795245458.7533438,
+    "seen": 1795252950.298338,
+    "ast_hash": "3f5a3a7f50e2512a522119bbd91af7d4",
     "semantic_hash": ""
   },
   "firmware/display-v9/main.cpp": {
-    "mtime": 1794975602.982729,
-    "seen": 1795233883.7108603,
-    "ast_hash": "281b280a8a8ef07cbcd4b873d07fdaac",
+    "mtime": 1795244939.8910196,
+    "seen": 1795252950.298339,
+    "ast_hash": "effbfbf5280d7c9cb777a33f526b57ab",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_control.cpp": {
-    "mtime": 1794838130.1756961,
-    "seen": 1795233883.7108603,
-    "ast_hash": "3d729f72164d00f65aa727f6a3065755",
+    "mtime": 1795245300.8851335,
+    "seen": 1795252950.2983396,
+    "ast_hash": "777aa7e856d588fa75b6bc7bbd344022",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_control.h": {
-    "mtime": 1792652495.6359968,
-    "seen": 1795233883.7108603,
-    "ast_hash": "ca0787f47ced59ccd6bc8527b5a52610",
+    "mtime": 1795245131.719769,
+    "seen": 1795252950.2983403,
+    "ast_hash": "c62e37d75c3c17a5b2ac82d7fcf318b1",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_data.cpp": {
-    "mtime": 1795147793.4011633,
-    "seen": 1795233883.7108603,
-    "ast_hash": "7f15e23459d935c5092c7e2a7f1bc302",
+    "mtime": 1795245609.184997,
+    "seen": 1795252950.298341,
+    "ast_hash": "14553edbe9ba440fc17b2cdfa19c2b37",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_data.h": {
-    "mtime": 1792652495.6359968,
-    "seen": 1795233883.7108603,
-    "ast_hash": "9d40678dabffcd9b2ed4519677ac50b0",
+    "mtime": 1795245131.7217193,
+    "seen": 1795252950.2983422,
+    "ast_hash": "74617c65955f058c0ddbef72557256c7",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_home.cpp": {
-    "mtime": 1794838130.1925898,
-    "seen": 1795233883.7108603,
-    "ast_hash": "211e088d345dc5e63bdbfdcf2574eea8",
+    "mtime": 1795245574.9256723,
+    "seen": 1795252950.298343,
+    "ast_hash": "deb0f2440a9bfaf24b7e4ef244b6ae8c",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_home.h": {
-    "mtime": 1792652495.6359968,
-    "seen": 1795233883.7108603,
-    "ast_hash": "73b30b9a5ac448da85ff90b6a74512e5",
+    "mtime": 1795245131.7187836,
+    "seen": 1795252950.2983437,
+    "ast_hash": "1afdd89222e2ab4c8d5c5626fa15929b",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_info.cpp": {
-    "mtime": 1794838130.192824,
-    "seen": 1795233883.7108603,
-    "ast_hash": "50e13322d6dfdc6622b7cbecce0a10dd",
+    "mtime": 1795245580.032955,
+    "seen": 1795252950.2983444,
+    "ast_hash": "e1fb712c4a6a8be0be3caf3148456300",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_info.h": {
-    "mtime": 1792652495.6359968,
-    "seen": 1795233883.7108603,
-    "ast_hash": "b1bdf3f1b08da8e9d276f10171633628",
+    "mtime": 1795245131.7207308,
+    "seen": 1795252950.2983456,
+    "ast_hash": "0489551398150e73646a56bc40503ff4",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_setup.cpp": {
-    "mtime": 1794838130.192824,
-    "seen": 1795233883.7108603,
-    "ast_hash": "50be113357405d8a298bf616c81494f4",
+    "mtime": 1795245450.1381826,
+    "seen": 1795252950.2983463,
+    "ast_hash": "af72dcd146343f7f0229e692aa6be27b",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_setup.h": {
-    "mtime": 1794838130.192824,
-    "seen": 1795233883.7108603,
-    "ast_hash": "634e4182e9a9620505236a192075da80",
+    "mtime": 1795245131.7325585,
+    "seen": 1795252950.298347,
+    "ast_hash": "60a9a10f5a6a0e0d6ab379e60538a5c0",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_sleep.cpp": {
-    "mtime": 1794838130.192824,
-    "seen": 1795233883.7108603,
-    "ast_hash": "1db954c6180beedd8920bffa80e0cc3d",
+    "mtime": 1795244939.8764899,
+    "seen": 1795252950.2983477,
+    "ast_hash": "ff0dac678ce7e856ecdd6a153683c5d7",
     "semantic_hash": ""
   },
   "firmware/display-v9/screen_sleep.h": {
-    "mtime": 1794838130.192824,
-    "seen": 1795233883.7108603,
-    "ast_hash": "12cd360f082bf39a988874cc97579f14",
+    "mtime": 1795244939.87449,
+    "seen": 1795252950.2983484,
+    "ast_hash": "3d368969fcf5de5b8c6f7e40f4a7094c",
     "semantic_hash": ""
   },
   "firmware/display-v9/serial_cmd.cpp": {
-    "mtime": 1794838130.192824,
-    "seen": 1795233883.7108603,
-    "ast_hash": "bda1dbbeb3bb17578d49211b620cff4a",
+    "mtime": 1795245485.2552667,
+    "seen": 1795252950.2983496,
+    "ast_hash": "8929cff9b3f7bfb391cd948666543370",
     "semantic_hash": ""
   },
   "firmware/display-v9/serial_cmd.h": {
-    "mtime": 1794975602.982729,
-    "seen": 1795233883.7108603,
-    "ast_hash": "31add2e1a4b0839d8dc5e1645b265d70",
+    "mtime": 1794934002.2558029,
+    "seen": 1795252950.2983503,
+    "ast_hash": "fc7fed16d6b856bdf5f3a51a1cd3709f",
     "semantic_hash": ""
   },
   "firmware/display-v9/sim/Arduino.h": {
-    "mtime": 1792652495.6359968,
-    "seen": 1795233883.7108603,
-    "ast_hash": "c461b3e12bd0b5d69eccdbf1c2a36fda",
+    "mtime": 1792040366.8105354,
+    "seen": 1795252950.298351,
+    "ast_hash": "de05e83308c1fd91f3f86b6b44f94808",
     "semantic_hash": ""
   },
   "firmware/display-v9/sim/lv_conf.h": {
-    "mtime": 1792652495.6359968,
-    "seen": 1795233883.7108603,
-    "ast_hash": "2e77ec3358ae1d704672149321ec0da4",
+    "mtime": 1795245520.9570017,
+    "seen": 1795252950.2983532,
+    "ast_hash": "ae84059334939f8542d8362fa9257f9e",
     "semantic_hash": ""
   },
   "firmware/display-v9/sim/main_native.cpp": {
-    "mtime": 1794838130.192824,
-    "seen": 1795233883.7108603,
-    "ast_hash": "ed552d81aafeafa7e625aac92e7f1785",
+    "mtime": 1795245485.2554765,
+    "seen": 1795252950.2983541,
+    "ast_hash": "a7556089b74f41f9a9ce421fa54c4d98",
     "semantic_hash": ""
   },
   "firmware/display-v9/touch.h": {
-    "mtime": 1792652495.6359968,
-    "seen": 1795233883.7108603,
+    "mtime": 1790136410.4251816,
+    "seen": 1795252950.298355,
     "ast_hash": "ab0b9cfefa55119ca907b4f6ada89d8a",
     "semantic_hash": "ab0b9cfefa55119ca907b4f6ada89d8a"
   },
   "firmware/display-v9/ui_config.h": {
-    "mtime": 1795147793.402155,
-    "seen": 1795233883.7108603,
-    "ast_hash": "22b11f5841f80170d1476e688c981be2",
+    "mtime": 1795245131.7108674,
+    "seen": 1795252950.2983563,
+    "ast_hash": "969ef042005447fcd3a4f6a518ad9558",
     "semantic_hash": ""
   },
   "firmware/display-v9/ui_hold_button.cpp": {
-    "mtime": 1792652495.6359968,
-    "seen": 1795233883.7108603,
-    "ast_hash": "9f51ea60ce57e9ffad866f8e24b69700",
+    "mtime": 1795244956.6486554,
+    "seen": 1795252950.298357,
+    "ast_hash": "1301298bdca43f4c9289b9a8713edfda",
     "semantic_hash": ""
   },
   "firmware/display-v9/ui_hold_button.h": {
-    "mtime": 1792652495.6359968,
-    "seen": 1795233883.7108603,
-    "ast_hash": "1af93472d6fe7d71807bb3b8588af5b6",
+    "mtime": 1795244956.65248,
+    "seen": 1795252950.298358,
+    "ast_hash": "43e1ae2f7f53436fa9c1e2b700d25f71",
     "semantic_hash": ""
   },
   "firmware/display-v9/ui_shell.cpp": {
-    "mtime": 1794303691.822625,
-    "seen": 1795233883.7108603,
-    "ast_hash": "7f878dbd3a7d9e1ea80211072d74f614",
+    "mtime": 1795245609.1842983,
+    "seen": 1795252950.2983587,
+    "ast_hash": "a927b5e83fef665b49a27f1f078adfb1",
     "semantic_hash": ""
   },
   "firmware/display-v9/ui_shell.h": {
-    "mtime": 1794303691.822625,
-    "seen": 1795233883.7108603,
-    "ast_hash": "d17431c52469363d8fd2570d6f01010f",
+    "mtime": 1795245014.8304448,
+    "seen": 1795252950.2983596,
+    "ast_hash": "4860918a7dc559d7978d03246da59d64",
     "semantic_hash": ""
   },
   "firmware/methane-calibrate/main.cpp": {
-    "mtime": 1794838130.192824,
-    "seen": 1795233883.7108603,
-    "ast_hash": "ce2fe6974156b24cc09780f26cd0bd5a",
+    "mtime": 1794823049.771448,
+    "seen": 1795252950.2983603,
+    "ast_hash": "6571ad8618632ceb4a07f086fb29933b",
     "semantic_hash": ""
   },
   "firmware/motor-driver/main.cpp": {
-    "mtime": 1792652495.6516206,
-    "seen": 1795233883.7108603,
-    "ast_hash": "60e2187aca123f93c24bd24874aff80c",
+    "mtime": 1791194726.5185268,
+    "seen": 1795252950.298361,
+    "ast_hash": "d33a49edb6ec0ea1a60b89b24314bdf2",
     "semantic_hash": ""
   },
   "firmware/network-master/main.cpp": {
-    "mtime": 1795147793.404164,
-    "seen": 1795233883.7108603,
-    "ast_hash": "c920f709e14284530d20d391d24826b3",
+    "mtime": 1795235882.1629453,
+    "seen": 1795252950.298363,
+    "ast_hash": "e6fbabe1008eeddc44a5b609046d56dc",
     "semantic_hash": ""
   },
   "firmware/network-master/supabase_ca.h": {
-    "mtime": 1794975602.9857228,
-    "seen": 1795233883.7108603,
-    "ast_hash": "91e11be9bc923d10100055277e3f299f",
+    "mtime": 1794934594.3093877,
+    "seen": 1795252950.298364,
+    "ast_hash": "6464bb6f7b14585d1bef0dd733af4bd0",
     "semantic_hash": ""
   },
   "firmware/pressure-calibrate/main.cpp": {
-    "mtime": 1794838130.192824,
-    "seen": 1795233883.7108603,
-    "ast_hash": "68865decea7a3f1237af01c8de74aec8",
+    "mtime": 1794470810.7033882,
+    "seen": 1795252950.2983654,
+    "ast_hash": "74d1231af0a71e48c52e1ba42228cbb1",
     "semantic_hash": ""
   },
   "firmware/temp-probe/main.cpp": {
-    "mtime": 1792652495.6516206,
-    "seen": 1795233883.7108603,
-    "ast_hash": "06d203e1223464bf8f508f7d9e7d7966",
+    "mtime": 1792474510.526096,
+    "seen": 1795252950.2983665,
+    "ast_hash": "ab164e1ede6502e3e8f336b0688e2c9a",
     "semantic_hash": ""
   },
   "firmware/wt32-eth01_captive-recon/main.cpp": {
-    "mtime": 1792652495.6516206,
-    "seen": 1795233883.7108603,
-    "ast_hash": "8b1424d66a1c3ea3d2c4ad309fb5a158",
+    "mtime": 1790923706.335703,
+    "seen": 1795252950.298375,
+    "ast_hash": "74caa6ed051bc1ac77582d36dc86d775",
     "semantic_hash": ""
   },
   "gen-compile-db.sh": {
-    "mtime": 1793199649.5327506,
-    "seen": 1795233883.7108603,
-    "ast_hash": "e65e010ccf0c9dfd9657dc4107a770ec",
+    "mtime": 1793161794.3165867,
+    "seen": 1795252950.2983756,
+    "ast_hash": "1bf9cb761abef6af5094b514fdeb6869",
     "semantic_hash": ""
   },
   "legacy/master/master.cpp": {
-    "mtime": 1795233785.6205451,
-    "seen": 1795233883.7108603,
-    "ast_hash": "416096d2a3baaa8dba107de429859d88",
+    "mtime": 1795235838.3379357,
+    "seen": 1795252950.2983768,
+    "ast_hash": "ec5c76e20648141b460dfa5dbc012408",
     "semantic_hash": ""
   },
   "legacy/pi/captive-portal-login.sh": {
-    "mtime": 1793433334.703962,
-    "seen": 1795233883.7108603,
-    "ast_hash": "8970af98e6edf4b06572a7a653cf96b8",
+    "mtime": 1795238343.922671,
+    "seen": 1795252950.2983775,
+    "ast_hash": "a1486516cf427e1a127f510d59e3b97c",
     "semantic_hash": ""
   },
   "legacy/pi/install-leaf.sh": {
-    "mtime": 1792747939.9226334,
-    "seen": 1795233883.7108603,
-    "ast_hash": "dcd5e4bbd753a9d47a6098b4d67aef81",
+    "mtime": 1792742733.885183,
+    "seen": 1795252950.2983785,
+    "ast_hash": "be20d2e2d4300128454ff2fc07560950",
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/web_control.py": {
-    "mtime": 1795233785.6225467,
-    "seen": 1795233883.7108603,
-    "ast_hash": "d5d7a716a94eac08aef0e726650b4ea8",
+    "mtime": 1795235838.3384473,
+    "seen": 1795252950.2983816,
+    "ast_hash": "e4c3d178f85365be5a920cc18993591b",
     "semantic_hash": ""
   },
   "legacy/slave/new-slave.cpp": {
-    "mtime": 1795233712.801071,
-    "seen": 1795233883.7108603,
-    "ast_hash": "8f2a734f160c911362ff007e2d0ca00d",
+    "mtime": 1795164949.5126812,
+    "seen": 1795252950.2983823,
+    "ast_hash": "370bf2eda104529e087052df024a4355",
     "semantic_hash": ""
   },
   "scripts-hardware/flash-factory.ts": {
-    "mtime": 1792652495.6672435,
-    "seen": 1795233883.7108603,
-    "ast_hash": "088808a2bce11ae21c54f1a34928c2d9",
+    "mtime": 1790844076.9911537,
+    "seen": 1795252950.2983835,
+    "ast_hash": "2901b0f2c28d3305b160131a98df0b8d",
     "semantic_hash": ""
   },
   "scripts-hardware/monitor-legacy-pi.ts": {
-    "mtime": 1792988462.9157488,
-    "seen": 1795233883.7108603,
-    "ast_hash": "9bf0f82647250361ae50eec64aa4370b",
+    "mtime": 1792743855.4292052,
+    "seen": 1795252950.2983851,
+    "ast_hash": "27b4e8c117f301fecb4b57f8591ee7b1",
     "semantic_hash": ""
   },
   "scripts-hardware/network-master-passthrough.py": {
-    "mtime": 1794975603.0045977,
-    "seen": 1795233883.7108603,
-    "ast_hash": "d0ec6729c8fbbce373c9d57b0a26a113",
+    "mtime": 1794934002.2607074,
+    "seen": 1795252950.2983859,
+    "ast_hash": "9ad82202bd1883d426eff27342ba36d2",
     "semantic_hash": ""
   },
   "scripts-hardware/read-legacy-slave.ts": {
-    "mtime": 1792988462.9240372,
-    "seen": 1795233883.7108603,
-    "ast_hash": "193dfb95f882459c57dc9fa84101e959",
+    "mtime": 1792832773.619977,
+    "seen": 1795252950.298387,
+    "ast_hash": "e363048d64b0c0105fd9329499e067d6",
     "semantic_hash": ""
   },
   "skills-lock.json": {
-    "mtime": 1794975603.0045977,
-    "seen": 1795233883.7108603,
-    "ast_hash": "93b826b2d21778fdd0b813f86de67115",
-    "semantic_hash": ""
-  },
-  "sync_pi.sh": {
-    "mtime": 1792663364.7519464,
-    "seen": 1795233883.7108603,
-    "ast_hash": "75643486b4e6ad219a71573b8995e132",
+    "mtime": 1794904297.5711465,
+    "seen": 1795252950.2983878,
+    "ast_hash": "d681da42645f115925b28c45e4aae99a",
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1794975602.9518614,
-    "seen": 1795233883.7108603,
-    "ast_hash": "b72678a37233ec95a366494d1908a818",
+    "mtime": 1794937457.57471,
+    "seen": 1795252950.2983885,
+    "ast_hash": "c5cffdc200b51556a59bdbce70b1d624",
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1795147793.3931515,
-    "seen": 1795233883.7108603,
-    "ast_hash": "f882c94ecb7dc9329a07898a3f868696",
+    "mtime": 1794984050.7475436,
+    "seen": 1795252950.2983894,
+    "ast_hash": "b4f434fcb8b663130f6966d1a4706cca",
     "semantic_hash": ""
   },
   "backlog.md": {
-    "mtime": 1795233712.7990708,
-    "seen": 1795233883.7108603,
-    "ast_hash": "c47518de99fd5550bc4ed4a536ceed3f",
+    "mtime": 1795245817.0793164,
+    "seen": 1795252950.2983904,
+    "ast_hash": "b7524433a5ff7d259200f29ef8494f73",
     "semantic_hash": ""
   },
   "dashboard/index.html": {
-    "mtime": 1795161542.1321156,
-    "seen": 1795233883.7108603,
-    "ast_hash": "2bfc11de82f9a62fdfefb99c5dec454b",
+    "mtime": 1795252648.3448722,
+    "seen": 1795252950.298391,
+    "ast_hash": "55975f66be1d56b8e342470699a4a4f2",
     "semantic_hash": ""
   },
   "docs/calibration.md": {
-    "mtime": 1794975602.9558618,
-    "seen": 1795233883.7108603,
-    "ast_hash": "66bd140f36efe9cee0309ef8c102737e",
+    "mtime": 1794936184.1548278,
+    "seen": 1795252950.2983947,
+    "ast_hash": "f76c876427df768f6684b594cb18cb2f",
     "semantic_hash": ""
   },
   "docs/hardware.md": {
-    "mtime": 1794838130.1618176,
-    "seen": 1795233883.7108603,
-    "ast_hash": "7c91a8701bef31756ef56a0577b3f82b",
+    "mtime": 1794383088.9256713,
+    "seen": 1795252950.2984056,
+    "ast_hash": "ed1d26ae41a94778b76ce89b1d1cf2aa",
     "semantic_hash": ""
   },
   "docs/index.md": {
-    "mtime": 1795232860.5827074,
-    "seen": 1795233883.7108603,
-    "ast_hash": "642912d533aee2a5e4fbd7136fbd7084",
+    "mtime": 1795244379.572615,
+    "seen": 1795252950.2984064,
+    "ast_hash": "1bf82430bbccf02ef0491f2cd4c603c4",
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/templates/index.html": {
-    "mtime": 1795233773.058762,
-    "seen": 1795233883.7108603,
+    "mtime": 1795235838.3381774,
+    "seen": 1795252950.2984488,
     "ast_hash": "73ee676234f3932a9b8b5c1fc811cb9a",
     "semantic_hash": ""
   },
   "firmware/tests/pwm-50-hold/main.cpp": {
-    "mtime": 1793351470.6662035,
-    "seen": 1795233883.7108603,
-    "ast_hash": "b5389c31532ef54726a88045f824ce47",
+    "mtime": 1793264396.2139387,
+    "seen": 1795252950.2983716,
+    "ast_hash": "99feae45c8acaaa6fcf2344ff778d8f3",
     "semantic_hash": ""
   },
   "firmware/tests/water-level/main.cpp": {
-    "mtime": 1793779314.2878428,
-    "seen": 1795233883.7108603,
-    "ast_hash": "d992e9d590a328c00b9d7bdad8603935",
+    "mtime": 1793424851.667958,
+    "seen": 1795252950.2983742,
+    "ast_hash": "39b23dc9ab3a91af1cba598ba25faa55",
     "semantic_hash": ""
   },
   "scripts-hardware/legacy-master-usb.ts": {
-    "mtime": 1793779314.304845,
-    "seen": 1795233883.7108603,
-    "ast_hash": "9f7a73287da23dec86674972721c65a7",
+    "mtime": 1793766580.9449096,
+    "seen": 1795252950.2983844,
+    "ast_hash": "1d671a8416631d1bbc6e2a0fe98865b5",
     "semantic_hash": ""
   },
   "dashboard/src/compare.test.ts": {
-    "mtime": 1793779314.2718375,
-    "seen": 1795233883.7098496,
-    "ast_hash": "0debc95e16f076c25c8fe6f129a52110",
+    "mtime": 1793768078.9204488,
+    "seen": 1795252950.2983153,
+    "ast_hash": "b08df680ef632c81670ed413ce759bec",
     "semantic_hash": ""
   },
   "dashboard/src/compare.ts": {
-    "mtime": 1795161542.134116,
-    "seen": 1795233883.7098496,
-    "ast_hash": "6282f5e0c3e5687445565bc211ba4155",
+    "mtime": 1795252789.6013057,
+    "seen": 1795252950.2983167,
+    "ast_hash": "332c01b29ca7f372f6d4fd48b1271cd9",
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/flask_cli.py": {
-    "mtime": 1793954622.7175097,
-    "seen": 1795233883.7108603,
-    "ast_hash": "09a1afa653a900d043c5e43dbebe57a6",
+    "mtime": 1793946388.9256334,
+    "seen": 1795252950.2983806,
+    "ast_hash": "d5abb58513e9c24cc805d11076b1a96b",
     "semantic_hash": ""
   },
   "firmware/tests/test_methane_calibration.py": {
-    "mtime": 1793954622.6881685,
-    "seen": 1795233883.7108603,
-    "ast_hash": "a357e73ddf1f532fc83cd1f3f310c118",
+    "mtime": 1793953741.9942122,
+    "seen": 1795252950.2983732,
+    "ast_hash": "862c23b378366ada4ff78586073f9e5d",
     "semantic_hash": ""
   },
   "firmware/network-master/db_contract.h": {
-    "mtime": 1794975602.9837246,
-    "seen": 1795233883.7108603,
-    "ast_hash": "87e3de2975d03d719962fcbd925ead03",
+    "mtime": 1795235868.8722262,
+    "seen": 1795252950.298362,
+    "ast_hash": "8a1d89c88cac1198d3f8db551705bc6b",
     "semantic_hash": ""
   },
   "firmware/tests/db-contract/main.cpp": {
-    "mtime": 1794975602.986715,
-    "seen": 1795233883.7108603,
-    "ast_hash": "74474574994e8c2edab4ac22a11f8cc0",
+    "mtime": 1795235889.229013,
+    "seen": 1795252950.2983673,
+    "ast_hash": "6c8690a869a5dd1397c6d7661730bf6c",
     "semantic_hash": ""
   },
   "firmware/display-v9/sim/link_stub.cpp": {
-    "mtime": 1794838130.192824,
-    "seen": 1795233883.7108603,
-    "ast_hash": "4af4943e3ae514b79d457e675cdd8785",
+    "mtime": 1795244926.0083117,
+    "seen": 1795252950.2983525,
+    "ast_hash": "a35a7416a20f253363acf3b9d00f7f76",
     "semantic_hash": ""
   },
   "firmware/tests/display-sensors/Arduino.h": {
-    "mtime": 1794303691.8246813,
-    "seen": 1795233883.7108603,
-    "ast_hash": "ea19ab82e94d57759e07da4b346e59b0",
+    "mtime": 1794292591.6049943,
+    "seen": 1795252950.298368,
+    "ast_hash": "a7201d23277be657c4b64a7b0b043b1e",
     "semantic_hash": ""
   },
   "firmware/tests/display-sensors/lvgl.h": {
-    "mtime": 1794303691.8246813,
-    "seen": 1795233883.7108603,
-    "ast_hash": "98a32cf5e1b99298cd47b7e876127f93",
+    "mtime": 1795245636.96807,
+    "seen": 1795252950.2983687,
+    "ast_hash": "0a61ac58bdb8136d3f2d14094eacc6b0",
     "semantic_hash": ""
   },
   "firmware/tests/display-sensors/run_tests.py": {
-    "mtime": 1794303691.8246813,
-    "seen": 1795233883.7108603,
-    "ast_hash": "ca167f08ee0ab7f70cf30bdac0f984cd",
+    "mtime": 1794292591.6159942,
+    "seen": 1795252950.29837,
+    "ast_hash": "c3198552d665b229987f52074c966bdb",
     "semantic_hash": ""
   },
   "firmware/tests/display-sensors/test_display_sensors.cpp": {
-    "mtime": 1794838130.206939,
-    "seen": 1795233883.7108603,
-    "ast_hash": "79e423ffde282293b92d3d174da6b9ff",
+    "mtime": 1795245675.0287848,
+    "seen": 1795252950.2983706,
+    "ast_hash": "d05ef5120731e6bc402fecb7548be806",
     "semantic_hash": ""
   },
   "firmware/tests/pwm-pins-readout/main.cpp": {
-    "mtime": 1794975602.986715,
-    "seen": 1795233883.7108603,
-    "ast_hash": "89568505840f78f4442e5046775e2bfb",
+    "mtime": 1794930395.2702162,
+    "seen": 1795252950.2983723,
+    "ast_hash": "07826b00192ea1ed0558defec3276388",
     "semantic_hash": ""
   },
   "dashboard/supabase/migrations/20260927093901_create_mvp_schema.sql": {
@@ -648,381 +642,411 @@
     "semantic_hash": ""
   },
   "firmware/ph-calibrate/main.cpp": {
-    "mtime": 1795147793.4051542,
-    "seen": 1795233883.7108603,
-    "ast_hash": "ae2db83fd4e4ab8cbbac5257039718be",
+    "mtime": 1795068354.5024443,
+    "seen": 1795252950.2983646,
+    "ast_hash": "10e1db99a3e5e2077d6763664c89cf97",
     "semantic_hash": ""
   },
   "docs/SUNTON-luna.md": {
-    "mtime": 1794975602.9548614,
-    "seen": 1795233883.7108603,
-    "ast_hash": "a2660f3e6d755e55b2dc642fce86a946",
+    "mtime": 1794934225.8481615,
+    "seen": 1795252950.298392,
+    "ast_hash": "658d491aa681d8ad987768b0aa539059",
     "semantic_hash": ""
   },
   "docs/SUNTON-qwen.md": {
-    "mtime": 1794975602.9548614,
-    "seen": 1795233883.7108603,
-    "ast_hash": "80a3273991c6650c1c490de752fd6893",
+    "mtime": 1794934225.84983,
+    "seen": 1795252950.2983928,
+    "ast_hash": "dd519a2b8035097c312a6c9a8b5ec6f5",
     "semantic_hash": ""
   },
   "docs/atmega2560-mega-mini.md": {
-    "mtime": 1794975602.9558618,
-    "seen": 1795233883.7108603,
-    "ast_hash": "eb3b5dfcdfe3a9ac2557116a5ee40ce3",
+    "mtime": 1794934225.850797,
+    "seen": 1795252950.298394,
+    "ast_hash": "0060056166fe069886c2d08e3f55533c",
     "semantic_hash": ""
   },
   "docs/captive-portal-login-script.md": {
-    "mtime": 1794975602.956862,
-    "seen": 1795233883.7108603,
-    "ast_hash": "6220b8df306c50835d403e35e0a73466",
+    "mtime": 1795238467.3138158,
+    "seen": 1795252950.2983954,
+    "ast_hash": "796b92a5b57343a2c3d72aca766324fc",
     "semantic_hash": ""
   },
   "docs/compile-commands.md": {
-    "mtime": 1794975602.956862,
-    "seen": 1795233883.7108603,
-    "ast_hash": "23a6d9f18e6a9d666d507a492e01c9d8",
+    "mtime": 1794934225.8535664,
+    "seen": 1795252950.298396,
+    "ast_hash": "dfeca39aaa189df49f7f7d945ff6c0f8",
     "semantic_hash": ""
   },
   "docs/dashboard.md": {
-    "mtime": 1795161542.1371174,
-    "seen": 1795233883.7108603,
-    "ast_hash": "672a5d3cd2f7f559b0149d32ffbda47c",
+    "mtime": 1795252789.6013057,
+    "seen": 1795252950.2983973,
+    "ast_hash": "4abcd002b1224f3a7784bfb4d5eaca84",
     "semantic_hash": ""
   },
   "docs/database.md": {
-    "mtime": 1794975602.9578624,
-    "seen": 1795233883.7108603,
-    "ast_hash": "9cd9c2ee5de9a7e66bb5883ff9d9f7f0",
+    "mtime": 1794935642.7886183,
+    "seen": 1795252950.2983983,
+    "ast_hash": "d40450afba1de4108e89567f1a7b31a8",
     "semantic_hash": ""
   },
   "docs/db-sync-experiment-ntp.md": {
-    "mtime": 1794975602.9588635,
-    "seen": 1795233883.7108603,
-    "ast_hash": "df4b69a513e982351ddf98b3cec59de6",
+    "mtime": 1794935642.821965,
+    "seen": 1795252950.298399,
+    "ast_hash": "88d71926c6cd6421416650be3100edb0",
     "semantic_hash": ""
   },
   "docs/display-debug-flag.md": {
-    "mtime": 1794975602.9588635,
-    "seen": 1795233883.7108603,
-    "ast_hash": "6432b18cfdd41a56aecf543b408fd82e",
+    "mtime": 1794934225.8566587,
+    "seen": 1795252950.2984,
+    "ast_hash": "ed24816ed62f66b10e50c16926f8a8ec",
     "semantic_hash": ""
   },
   "docs/display-docs.md": {
-    "mtime": 1795147793.3951533,
-    "seen": 1795233883.7108603,
-    "ast_hash": "a6792403bdf6af31e5b510478dba3676",
+    "mtime": 1795245770.8150473,
+    "seen": 1795252950.2984009,
+    "ast_hash": "31d4a1fc8baf4e6f81f776da250701d7",
     "semantic_hash": ""
   },
   "docs/display-lvgl-9-6-port.md": {
-    "mtime": 1794975602.9598653,
-    "seen": 1795233883.7108603,
-    "ast_hash": "67c78e6a5c8c405723db8be2cb1c4259",
+    "mtime": 1794934225.8581128,
+    "seen": 1795252950.2984016,
+    "ast_hash": "d6a0d23aaf3440d89a7450f495c587d7",
     "semantic_hash": ""
   },
   "docs/display-provisioning-ap.md": {
-    "mtime": 1794975602.9598653,
-    "seen": 1795233883.7108603,
-    "ast_hash": "02b7df8610948374eb7cbcdec4fd188c",
+    "mtime": 1794934225.858298,
+    "seen": 1795252950.2984023,
+    "ast_hash": "c5fcd750b63e1c3149a109a6a46b81a2",
     "semantic_hash": ""
   },
   "docs/display-sim.md": {
-    "mtime": 1794975602.9608629,
-    "seen": 1795233883.7108603,
-    "ast_hash": "bcbc4d2981a873b652c85363e33e1cae",
+    "mtime": 1795245782.9606755,
+    "seen": 1795252950.298403,
+    "ast_hash": "8562659e8629837bf03bb89546d8cffe",
     "semantic_hash": ""
   },
   "docs/display-wt32-link.md": {
-    "mtime": 1794975602.9618628,
-    "seen": 1795233883.7108603,
-    "ast_hash": "90d37b49c1f19f2920079bf0e82ca748",
+    "mtime": 1794935642.7961323,
+    "seen": 1795252950.2984037,
+    "ast_hash": "cfd090b91e135e49c804ec1e35af4541",
     "semantic_hash": ""
   },
   "docs/flash-factory-tool.md": {
-    "mtime": 1794975602.9618628,
-    "seen": 1795233883.7108603,
-    "ast_hash": "acfa986a1a129954d81d577f6e06008a",
+    "mtime": 1794935642.7833946,
+    "seen": 1795252950.298405,
+    "ast_hash": "af09999088cb90a7d2d4a71d5083d7ac",
     "semantic_hash": ""
   },
   "docs/learned-mistakes.md": {
-    "mtime": 1795232860.5837238,
-    "seen": 1795233883.7108603,
-    "ast_hash": "3f2d6d7b7f6d2bdb65bf9ab332abed9f",
+    "mtime": 1795164259.0357032,
+    "seen": 1795252950.298407,
+    "ast_hash": "19dce5d4300e872c9fcd46d62d514561",
     "semantic_hash": ""
   },
   "docs/legacy-flask-cli.md": {
-    "mtime": 1794975602.9628632,
-    "seen": 1795233883.7108603,
-    "ast_hash": "f75c354e38b354519ff66d688fb2f286",
+    "mtime": 1794934225.8618693,
+    "seen": 1795252950.298408,
+    "ast_hash": "da53dab8be764ddd99b000d59c49081c",
     "semantic_hash": ""
   },
   "docs/legacy-master-usb-tool.md": {
-    "mtime": 1794975602.9638643,
-    "seen": 1795233883.7108603,
-    "ast_hash": "03ac60e67ae0c05accfd7a6fb7ee968c",
+    "mtime": 1794934225.8623564,
+    "seen": 1795252950.298409,
+    "ast_hash": "c4cef202ca91304529fb771e5433e3fe",
     "semantic_hash": ""
   },
   "docs/legacy-master.md": {
-    "mtime": 1795233860.7821295,
-    "seen": 1795233883.7108603,
-    "ast_hash": "dc60834a3c8e58b82e8dc4f3ded2d8c9",
+    "mtime": 1795235838.3329995,
+    "seen": 1795252950.2984097,
+    "ast_hash": "9dfa8af85576e1ed97d4900e07277cd1",
     "semantic_hash": ""
   },
   "docs/legacy-pi-remote-monitor.md": {
-    "mtime": 1794975602.964725,
-    "seen": 1795233883.7108603,
-    "ast_hash": "463134212ea83869ea973b5e8debfc74",
+    "mtime": 1794934225.8641067,
+    "seen": 1795252950.2984107,
+    "ast_hash": "31284142ef350aeeecf22c022f5e3c25",
     "semantic_hash": ""
   },
   "docs/legacy-slave-json-wrapper.md": {
-    "mtime": 1794975602.964725,
-    "seen": 1795233883.7108603,
-    "ast_hash": "2f8cfe03f89066ae37c9987b76e230bd",
+    "mtime": 1794934225.8644803,
+    "seen": 1795252950.2984118,
+    "ast_hash": "aa77770b891dee6b4e67f5adaba8d9dc",
     "semantic_hash": ""
   },
   "docs/legacy-slave.md": {
-    "mtime": 1795233712.8000703,
-    "seen": 1795233883.7108603,
-    "ast_hash": "a199475e5ef067b00052292a722a0deb",
+    "mtime": 1795164958.6343086,
+    "seen": 1795252950.2984128,
+    "ast_hash": "ddf8e3fdedbaf899feca494842c0b37b",
     "semantic_hash": ""
   },
   "docs/link-serial-protocol.md": {
-    "mtime": 1795147793.3961532,
-    "seen": 1795233883.7108603,
-    "ast_hash": "8e20e9da7ef6a471cc4d3f57812356aa",
+    "mtime": 1795245835.5232365,
+    "seen": 1795252950.2984135,
+    "ast_hash": "4e7ad9dc6eb9c4fe3e04a465fa2ce05d",
     "semantic_hash": ""
   },
   "docs/memory-safety-hardening.md": {
-    "mtime": 1794975602.9667184,
-    "seen": 1795233883.7108603,
-    "ast_hash": "f66696d06c16674ec8f478911a545f64",
+    "mtime": 1794935642.7991996,
+    "seen": 1795252950.2984147,
+    "ast_hash": "4e557ae38178ec888131d1f3a4d4c33f",
     "semantic_hash": ""
   },
   "docs/network-master.md": {
-    "mtime": 1795147793.3971624,
-    "seen": 1795233883.7108603,
-    "ast_hash": "759d0a0e50e5806c9bcd07bc712d9625",
+    "mtime": 1795235910.7098715,
+    "seen": 1795252950.2984164,
+    "ast_hash": "e8e46936fd9a3032a98d7f0742b382e8",
     "semantic_hash": ""
   },
   "docs/pi-kiosk-font-scale.md": {
-    "mtime": 1794975602.9677188,
-    "seen": 1795233883.7108603,
-    "ast_hash": "39d5d0db966e71946426057ac2a34228",
+    "mtime": 1794935642.8099663,
+    "seen": 1795252950.298417,
+    "ast_hash": "d21785b00b79d8e58ed80da33f2fc831",
     "semantic_hash": ""
   },
   "docs/pi-kiosk-ui-css-redesign.md": {
-    "mtime": 1794975602.9677188,
-    "seen": 1795233883.7108603,
-    "ast_hash": "6cf59a159beb95e10c038dd5f9d9e99f",
+    "mtime": 1794934225.8694065,
+    "seen": 1795252950.2984183,
+    "ast_hash": "250c9e71d82b5da6452442caae002fc8",
     "semantic_hash": ""
   },
   "docs/pi-sync-script.md": {
-    "mtime": 1794975602.9677188,
-    "seen": 1795233883.7108603,
-    "ast_hash": "237428fe240f822de3844b1c58903f7e",
+    "mtime": 1794934225.869525,
+    "seen": 1795252950.298419,
+    "ast_hash": "3a55d6f254ad3b9ca7abb76a0b8371d1",
     "semantic_hash": ""
   },
   "docs/pi-water-control-system-mirror.md": {
-    "mtime": 1794975602.968719,
-    "seen": 1795233883.7108603,
-    "ast_hash": "606ac727f06a10dbe034994afe61270a",
+    "mtime": 1794935642.8064446,
+    "seen": 1795252950.29842,
+    "ast_hash": "df7b54a957eedf439b3c22979d83af87",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/captive-portal-workaround.md": {
-    "mtime": 1794975602.9697192,
-    "seen": 1795233883.7108603,
-    "ast_hash": "d7ada7185b4b776ff7fc1c36ab0453c7",
+    "mtime": 1794934463.9967248,
+    "seen": 1795252950.298421,
+    "ast_hash": "0d592efd0121c82d6e55e0b06edbd418",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/comms-rework-plan.md": {
-    "mtime": 1794975602.9697192,
-    "seen": 1795233883.7108603,
-    "ast_hash": "7947d3a4f22855a7fd5fdc90cdd936c4",
+    "mtime": 1794934463.9973576,
+    "seen": 1795252950.2984219,
+    "ast_hash": "36d11773a812eb317919c772c32a7210",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/display-info-reboot.md": {
-    "mtime": 1794975602.9707193,
-    "seen": 1795233883.7108603,
-    "ast_hash": "c0f6a88ca697770c6e7f351ff0443508",
+    "mtime": 1794934225.8578365,
+    "seen": 1795252950.2984226,
+    "ast_hash": "fa34a98fd4b99c4d7bb5914804c2c269",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/documentation-review-legacy.md": {
-    "mtime": 1794975602.9707193,
-    "seen": 1795233883.7108603,
-    "ast_hash": "48b0608daf5ba2e845a248b7f484abe2",
+    "mtime": 1794935701.6578524,
+    "seen": 1795252950.2984235,
+    "ast_hash": "c2c1472197e141cb5fd13b716e54ee04",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/esp-db-sync.md": {
-    "mtime": 1794975602.971728,
-    "seen": 1795233883.7108603,
-    "ast_hash": "63050311c6a48c3678e1e00238ec00a3",
+    "mtime": 1794934463.9991176,
+    "seen": 1795252950.2984242,
+    "ast_hash": "88f06ff4eb7a79424bd34259c40fe1bc",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/lvgl-redesign.md": {
-    "mtime": 1794975602.971728,
-    "seen": 1795233883.7108603,
-    "ast_hash": "894300ce8a5d768514c931d6f2eabf56",
+    "mtime": 1795245794.1889753,
+    "seen": 1795252950.2984252,
+    "ast_hash": "38066b66a1a2b6b0362e9a7f14dae832",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/migration-notes.md": {
-    "mtime": 1794975602.9727201,
-    "seen": 1795233883.7108603,
-    "ast_hash": "9934aa22812ea5222cf22186a8092080",
+    "mtime": 1794935642.8164756,
+    "seen": 1795252950.298427,
+    "ast_hash": "eb7205d3ec0243ca426498c9cb86fbe3",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/migration-plan.md": {
-    "mtime": 1794975602.9727201,
-    "seen": 1795233883.7108603,
-    "ast_hash": "897706842acdbe854a8d9b8debf8e3ab",
+    "mtime": 1794934464.002912,
+    "seen": 1795252950.298428,
+    "ast_hash": "2e91ee8271ba1bc6382f74251e32f4a3",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/network-master-database-plan.md": {
-    "mtime": 1794975602.9737234,
-    "seen": 1795233883.7108603,
-    "ast_hash": "d4d5cb1adcac16dcf961f050507c2a1b",
+    "mtime": 1794934565.9703476,
+    "seen": 1795252950.298429,
+    "ast_hash": "4c97da6c9d69537ee9a445f8d56e8a90",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/security-report.md": {
-    "mtime": 1794975602.9737234,
-    "seen": 1795233883.7108603,
-    "ast_hash": "c2161cc2b219337d0a322323949180b2",
+    "mtime": 1794934389.2226474,
+    "seen": 1795252950.29843,
+    "ast_hash": "96e4b2863db66ac173adcf4af4d97a25",
     "semantic_hash": ""
   },
   "docs/platformio-environments.md": {
-    "mtime": 1795147793.3981628,
-    "seen": 1795233883.7108603,
-    "ast_hash": "547aa63fdc2050ed7f894450244d5f32",
+    "mtime": 1795063988.5441322,
+    "seen": 1795252950.298431,
+    "ast_hash": "c001d0ab44cccd0eea7f5ba69ae7398c",
     "semantic_hash": ""
   },
   "docs/raspi-docs/01-hardware-and-os.md": {
-    "mtime": 1794975602.974721,
-    "seen": 1795233883.7108603,
-    "ast_hash": "2f0be5bb52a123e936cb93717f335904",
+    "mtime": 1794934225.871625,
+    "seen": 1795252950.2984328,
+    "ast_hash": "f84511dc10f9fdabdf932680d339a8fa",
     "semantic_hash": ""
   },
   "docs/raspi-docs/02-boot-and-kiosk.md": {
-    "mtime": 1794975602.974721,
-    "seen": 1795233883.7108603,
-    "ast_hash": "4fcb60569425f052e7a3e9f47a7ad8b5",
+    "mtime": 1794934225.8717284,
+    "seen": 1795252950.2984335,
+    "ast_hash": "e77b0527b3cdb4c27e6991383aa97319",
     "semantic_hash": ""
   },
   "docs/raspi-docs/03-project-overview.md": {
-    "mtime": 1794975602.9757214,
-    "seen": 1795233883.7108603,
-    "ast_hash": "6a23d13315c6e40959b027ee56173e08",
+    "mtime": 1794934225.8718102,
+    "seen": 1795252950.2984345,
+    "ast_hash": "bb72cfbfe6a72ed93effe27649ac65a2",
     "semantic_hash": ""
   },
   "docs/raspi-docs/04-backend-web-control.md": {
-    "mtime": 1795233860.7851298,
-    "seen": 1795233883.7108603,
-    "ast_hash": "9c34632c35db6df092bfd5d5131139de",
+    "mtime": 1795235838.3331702,
+    "seen": 1795252950.2984357,
+    "ast_hash": "425f0b2a0432a4b793336d2bf7464ccc",
     "semantic_hash": ""
   },
   "docs/raspi-docs/05-frontend-ui.md": {
-    "mtime": 1795233860.7871287,
-    "seen": 1795233883.7108603,
-    "ast_hash": "c6dbf0dd4760701fa8e4246082ff5c9c",
+    "mtime": 1795235838.3332763,
+    "seen": 1795252950.2984364,
+    "ast_hash": "5810cfd11560e279ac0549798a9c5993",
     "semantic_hash": ""
   },
   "docs/raspi-docs/06-master-firmware.md": {
-    "mtime": 1795233860.7881305,
-    "seen": 1795233883.7108603,
-    "ast_hash": "6506b17c35b81bbb53f4188e5696fd9c",
+    "mtime": 1795235838.3334064,
+    "seen": 1795252950.2984374,
+    "ast_hash": "0a4b2327de61a3e4c1528f08664a7afa",
     "semantic_hash": ""
   },
   "docs/raspi-docs/07-data-and-logging.md": {
-    "mtime": 1794975602.977721,
-    "seen": 1795233883.7108603,
-    "ast_hash": "42500f8570cfb2fcc783c9b2eb8c5df2",
+    "mtime": 1794934225.8725123,
+    "seen": 1795252950.298438,
+    "ast_hash": "d12f711cbad4a8a4afa9e12eeff6e57e",
     "semantic_hash": ""
   },
   "docs/raspi-docs/08-auxiliary-tools.md": {
-    "mtime": 1794975602.977721,
-    "seen": 1795233883.7108603,
-    "ast_hash": "c2c811cc6913f21b462f62a734bc45dd",
+    "mtime": 1794934225.8726094,
+    "seen": 1795252950.298439,
+    "ast_hash": "ac577c55789810c6989ff24b6d2fb4ff",
     "semantic_hash": ""
   },
   "docs/raspi-docs/09-network-and-services.md": {
-    "mtime": 1794975602.977721,
-    "seen": 1795233883.7108603,
-    "ast_hash": "bbe794a96df9b58c6462d1a917868eb4",
+    "mtime": 1794934225.8726873,
+    "seen": 1795252950.2984397,
+    "ast_hash": "4cf1d9dd9e775268b3ac788c1d295c28",
     "semantic_hash": ""
   },
   "docs/raspi-docs/10-security-and-caveats.md": {
-    "mtime": 1794975602.9787219,
-    "seen": 1795233883.7108603,
-    "ast_hash": "3791900655d6a6de9090cbf9e391d9bc",
+    "mtime": 1794934225.8727734,
+    "seen": 1795252950.2984407,
+    "ast_hash": "01976a4e792a024256c077e9072f13fe",
     "semantic_hash": ""
   },
   "docs/raspi-docs/11-key-paths.md": {
-    "mtime": 1794975602.9787219,
-    "seen": 1795233883.7108603,
-    "ast_hash": "56087884e9cf4941b7907aca97b2734b",
+    "mtime": 1794934225.873043,
+    "seen": 1795252950.2984416,
+    "ast_hash": "941b635f5a2c84128a1d51ebbd312971",
     "semantic_hash": ""
   },
   "docs/raspi-docs/12-copies-and-git-state.md": {
-    "mtime": 1794975602.9787219,
-    "seen": 1795233883.7108603,
-    "ast_hash": "34b07b9d710c2facf933e336a0bd88c1",
+    "mtime": 1794934225.8731582,
+    "seen": 1795252950.2984426,
+    "ast_hash": "bd6bc816164098dba49d44724f80598b",
     "semantic_hash": ""
   },
   "docs/raspi-docs/13-rest-api-reference.md": {
-    "mtime": 1794975602.979722,
-    "seen": 1795233883.7108603,
-    "ast_hash": "2bdc00368817c5deec8840fc2e8dd3ad",
+    "mtime": 1794935642.8284261,
+    "seen": 1795252950.2984436,
+    "ast_hash": "3908cda3b9e074d1573ba4784c3a59e7",
     "semantic_hash": ""
   },
   "docs/raspi-docs/14-leaf-reader.md": {
-    "mtime": 1794975602.979722,
-    "seen": 1795233883.7108603,
-    "ast_hash": "0c9556f4fe233407d7fce8bad7a92a96",
+    "mtime": 1794934225.8740015,
+    "seen": 1795252950.2984445,
+    "ast_hash": "c1471726a264e3ffe09cf394446b50bf",
     "semantic_hash": ""
   },
   "docs/raspi-docs/README.md": {
-    "mtime": 1794975602.979722,
-    "seen": 1795233883.7108603,
-    "ast_hash": "1fa53ea9e00c0b8a25d6e53a7b6a5855",
+    "mtime": 1794934225.8743787,
+    "seen": 1795252950.2984452,
+    "ast_hash": "aecd1827bf5c3f7fa7a918b26725a166",
     "semantic_hash": ""
   },
   "docs/sensor-calibration-firmware.md": {
-    "mtime": 1795232860.5866976,
-    "seen": 1795233883.7108603,
-    "ast_hash": "e61973882e84a913d60617414573bd19",
+    "mtime": 1795164259.0364997,
+    "seen": 1795252950.2984462,
+    "ast_hash": "1ce798a4c42e776f45d02c467690738d",
     "semantic_hash": ""
   },
   "docs/wt32-eth01-captive-recon.md": {
-    "mtime": 1794975602.980722,
-    "seen": 1795233883.7108603,
-    "ast_hash": "60f19bf5674980a72b0602bd2ce6742c",
+    "mtime": 1794934519.0652938,
+    "seen": 1795252950.2984471,
+    "ast_hash": "6ae9659c99e00d05656b5d0fd597444f",
     "semantic_hash": ""
   },
   "docs/wt32-eth01.md": {
-    "mtime": 1794975602.9817219,
-    "seen": 1795233883.7108603,
-    "ast_hash": "47e3fd81355d81346a74d2a27a52ab9e",
+    "mtime": 1794934225.8713331,
+    "seen": 1795252950.2984478,
+    "ast_hash": "0e9a7e1d68fe5db6e269a9b281ae5a96",
     "semantic_hash": ""
   },
   "dashboard/src/motion.ts": {
-    "mtime": 1795161542.135117,
-    "seen": 1795233883.7098496,
-    "ast_hash": "6b413b220aa72e670da3ed299f09477b",
+    "mtime": 1795150503.7746556,
+    "seen": 1795252950.2983286,
+    "ast_hash": "c82ae83480c0bdc6c2a2d42c0f3e9da8",
     "semantic_hash": ""
   },
   "docs/methane-calibration-report.md": {
-    "mtime": 1795232860.5856686,
-    "seen": 1795233883.7108603,
-    "ast_hash": "aff9d5ab90512afb81f9be477d4e5fa5",
+    "mtime": 1795164259.0361378,
+    "seen": 1795252950.2984154,
+    "ast_hash": "6bd460ae664f319bb9bfff93e27aa4f2",
     "semantic_hash": ""
   },
   "docs/pressure-calibration-plot.md": {
-    "mtime": 1795232860.5856686,
-    "seen": 1795233883.7108603,
-    "ast_hash": "93a4227f8095c0db9f098730ac017b47",
+    "mtime": 1795164259.0362089,
+    "seen": 1795252950.2984316,
+    "ast_hash": "789762162625b351eb5e98072d22ee17",
     "semantic_hash": ""
   },
   "firmware/methane-calibrate/sensor_3_calibration.svg": {
-    "mtime": 1795232860.6422257,
-    "seen": 1795233883.7108603,
-    "ast_hash": "387c7a3b0db7a8af931839b623a777e8",
+    "mtime": 1795164259.0493436,
+    "seen": 1795252950.2984517,
+    "ast_hash": "ba0fa231628292dbaa96a12c71c3f3e9",
+    "semantic_hash": ""
+  },
+  "dashboard/src/experimentReadings.test.ts": {
+    "mtime": 1795235299.0209064,
+    "seen": 1795252950.298321,
+    "ast_hash": "b859d1682e8e88574b0c3cfb26dabd49",
+    "semantic_hash": ""
+  },
+  "legacy/pi/sync_pi.sh": {
+    "mtime": 1792658759.9102237,
+    "seen": 1795252950.2983794,
+    "ast_hash": "ee61ea72f126c44132e4864ba37f1b42",
+    "semantic_hash": ""
+  },
+  "docs/plans-and-audits/lvgl-ui-ux-audit.md": {
+    "mtime": 1795245817.0653687,
+    "seen": 1795252950.2984262,
+    "ast_hash": "48484cbfc344be5be435dfdf374c1f66",
+    "semantic_hash": ""
+  },
+  "dashboard/public/favicon-32.png": {
+    "mtime": 1795252645.124876,
+    "seen": 1795252950.29845,
+    "ast_hash": "71e0b197470d7690f71e034357968ce5",
+    "semantic_hash": ""
+  },
+  "dashboard/public/favicon.svg": {
+    "mtime": 1795252642.6824358,
+    "seen": 1795252950.298451,
+    "ast_hash": "48cf4586f4d555edca9e7262fb56bc2f",
     "semantic_hash": ""
   }
 }

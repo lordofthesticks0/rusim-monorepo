@@ -15,7 +15,7 @@ export const MAX_COMPARE_SERIES = 4;
 
 /**
  * Series colours, in selection order, read from the `--chart-1` to `--chart-4`
- * tokens in styles.css: the magenta accent first, then blue, green, and amber,
+ * tokens in styles.css: the blue accent first, then green, amber, and violet,
  * so overlapping series stand off from each other on a white sheet.
  */
 export const COMPARE_SERIES_COLORS = [

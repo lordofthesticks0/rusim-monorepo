@@ -19,6 +19,9 @@ There is no UI framework, no state library, and no chart library. The chart is h
 | File | Lines | Responsibility |
 |---|---|---|
 | `index.tsx` | 5 | Mounts `<App/>` into `#root`, imports the stylesheet |
+| `index.html` | 18 | Page shell, fonts, theme colour, and favicon links |
+| `public/favicon.svg` | 7 | Browser-tab icon: the `BrandMark` glyph on an off-white tile, served at `/favicon.svg` |
+| `public/favicon-32.png` | — | 32×32 raster fallback of the same mark for browsers without SVG favicon support |
 | `src/App.tsx` | 1343 | Everything visible: login screen, all three views, all components, all chart math |
 | `src/data.ts` | 278 | Every Supabase read, the auth RPCs, and the non-numbering domain logic |
 | `src/chambers.ts` | 58 | Maps stored 0-based bottle ids to displayed chamber numbers and splits current presence |
@@ -258,7 +261,7 @@ Security therefore rests entirely on token entropy. The stated guidance is to is
 
 ### 5.1 Page load
 
-`index.html` loads `/index.tsx`, which calls `createRoot(...).render(<App/>)`.
+`index.html` loads `/index.tsx`, which calls `createRoot(...).render(<App/>)`. It also links `public/favicon.svg` and the `public/favicon-32.png` fallback, so the browser tab shows the same rounded-square mark and accent dot as the in-app `BrandMark` (§5.10). Vite copies `public/` verbatim into `dist/`.
 
 `App()` calls `useAuth()`, whose `useState` initialiser calls `readStoredSession()` **synchronously**. It parses `localStorage["rusim.device_session"]`, returns null if the token is not a string or `expiresAt` is in the past, and otherwise returns the stored session. A valid stored session therefore renders the dashboard with no network call and no loading flash.
 
@@ -314,7 +317,7 @@ The consequence is a worst-case latency of 5m30s for a device that samples every
 
 The default view, reached by the "Monitoring" nav tab.
 
-**Shell** — a tinted L-frame (sidebar + 56px top bar on an off-white ground) with the work on a white sheet inset 8px from the right and bottom edges, 10px radius, 1px edge, no shadow. The sidebar names the product (RuSim / Telemetry with a chamber mark), scopes to `Device {id}` with owner, and holds the three views (Monitoring, Experiment history, Compare). The active view sits on a white pill with a 2px magenta bar; the pill slides between items when the view changes. The top bar holds a breadcrumb (`Device {id} / {view}`), a freshness stamp (`Data loaded · Updated …`) whose green dot pulses twice when a load succeeds, and the black `Refresh data` primary, whose icon spins while a load runs. Sign out lives at the sidebar bottom with the session expiry. Below 860px the frame disappears: the sidebar becomes a drawer (at most 320px wide) behind a menu button, with a dimmed backdrop that closes it, and the sheet becomes the screen.
+**Shell** — a tinted L-frame (sidebar + 56px top bar on an off-white ground) with the work on a white sheet inset 8px from the right and bottom edges, 10px radius, 1px edge, no shadow. The sidebar names the product (RuSim / Telemetry with a chamber mark), scopes to `Device {id}` with owner, and holds the three views (Monitoring, Experiment history, Compare). The active view sits on a white pill with a 2px blue bar; the pill slides between items when the view changes. The top bar holds a breadcrumb (`Device {id} / {view}`), a freshness stamp (`Data loaded · Updated …`) whose green dot pulses twice when a load succeeds, and the black `Refresh data` primary, whose icon spins while a load runs. Sign out lives at the sidebar bottom with the session expiry. Below 860px the frame disappears: the sidebar becomes a drawer (at most 320px wide) behind a menu button, with a dimmed backdrop that closes it, and the sheet becomes the screen.
 
 **Title** — the view name as the page heading, with a one-line summary under it. On Monitoring a line above the heading names the live experiment (`Live experiment Experiment 999`).
 
@@ -326,11 +329,11 @@ The default view, reached by the "Monitoring" nav tab.
 
 **Disconnection notice** — rendered only when a latest sample exists *and* at least one configured chamber is missing from it. With the default dev configuration (24 configured, chambers 1–8 reporting) this reads: "Disconnected at …: chambers Chamber 9, Chamber 10, … Chamber 24 sent no data."
 
-**Five KPI cells as parameter tabs** — pH, Temperature, CO₂, CH₄, Pressure (`PARAMETER_DISPLAY`; stored and exported names stay `PARAMETER_NAMES`), read from the selected chamber's newest sample in the active experiment, in one container split by 1px dividers. Each cell shows its label, unit, value, and a sparkline of the chamber's last 40 samples of that parameter (real rows, gaps kept). Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as a grey dash. Selecting a cell switches the chart below to that parameter; a 2px magenta bar slides under the selected cell and its sparkline turns magenta. The strip has five columns on a desktop, three below 1100px and two below 860px.
+**Five KPI cells as parameter tabs** — pH, Temperature, CO₂, CH₄, Pressure (`PARAMETER_DISPLAY`; stored and exported names stay `PARAMETER_NAMES`), read from the selected chamber's newest sample in the active experiment, in one container split by 1px dividers. Each cell shows its label, unit, value, and a sparkline of the chamber's last 40 samples of that parameter (real rows, gaps kept). Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as a grey dash. Selecting a cell switches the chart below to that parameter; a 2px blue bar slides under the selected cell and its sparkline turns blue. The strip has five columns on a desktop, three below 1100px and two below 860px.
 
 **Status line** — chamber, connection state (`Disconnected` / `Concluded` / `Live` / `No data`), sample count, and latest sample time, in one 12px line under the KPI strip.
 
-**One chart** — plotting the selected chamber's rows for the **active experiment only**, headed `Chamber {n} · {parameter}` with the record count. The line is 2px in magenta (`--chart-1`) over a soft area fill, with round y ticks and gridlines; a `null` breaks both the line and the fill. Each sample is a focusable point; hovering, focusing or clicking shows a dashed vertical guide and a tooltip with value and timestamp. Fewer than two rows renders "Not enough data for chart."
+**One chart** — plotting the selected chamber's rows for the **active experiment only**, headed `Chamber {n} · {parameter}` with the record count. The line is 2px in blue (`--chart-1`) over a soft area fill, with round y ticks and gridlines; a `null` breaks both the line and the fill. Each sample is a focusable point; hovering, focusing or clicking shows a dashed vertical guide and a tooltip with value and timestamp. Fewer than two rows renders "Not enough data for chart."
 
 ### 5.6 Live vs concluded is inferred, never stored
 
@@ -383,7 +386,7 @@ The export is deliberately of what is on screen rather than a fresh query, and t
 
 Reached by the "Compare" nav tab. Overlays up to four chamber series on one chart; chambers may come from different experiments.
 
-**Selection** — a panel headed `Chambers to compare` with an Experiment select, a Chamber select (all configured chambers), an `Add chamber` button, and `Clear all`. Each added series becomes a chip with a colour dot, its label (`Experiment 3 · Chamber 5`), and a remove button. The header shows `n of 4`. The rules live in `compare.ts`: `MAX_COMPARE_SERIES` is 4, the same experiment and chamber cannot be added twice, but the same chamber in different experiments can. `Add chamber` is disabled at the cap or on a duplicate. Colours are assigned by position in the selection list (`--chart-1` magenta, `--chart-2` blue, `--chart-3` green, `--chart-4` amber), so removing a middle chip shifts later colours.
+**Selection** — a panel headed `Chambers to compare` with an Experiment select, a Chamber select (all configured chambers), an `Add chamber` button, and `Clear all`. Each added series becomes a chip with a colour dot, its label (`Experiment 3 · Chamber 5`), and a remove button. The header shows `n of 4`. The rules live in `compare.ts`: `MAX_COMPARE_SERIES` is 4, the same experiment and chamber cannot be added twice, but the same chamber in different experiments can. `Add chamber` is disabled at the cap or on a duplicate. Colours are assigned by position in the selection list (`--chart-1` blue, `--chart-2` green, `--chart-3` amber, `--chart-4` violet), so removing a middle chip shifts later colours.
 
 **Data** — each distinct experiment in the selection is fetched once via `fetchExperimentReadings` and cached in `readingsByExperiment`; the chart filters each cache entry with `selectChamberReadings`. Compare uses real data only (the synthetic preview experiment 999 never appears in the experiment list) and does not poll.
 
@@ -402,9 +405,9 @@ The look was redesigned with the `design-taste-frontend` skill. Its scripts deal
 | Ground (frame) | `#f7f7f5` off-white |
 | Sheet and panels | `#ffffff`, 1px `#e3e3de` edge |
 | Ink / muted | `#000000` / `#666662` |
-| Accent | `#d0106f` magenta: selection, focus ring, the main chart line |
+| Accent | `#2563eb` blue: selection, focus ring, the main chart line |
 | Primary button | black with white text |
-| Chart series | `--chart-1` magenta, `--chart-2` blue `#1a5fd0`, `--chart-3` green `#0f8a6a`, `--chart-4` amber `#b86200` |
+| Chart series | `--chart-1` blue `#2563eb`, `--chart-2` green `#0f8a6a`, `--chart-3` amber `#b86200`, `--chart-4` violet `#7c3aed` |
 | Type | Chivo (text and headings), Chivo Mono (ids, units, chamber numbers), from Google Fonts in `index.html` |
 | Radii | 4px controls, 6px panels, 10px sheet |
 
@@ -785,4 +788,4 @@ The Compare tab overlays up to four (experiment, chamber) series on one chart wi
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Updated at 2026-11-21-11:28.
+Updated at 2026-11-21-16:24.
