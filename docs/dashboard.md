@@ -285,7 +285,8 @@ for (let offset = 0; offset < MAX_READING_ROWS; offset += PAGE_SIZE) {
 | Constant | Value | Reasoning in the source |
 |---|---|---|
 | `PAGE_SIZE` | 1000 | *"Must stay at or below the server's `max_rows` setting, otherwise every page returns a truncated response and the paging loop misreads the last one as the end of the data."* |
-| `MAX_READING_ROWS` | 5000 | Client-side ceiling. Callers hitting it receive a partial result, so anything presenting itself as complete must check and say so. |
+| `MAX_READING_ROWS` | 5000 | Client-side ceiling for `fetchReadings` (newest first). Callers hitting it receive a partial result, so anything presenting itself as complete must check and say so. |
+| `MAX_EXPERIMENT_ROWS` | 50,000 | Ceiling for `fetchExperimentReadings` (oldest first). Sized for a 99 h run at one round per 30 s: about 47,500 rows for four bottles. |
 
 `config.toml` sets `max_rows = 1000`, matching `PAGE_SIZE` exactly.
 
@@ -356,7 +357,13 @@ Reached by the "Experiment History" nav tab. Two-stage drill-down.
 
 Selection starts empty; clicking the selected item clears it (`toggleExperimentSelection()`), and choosing another replaces it. A notice asks the operator to select an experiment until one is chosen.
 
-**Stage 2 — the detail.** A `useEffect` keyed on `activeExperimentId` fires `fetchExperimentReadings`, which pages identically but adds `.eq("experiment_id", id)` and orders by `bottle_id` ascending then `timestamp` ascending. A `cancelled` closure flag prevents state updates from a superseded request or an unmounted component.
+**Stage 2 — the detail.** A `useEffect` keyed on `activeExperimentId` fires `fetchExperimentReadings`. It filters with `.eq("experiment_id", id)` and uses **keyset paging** instead of offsets: rows are ordered by `timestamp` ascending then `bottle_id` ascending, and each page after the first adds a filter for rows after the last one seen:
+
+```
+or=(timestamp.gt."T", and(timestamp.eq."T", bottle_id.gt.B))
+```
+
+`bottle_id` is the tiebreak because all bottles in one round share a timestamp, so a page boundary can fall inside a round. Compared with offsets, this cannot skip or repeat rows while new rows arrive during a run. Because every bottle is sampled at the same instants, reaching `MAX_EXPERIMENT_ROWS` cuts the experiment off at one point in time for all bottles; it no longer drops whole bottles. Before 2026-11-21 the read ordered by `bottle_id` first and capped at 5,000 rows, so any experiment over about 10 h lost its later bottles. A `cancelled` closure flag prevents state updates from a superseded request or an unmounted component.
 
 That ordering is load-bearing, and the comment says so: it keeps a multi-page read contiguous, so each chamber's samples stay together.
 
@@ -368,7 +375,7 @@ That ordering is load-bearing, and the comment says so: it keeps a multi-page re
 
 ### 5.8 Truncation is surfaced, not hidden
 
-`isTruncated(readings.length)` compares against `MAX_READING_ROWS`. When a read hit the cap, the detail pane shows: *"Only the most recent 5,000 readings were loaded, so this experiment is incomplete on screen and any CSV export is truncated too."*
+`isTruncated(readings.length)` compares against `MAX_EXPERIMENT_ROWS`. When a read hit the cap, the detail pane shows: *"Only the first 50,000 readings were loaded, so the end of this experiment is missing on screen and any CSV export is truncated too."*
 
 The export is deliberately of what is on screen rather than a fresh query, and the comment explains the tradeoff: *"This exports what is already on screen rather than re-querying, so the file and the charts always describe the same rows. A truncated read therefore produces a truncated file, which is why the limit is called out on screen next to the button."*
 
@@ -676,8 +683,8 @@ be inlined.
 
 | Claim | Reality |
 |---|---|
-| `auth.ts:80` — *"server throttle in `device_data.authenticate` (30 failures / 5 min globally)"* | No such throttle exists. It was dropped because a failed call rolls back its own counter. |
-| `data.ts:113` — handles `42900` "too many attempts" | No migration raises `42900`. The branch is dead. |
+| `auth.ts` — *"server throttle in `device_data.authenticate` (30 failures / 5 min globally)"* | No such throttle exists. It was dropped because a failed call rolls back its own counter. The comment was corrected on 2026-11-21 to say the backoff is client-side only. |
+| `data.ts` handled `42900` "too many attempts" | No migration raises `42900`. The dead branch was removed on 2026-11-21; `authenticate()` now throws one generic "Invalid device token." for every failure. |
 | `signOut` comment — *"the session expires on its own within a day"* | TTL is now 12 hours. |
 
 
@@ -731,7 +738,8 @@ Open items:
 |---|---|---|
 | `CONCLUDED_AFTER_MS` | 600,000 (10 min) | `data.ts:61` |
 | `POLL_INTERVAL_MS` | 330,000 (5m30s) | `data.ts:64` |
-| `MAX_READING_ROWS` | 5,000 | `data.ts:74` |
+| `MAX_READING_ROWS` | 5,000 | `data.ts` |
+| `MAX_EXPERIMENT_ROWS` | 50,000 | `data.ts` |
 | `MAX_COMPARE_SERIES` | 4 | `compare.ts` |
 | `PAGE_SIZE` | 1,000 | `data.ts:83` |
 | `TESTING_EXPERIMENT_ID` | `0` | `types/domain.ts:52` |
@@ -777,4 +785,4 @@ The Compare tab overlays up to four (experiment, chamber) series on one chart wi
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Updated at 2026-11-20-12:40.
+Updated at 2026-11-21-11:28.

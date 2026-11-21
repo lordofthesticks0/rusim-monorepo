@@ -77,6 +77,15 @@ export const POLL_INTERVAL_MS = 5 * 60 * 1000 + 30 * 1000;
 export const MAX_READING_ROWS = 5000;
 
 /**
+ * Upper bound on rows one experiment read returns.
+ *
+ * Sized for the longest run: 99 h at one round per 30 s is 11,880 rows per
+ * bottle, about 47,500 for four bottles. Reads are oldest first, so a result
+ * at this bound is missing the END of the experiment.
+ */
+export const MAX_EXPERIMENT_ROWS = 50_000;
+
+/**
  * Rows requested per PostgREST request while paging.
  *
  * Must stay at or below the server's max_rows setting, otherwise every page
@@ -114,12 +123,8 @@ function toReading(row: ReadingRow): Reading {
 export async function authenticate(deviceToken: string): Promise<DeviceSession> {
   const { data, error } = await getSupabase(null).rpc("authenticate", { p_token: deviceToken });
   if (error) {
-    // Preserve the throttle signal (SQLSTATE 42900) so the UI can tell
-    // "slow down" apart from "wrong token". Everything else stays generic
-    // to avoid oracling device existence.
-    if (/too many attempts/i.test(error.message)) {
-      throw new Error("Too many attempts. Try again later.");
-    }
+    // Every failure maps to one generic message to avoid oracling device
+    // existence.
     throw new Error("Invalid device token.");
   }
   const row = data?.[0];
@@ -187,22 +192,49 @@ export async function fetchReadings(sessionToken: string): Promise<Reading[]> {
  * Reads every chamber's readings for one experiment.
  *
  * RLS already restricts this to the session's own device, so no device filter
- * is applied here. Ordering by chamber then time keeps a multi-page read
- * contiguous, so `groupReadingsByChamber` sees each chamber's samples together.
+ * is applied here.
+ *
+ * Rows are read oldest first in (timestamp, bottle_id) order, and each page
+ * starts after the last row of the previous one (keyset paging) instead of at
+ * a numeric offset. Two reasons:
+ *  - Every bottle is sampled at the same instant, so hitting the row cap cuts
+ *    the experiment off at a point in time for all bottles together, never
+ *    dropping whole bottles.
+ *  - Rows keep arriving while a run is active. An offset would shift under the
+ *    reader and could skip or repeat rows; "after this row" cannot.
+ *
+ * bottle_id is the tiebreak because several bottles share one timestamp, and
+ * a timestamp-only cursor could skip the rest of a round split across pages.
  */
 export async function fetchExperimentReadings(sessionToken: string, experimentId: number): Promise<Reading[]> {
   const rows: ReadingRow[] = [];
-  for (let offset = 0; offset < MAX_READING_ROWS; offset += PAGE_SIZE) {
-    const { data, error } = await getSupabase(sessionToken)
+  let cursor: { timestamp: string; bottle_id: number } | null = null;
+
+  while (rows.length < MAX_EXPERIMENT_ROWS) {
+    let query = getSupabase(sessionToken)
       .from("readings")
       .select(READING_COLUMNS)
-      .eq("experiment_id", experimentId)
-      .order("bottle_id", { ascending: true })
+      .eq("experiment_id", experimentId);
+    if (cursor) {
+      // Quotes keep the timestamp's "+" and ":" literal inside the filter.
+      query = query.or(
+        `timestamp.gt."${cursor.timestamp}",` +
+          `and(timestamp.eq."${cursor.timestamp}",bottle_id.gt.${cursor.bottle_id})`,
+      );
+    }
+    const pageSize = Math.min(PAGE_SIZE, MAX_EXPERIMENT_ROWS - rows.length);
+    const { data, error } = await query
       .order("timestamp", { ascending: true })
-      .range(offset, Math.min(offset + PAGE_SIZE - 1, MAX_READING_ROWS - 1));
+      .order("bottle_id", { ascending: true })
+      .limit(pageSize);
     if (error) throw error;
-    rows.push(...(data ?? []));
-    if (!data || data.length < PAGE_SIZE) break;
+
+    const page = data ?? [];
+    rows.push(...page);
+    // A short page means the experiment has no more rows.
+    if (page.length < pageSize) break;
+    const last = page[page.length - 1]!;
+    cursor = { timestamp: last.timestamp, bottle_id: last.bottle_id };
   }
 
   return rows.map(toReading);

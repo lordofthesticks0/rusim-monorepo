@@ -76,9 +76,10 @@ export function useAuth(): AuthState {
     setSigningIn(true);
     setError("");
     try {
-      // Client-side backoff complements the server throttle in
-      // device_data.authenticate (30 failures / 5 min globally): rapid
-      // repeat submits wait briefly instead of hammering the RPC.
+      // Client-side backoff only. There is no server-side throttle: a failed
+      // device_data.authenticate call rolls back its own counter. Rapid
+      // repeat submits from this page wait briefly instead of hammering the
+      // RPC, but a reload or a direct RPC call bypasses it.
       const waited = Date.now() - lastAttemptAt;
       const backoffMs = Math.min(1000 * 2 ** Math.max(consecutiveFailures - 1, 0), 5000);
       if (consecutiveFailures >= 2 && waited < backoffMs) {
