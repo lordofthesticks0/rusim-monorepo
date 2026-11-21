@@ -36,6 +36,8 @@ app = Flask(__name__)
 LOG_DIR = 'logs'
 MOUNT_POINT = '/media/usb'
 SLAVE_STALE_SECONDS = 12.0
+STATUS_POLL_INTERVAL_SECONDS = 0.5
+CSV_LOG_INTERVAL_SECONDS = 1.0
 MASTER_SILENCE_RECONNECT_SECONDS = 10.0
 VALID_BOTTLE_IDS = (1, 2, 3, 4)
 REQUIRED_BOTTLE_KEYS = ('id', 'temp', 'ph', 'methane', 'co2', 'press')
@@ -898,6 +900,7 @@ def serial_worker():
 # --- BACKGROUND WORKER 2: POLLING & LOGGING ---
 def polling_worker():
     global boot_defaults_applied, state_sent, last_state_send_mono, thresholds_sent, last_thresh_send_mono
+    last_csv_log_mono = -1000.0
     while True:
         if serial_conn:
             if not boot_defaults_applied:
@@ -959,9 +962,12 @@ def polling_worker():
                 update_packet_metrics()
 
         if logging_active:
-            log_data_to_csv()
+            now_mono = time.monotonic()
+            if (now_mono - last_csv_log_mono) >= CSV_LOG_INTERVAL_SECONDS:
+                log_data_to_csv()
+                last_csv_log_mono = now_mono
 
-        time.sleep(1.0)
+        time.sleep(STATUS_POLL_INTERVAL_SECONDS)
 
 
 # --- LEGIBLE, ALIGNED CSV LOGGING ENGINE ---
@@ -1135,6 +1141,7 @@ def status():
     if not master_fresh:
         res['temp'] = -999.0
         res['bottle_avg_temp'] = -999.0
+        res['water_adc'] = -1
     if not slave_fresh:
         res['bottles'] = []
         res['bottle_avg_temp'] = -999.0

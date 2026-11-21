@@ -16,7 +16,7 @@ a copy of this file.
 | D5 | Heater SSR (active HIGH trigger; `HIGH` = ON) |
 | D6 | System switch (input pull-up; `LOW` = OFF) |
 | D7 | Circulation Pump 2 MOSFET gate (active-HIGH PWM: `0`–`255`, Timer 4 `OC4B`) |
-| A9 | 3-pin resistive water-level analog sensor (250 ms check interval, 16-sample interquartile mean, hysteresis + asymmetric debounce) |
+| A9 | 3-pin resistive water-level analog sensor (25 ms / 40 Hz ring-buffer sampling, 200 ms middle-4 trimmed mean, 100 ms asymmetric debounce) |
 | A8 | Optional pump leak analog sensor (`LEAK_THRESHOLD = 200`, disabled by default via `ENABLE_LEAK_SENSOR = 0`) |
 | Serial (USB) | 115200 to Raspberry Pi |
 | Serial1 | 9600 to slave "Mega Pro" |
@@ -30,7 +30,7 @@ a copy of this file.
 - DS18B20 cadence: **750 ms**, non-blocking
 - Slave poll cadence: **3500 ms**
 - Stirrer & pump ramp: **3000 ms** soft-start and soft-stop, full duty **255** (AUTO pump cap **200**, dry Pump 2 throttle **100**)
-- Water-level sensing (`A9`): evaluated every **250 ms** using the interquartile mean (middle 8 of 16 sorted samples), with **4** checks (**1.0 s**) to trip and **20** uninterrupted checks (**5.0 s**) back on the safe side of the same threshold to clear. The thresholds are trip-only, with no recovery deadband, because the level can move fast:
+- Water-level sensing (`A9`): sampled every **25 ms** (40 Hz) into an 8-sample (**200 ms**) rolling ring buffer where the middle 4 sorted samples are averaged (`waterRaw`), and evaluated every **100 ms** (10 Hz) with **5** checks (**0.5 s**) to trip and **15** checks (**1.5 s**) with leaky-bucket (`+2` penalty on fault glitch) to clear. The thresholds are trip-only, with no recovery deadband, because the level can move fast:
   - `waterCriticalLow` (Heater & Pump 2 hard cutoff): trips `<= 400`, clears above `400`
   - `waterDepleted` (Pump 2 throttle to `100` PWM): trips `<= 460`, clears above `460`
   - `inletWaterFull` (Pump 1 hard cutoff): trips `>= 550`, clears below `550`
@@ -52,7 +52,7 @@ a copy of this file.
 3. Poll slave #1 every 3500 ms with `#1:PING*` on `Serial1`.
 4. In `pollSlaveSerial(now)`, extract the `{...}` substring, validate `deserializeJson(doc, cleanJson)` and every bottle object (`isValidBottleObject`: `id` in `1..4`, no duplicates, required keys `temp`, `ph`, `methane`, `co2`, `press`), forward the validated JSON to the Pi over `Serial`, and compute the average bottle temperature.
 5. Read D6. `LOW` forces `MODE_OFF`.
-6. Water-level check every 250 ms: computes the interquartile mean of 16 samples on `A9` (`readAdcAveraged()`), updates the debounced `waterCriticalLow`, `waterDepleted`, and `inletWaterFull` flags (`1.0 s` trip, `5.0 s` recovery), and enforces opposite-extreme mutual exclusion so `waterCriticalLow`/`waterDepleted` and `inletWaterFull` cannot remain latched simultaneously.
+6. Water-level sampling & check: samples `A9` every `25 ms` into the 8-sample rolling ring buffer (`sampleWaterSensor()`), and every `100 ms` updates the debounced `waterCriticalLow`, `waterDepleted`, and `inletWaterFull` flags (`0.5 s` trip, `1.5 s` leaky-bucket recovery) with opposite-extreme mutual exclusion.
 7. Actuator control:
    - If `currentMode == MODE_OFF` or `pumpLeakDetected`: `forceAllOff()` cuts heater, both pumps, and stirrer immediately.
    - If `inletWaterFull`: `resetMosfetOff(pump1Mosfet)` cuts Pump 1 immediately.
@@ -106,4 +106,4 @@ last successful hash is stored in
 [legacy-master.md](../legacy-master.md).
 
 ---
-Updated at 2026-11-18-00:12.
+Updated at 2026-11-21-11:04.

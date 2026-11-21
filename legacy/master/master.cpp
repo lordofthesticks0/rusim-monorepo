@@ -31,11 +31,13 @@ int waterDryThreshold = 460;  // Trip low-water Pump 2 throttle at or below this
 int inPumpStopAdc     = 550;  // Trip high-water cutoff (Pump 1 OFF) at or above this ADC
 #define ENABLE_LEAK_SENSOR     0      // 0 = disabled (only A9 water presence sensor installed); 1 = enable A8 leak probe
 int leakThreshold     = 200;  // Pump leak wet-detection ADC threshold
-#define WATER_CHECK_MS         250UL  // Time-gated water & leak sampling interval (250ms = 4 Hz)
-#define WATER_TRIP_LIMIT       4      // 4 checks (1.0s) to trip safety cutoff
-#define WATER_RECOVER_LIMIT    20     // 20 uninterrupted checks (5.0s) past the trip point to recover
-#define WATER_FAULT_LIMIT      4      // Alias used by optional A8 leak sensor debounce
-#define WATER_ADC_SAMPLES      16     // Number of ADC samples per burst (middle 8 averaged)
+#define WATER_SAMPLE_MS        25UL   // Time-spread ADC sampling cadence (25ms = 40 Hz, cancels 50/60 Hz)
+#define WATER_RING_SIZE        8      // Rolling ring buffer of 8 samples (200ms true time window, middle 4 averaged)
+#define WATER_BURST_SAMPLES    4      // Fast micro-average per 25ms tick (~0.55ms) to reject PWM spikes
+#define WATER_CHECK_MS         100UL  // Time-gated water & leak safety state evaluation interval (100ms = 10 Hz)
+#define WATER_TRIP_LIMIT       5      // 5 checks (0.5s) to trip safety cutoff
+#define WATER_RECOVER_LIMIT    15     // 15 checks (1.5s) past the trip point to recover (leaky-bucket +2 on glitch)
+#define WATER_FAULT_LIMIT      10     // 10 checks (1.0s) used by optional A8 leak sensor debounce
 #define SLAVE_TIMEOUT_MS     12000  // Failsafe timeout if Slave stops responding
 #define TEMP_INTERVAL_MS     750    // Non-blocking DS18B20 cadence
 #define SLAVE_POLL_INTERVAL  3500   // Acquisition cadence matching Slave cycle time
@@ -85,6 +87,8 @@ bool heaterState = false;
 bool bottleTelemetryValid = false;
 
 int waterRaw = 0;
+int waterRing[WATER_RING_SIZE] = {0};
+uint8_t waterRingIdx = 0;
 uint8_t waterFaultCounter = 0;
 bool waterDepleted = false;       // Debounced low-water throttle state (see waterDryThreshold)
 uint8_t waterCritCounter = 0;
@@ -97,6 +101,7 @@ int leakFaultCounter = 0;
 bool pumpLeakDetected = false;
 
 unsigned long lastTempRequest = 0;
+unsigned long lastWaterSample = 0;
 unsigned long lastWaterCheck = 0;
 unsigned long lastSlavePollTime = 0;
 unsigned long lastSlavePacketTime = 0;
@@ -184,30 +189,44 @@ void forceAllOff() {
   resetMosfetOff(stirMosfet);
 }
 
-int readAdcAveraged(uint8_t pin) {
+int readAdcSample(uint8_t pin) {
   analogRead(pin); // Discard first mux switch reading to settle S/H capacitor
-  int samples[WATER_ADC_SAMPLES];
-  for (int i = 0; i < WATER_ADC_SAMPLES; i++) {
-    samples[i] = analogRead(pin);
+  long sum = 0;
+  for (int i = 0; i < WATER_BURST_SAMPLES; i++) {
+    sum += analogRead(pin);
   }
-  // Insertion sort to compute interquartile mean (middle 8 of 16 samples),
-  // rejecting up to 4 low and 4 high transient spikes per sampling burst.
-  for (int i = 1; i < WATER_ADC_SAMPLES; i++) {
-    int key = samples[i];
+  return (int)(sum / WATER_BURST_SAMPLES);
+}
+
+int computeWaterRingAverage() {
+  int sorted[WATER_RING_SIZE];
+  for (int i = 0; i < WATER_RING_SIZE; i++) {
+    sorted[i] = waterRing[i];
+  }
+  // Insertion sort 8 time-spread samples (200ms window) and average the middle 4,
+  // rejecting up to 2 low and 2 high transient spikes while cancelling 50/60 Hz hum.
+  for (int i = 1; i < WATER_RING_SIZE; i++) {
+    int key = sorted[i];
     int j = i - 1;
-    while (j >= 0 && samples[j] > key) {
-      samples[j + 1] = samples[j];
+    while (j >= 0 && sorted[j] > key) {
+      sorted[j + 1] = sorted[j];
       j--;
     }
-    samples[j + 1] = key;
+    sorted[j + 1] = key;
   }
   long sum = 0;
-  const int trim = WATER_ADC_SAMPLES / 4;
-  const int kept = WATER_ADC_SAMPLES - (2 * trim);
-  for (int i = trim; i < WATER_ADC_SAMPLES - trim; i++) {
-    sum += samples[i];
+  const int trim = WATER_RING_SIZE / 4;
+  const int kept = WATER_RING_SIZE - (2 * trim);
+  for (int i = trim; i < WATER_RING_SIZE - trim; i++) {
+    sum += sorted[i];
   }
   return (int)(sum / kept);
+}
+
+void sampleWaterSensor() {
+  waterRing[waterRingIdx] = readAdcSample(WATER_SENSOR_PIN);
+  waterRingIdx = (uint8_t)((waterRingIdx + 1) % WATER_RING_SIZE);
+  waterRaw = computeWaterRingAverage();
 }
 
 void updateLowTripFlag(bool &tripped, uint8_t &counter, int adc, int thr) {
@@ -228,7 +247,12 @@ void updateLowTripFlag(bool &tripped, uint8_t &counter, int adc, int thr) {
         tripped = false;
       }
     } else {
-      counter = WATER_RECOVER_LIMIT;
+      // Leaky-bucket penalty (+2, capped at WATER_RECOVER_LIMIT) prevents a single
+      // noisy boundary tick from resetting the whole recovery window while still
+      // locking out brief false readings when genuinely dry.
+      counter = (counter + 2 < WATER_RECOVER_LIMIT)
+                  ? (uint8_t)(counter + 2)
+                  : (uint8_t)WATER_RECOVER_LIMIT;
     }
   }
 }
@@ -251,7 +275,9 @@ void updateHighTripFlag(bool &tripped, uint8_t &counter, int adc, int thr) {
         tripped = false;
       }
     } else {
-      counter = WATER_RECOVER_LIMIT;
+      counter = (counter + 2 < WATER_RECOVER_LIMIT)
+                  ? (uint8_t)(counter + 2)
+                  : (uint8_t)WATER_RECOVER_LIMIT;
     }
   }
 }
@@ -432,7 +458,12 @@ void setup() {
   lastTempRequest = bootNow;
   stirCycleStart = bootNow;
 
-  waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
+  int initWater = readAdcSample(WATER_SENSOR_PIN);
+  for (int i = 0; i < WATER_RING_SIZE; i++) {
+    waterRing[i] = initWater;
+  }
+  waterRingIdx = 0;
+  waterRaw = initWater;
   waterDepleted = (waterRaw <= waterDryThreshold);
   waterFaultCounter = waterDepleted ? WATER_RECOVER_LIMIT : 0;
   waterCriticalLow = (waterRaw <= outPumpStopAdc);
@@ -441,7 +472,7 @@ void setup() {
   inletFullCounter = inletWaterFull ? WATER_RECOVER_LIMIT : 0;
 
 #if ENABLE_LEAK_SENSOR
-  leakRaw = readAdcAveraged(LEAK_SENSOR_PIN);
+  leakRaw = readAdcSample(LEAK_SENSOR_PIN);
   pumpLeakDetected = (leakRaw >= leakThreshold);
   leakFaultCounter = pumpLeakDetected ? WATER_FAULT_LIMIT : 0;
 #else
@@ -450,6 +481,7 @@ void setup() {
   leakFaultCounter = 0;
 #endif
 
+  lastWaterSample = bootNow;
   lastWaterCheck = bootNow;
   wdt_enable(WDTO_4S);
 }
@@ -491,10 +523,15 @@ void loop() {
     currentMode = MODE_OFF;
   }
 
-  // 5. Time-Gated Debounced Water Level (A9) & Pump Leak (A8) Verification (250ms cadence, interquartile ADC avg)
+  // 5a. Continuous Time-Spread Water Sensor Sampling (25ms = 40 Hz, 200ms rolling trimmed mean)
+  if (now - lastWaterSample >= WATER_SAMPLE_MS) {
+    sampleWaterSensor();
+    lastWaterSample = now;
+  }
+
+  // 5b. Time-Gated Debounced Water Level (A9) & Pump Leak (A8) Verification (100ms = 10 Hz)
   if (now - lastWaterCheck >= WATER_CHECK_MS) {
-    // 5a. Bath Water Level Probe (A9: asymmetric fast-trip / slow-recovery, trip-only)
-    waterRaw = readAdcAveraged(WATER_SENSOR_PIN);
+    // Bath Water Level Probe (A9: asymmetric fast-trip / leaky-bucket recovery, trip-only)
     updateLowTripFlag(waterCriticalLow, waterCritCounter, waterRaw, outPumpStopAdc);
     updateLowTripFlag(waterDepleted, waterFaultCounter, waterRaw, waterDryThreshold);
     updateHighTripFlag(inletWaterFull, inletFullCounter, waterRaw, inPumpStopAdc);
@@ -517,9 +554,9 @@ void loop() {
       }
     }
 
-    // 5b. Pump Leak Detection Sensor (A8: wet fault when ADC >= leakThreshold, disabled when ENABLE_LEAK_SENSOR == 0)
+    // Pump Leak Detection Sensor (A8: wet fault when ADC >= leakThreshold, disabled when ENABLE_LEAK_SENSOR == 0)
 #if ENABLE_LEAK_SENSOR
-    leakRaw = readAdcAveraged(LEAK_SENSOR_PIN);
+    leakRaw = readAdcSample(LEAK_SENSOR_PIN);
     if (!pumpLeakDetected) {
       if (leakRaw >= leakThreshold) {
         leakFaultCounter++;
@@ -735,6 +772,7 @@ void handleUsbCommand(String &cmd, unsigned long now) {
 }
 
 void sendTelemetryStatus(unsigned long now) {
+  pollSlaveSerial(now);
   StaticJsonDocument<768> doc;
   doc["type"] = "master_status";
   doc["water_temp"] = (waterTemp > -50.0) ? serialized(String(waterTemp, 2)) : serialized(String(-999.0));

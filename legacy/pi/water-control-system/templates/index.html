@@ -2233,20 +2233,22 @@
                     });
             }
 
+            let statusPollTick = 0;
             setInterval(() => {
                 if (isFetchingStatus) return;
                 isFetchingStatus = true;
+                statusPollTick++;
                 fetch("/status")
                     .then((r) => r.json())
                     .then((data) => {
                         updateUI(data);
-                        if (activeTab === "data" && selectedFile && liveTailActive) {
+                        if (activeTab === "data" && selectedFile && liveTailActive && (statusPollTick % 3 === 0)) {
                             fetchLogContent(selectedFile);
                         }
                     })
                     .catch(() => {})
                     .finally(() => { isFetchingStatus = false; });
-            }, 1500);
+            }, 500);
         </script>
     </body>
 </html>

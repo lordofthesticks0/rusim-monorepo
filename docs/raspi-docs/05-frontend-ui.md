@@ -1,6 +1,6 @@
 # 5. Frontend UI — `templates/index.html`
 
-Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-style** layout: a left dock with clock + nav (Home/Controls/Bottle/Logs/Settings) + REC button, and a main viewport.
+Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-style** layout: a left dock with clock + nav (Home/Controls/Bottle/Logs/Settings) + REC button, and a main viewport. The frontend polls `GET /status` every `500 ms` (2 Hz) while keeping live CSV log tailing throttled to every 3rd poll (`1.5 s`).
 
 ## Tabs
 
@@ -15,20 +15,17 @@ Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-st
 ## Expandable Water Level (`A9`) and Optional Pump Leak (`A8`) ADC Drawer
 
 On the Home (`water`) tab, the right-hand system status card (`#waterStatusCard`) is clickable (`onclick="toggleWaterDetails()"`):
-- `WATER LEVEL (A9)` displays `NORMAL`, `FULL`, `LOW`, or `CRITICAL LOW` using the master's debounced flags (`data.water_crit`, `data.water_low`, `data.water_full`):
-  - `CRITICAL LOW` reflects `data.water_crit` (tripped at `ADC <= 350`, cleared at `>= 420` after `5.0 s`), when both the Heater and Pump 2 stop.
-  - `LOW` reflects `data.water_low` (tripped at `ADC <= 450`, cleared at `>= 480` after `5.0 s`), when Pump 2 is throttled to `100` PWM.
-  - `FULL` reflects `data.water_full` (tripped at `ADC >= 500`, cleared at `<= 460` after `5.0 s`), when Pump 1 stops filling.
+- `WATER LEVEL (A9)` displays `NORMAL`, `FULL`, `LOW`, or `CRITICAL LOW` using the master's debounced flags (`data.water_crit`, `data.water_low`, `data.water_full`), with `0.5 s` trip and `1.5 s` leaky-bucket recovery:
+  - `CRITICAL LOW` reflects `data.water_crit` (tripped at `ADC <= out_stop_thr`, default `400`), when both the Heater and Pump 2 stop.
+  - `LOW` reflects `data.water_low` (tripped at `ADC <= water_thr`, default `460`), when Pump 2 is throttled to `100` PWM.
+  - `FULL` reflects `data.water_full` (tripped at `ADC >= in_stop_thr`, default `550`), when Pump 1 stops filling.
 - Tapping `#waterStatusCard` toggles `.expanded`, revealing `.water-adc-drawer` with the bath sensor pills:
-  - **BATH A9 ADC** (`#waterAdcVal`), **BATH VOLT** (`#waterVoltVal`), **BATH THR** (`#waterThrVal`: `≤ 450`, following `data.water_thr`), and **OUT PUMP STOP** (`#outPumpStopVal`: `≤ 350`, following `data.out_stop_thr`).
+  - **BATH A9 ADC** (`#waterAdcVal`), **BATH VOLT** (`#waterVoltVal`), **BATH THR** (`#waterThrVal`, following `data.water_thr`), and **OUT PUMP STOP** (`#outPumpStopVal`, following `data.out_stop_thr`).
 - Optional `PUMP LEAK (A8)` row (`#pumpLeakRow`) and its three drawer pills (`#leakAdcPill`, `#leakVoltPill`, `#leakThrPill`) are hidden (`display: none`) while `data.leak_enabled` is false (`ENABLE_LEAK_SENSOR == 0` in `master.cpp`).
 - Actuator badges reflect both the active mode and the master's debounced interlocks:
   - When an actuator's mode (`heater_mode`, `pump1_mode`, `pump2_mode`, `stir_mode`) is `OFF`, its Home tab badge explicitly displays `OFF` rather than `IDLE` or a sensor stop label, while the Controls tab `ON` / `OFF` / `AUTO` buttons (`updateActuatorButtons`) continuously sync with every `/status` poll.
   - `HEATER` shows `STOPPED (LOW WATER)` when enabled and `data.water_crit` is true, and `STOPPED (LEAK)` on a leak trip.
   - `PUMP 1` shows `STOPPED (HIGH WATER)` in `AUTO` when `data.water_full` is true.
-  - `PUMP 2` shows `STOPPED (CRITICAL LOW)` in `AUTO` when `data.water_crit` is true. See [legacy-master.md](../legacy-master.md#5-automatic-pump-interlocks).
-
-
   - `PUMP 2` shows `STOPPED (CRITICAL LOW)` in `AUTO` when `data.water_crit` is true. See [legacy-master.md](../legacy-master.md#5-automatic-pump-interlocks).
 
 ## Temporary MOSFET Speed Control (`0–255` Debit Testing)
@@ -41,4 +38,4 @@ In the Controls (`#pageControls`) tab, the **MOSFET Speed Control (0–255 Debit
 Changing any slider or stepper button sends `POST /control` with `{"action": "mosfet_pwm", "pin": "D3"|"D7"|"D4", "pwm": 0..255}`, which transmits `PWM:<pin>:<0-255>` to the Master Arduino. Each MOSFET channel slews smoothly over 3 seconds (`3000 ms`) to/from its configured `0–255` target ceiling according to its operating mode.
 
 ---
-Updated at 2026-11-17-23:47.
+Updated at 2026-11-21-11:04.

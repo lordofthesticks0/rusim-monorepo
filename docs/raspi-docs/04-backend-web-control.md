@@ -1,7 +1,7 @@
 # 4. Backend — `web_control.py`
 
 Plain Flask, no SocketIO. Listens on `0.0.0.0:5000` with
-`debug=False, threaded=True`. The kiosk page polls `/status` every 1.5 seconds.
+`debug=False, threaded=True`. The kiosk page polls `/status` every 0.5 seconds.
 
 ## Global state
 
@@ -34,7 +34,7 @@ current_data = {
     'water_low': False,       # master's debounced waterDepleted flag: Pump 2 throttled to 100 PWM
     'water_crit': False,      # master's debounced waterCriticalLow flag: Heater & Pump 2 cutoff
     'water_full': False,      # master's debounced inletWaterFull flag: Pump 1 cutoff
-    'water_adc': -1,          # interquartile-mean bath water sensor ADC on A9 (0..1023, rises when submerged)
+    'water_adc': -1,          # 200ms rolling trimmed-mean bath water sensor ADC on A9 (0..1023, rises when submerged)
     'water_thr': 460,         # WATER_DRY_THRESHOLD reported by master
     'out_stop_thr': 400,      # OUT_PUMP_STOP_ADC reported by master
     'in_stop_thr': 550,       # IN_PUMP_STOP_ADC reported by master
@@ -98,7 +98,7 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
      `leak_adc`, `leak_thr`; `pump_leak` is forced `False` and `leak_adc` `-1`
      when `leak_enabled` is false/absent), and `system_mode`.
   4. Anything else → `current_data.update(payload)`.
-- In `/status`, when `master_fresh` (`now_mono - last_master_rx_time < 12.0`) is `False`, `temp` and `bottle_avg_temp` are reported as `-999.0`; when `slave_fresh` (`now_mono - last_slave_rx_time < 12.0`) is `False`, `bottles` is returned as `[]` and `bottle_avg_temp` as `-999.0`.
+- In `/status`, when `master_fresh` (`now_mono - last_master_rx_time < 12.0`) is `False`, `temp` and `bottle_avg_temp` are reported as `-999.0` and `water_adc` is invalidated to `-1` (so a stalled master does not freeze the displayed ADC); when `slave_fresh` (`now_mono - last_slave_rx_time < 12.0`) is `False`, `bottles` is returned as `[]` and `bottle_avg_temp` as `-999.0`.
 
 ### `polling_worker` (daemon thread)
 
@@ -111,9 +111,9 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
 
 
 
-- Every 1.0 s, while connected, writes `b"STATUS\n"` under `serial_write_lock`
+- Every `STATUS_POLL_INTERVAL_SECONDS = 0.5` s (2 Hz), while connected, writes `b"STATUS\n"` under `serial_write_lock`
   and increments `outgoing`.
-- While `logging_active`, calls `log_data_to_csv()` once per loop.
+- While `logging_active`, calls `log_data_to_csv()` on its own `CSV_LOG_INTERVAL_SECONDS = 1.0` s monotonic cadence so CSV files remain 1 row/s.
 
 ### `telemetry_worker` (daemon thread)
 
@@ -164,11 +164,11 @@ traffic stays available without opening `/dev/ttyUSB0` a second time.
 - `{"action": "temp_target", "target": float, "hysteresis": float}` → sends `TEMP:<target>:<hyst>`.
 - `{"action": "thresholds", "out_stop": int, "dry": int, "in_stop": int, "leak": int}` (example `{"action":"thresholds","out_stop":400,"dry":460,"in_stop":550,"leak":200}`) → validates (`0–1023` each, trip-only), updates the volatile `thresholds` dict, sends `THRESH:...`, and caches the values optimistically. `400` on malformed/unknown action. Volatile: lost on Flask restart.
 
-Actuator modes are cached optimistically when a command is accepted, until the next `STATUS` reply overwrites them (polled every 1 s). The optimistic write reflects what the firmware will actually do:
+Actuator modes are cached optimistically when a command is accepted, until the next `STATUS` reply overwrites them (polled every 0.5 s). The optimistic write reflects what the firmware will actually do:
 
 - Heater: `ON` caches `heater = True` only while `water_crit` is false (`water_adc > out_stop_thr`, `400`) and no leak trip is active.
 - Pump 1: `ON` caches `pump1 = True` while no leak trip is active and its PWM ceiling is nonzero (debug `FORCE ON` ignores `water_full`; the master still honours `MODE_OFF`/leak).
 - Pump 2: `ON` caches `pump2 = True` while no leak trip is active and its PWM ceiling is nonzero (debug `FORCE ON` ignores `water_crit`; the master still honours `MODE_OFF`/leak).
 
 ---
-Updated at 2026-11-17-23:47.
+Updated at 2026-11-21-11:04.
