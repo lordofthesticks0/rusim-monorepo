@@ -37,7 +37,8 @@ legacy/pi/water-control-system/
 ├── .gitignore
 ├── web_control.py                  # Flask backend (no SocketIO)
 ├── templates/
-│   └── index.html                  # kiosk dashboard, live version
+│   ├── index.html                  # kiosk dashboard, live developer version
+│   └── Clean User Version.html     # dormant clean 5-tab user UI (inactive until requested)
 ├── water_control_arduino/
 │   └── water_control_arduino.ino   # Arduino master firmware
 └── logs/
@@ -121,4 +122,4 @@ inspector and hotspot download, but still uses the original iOS-style CSS.
   deploy/reload procedure.
 
 ---
-Updated at 2026-11-18-00:12.
+Updated at 2026-11-21-12:56.

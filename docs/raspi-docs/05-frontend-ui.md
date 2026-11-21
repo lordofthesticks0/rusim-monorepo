@@ -37,5 +37,13 @@ In the Controls (`#pageControls`) tab, the **MOSFET Speed Control (0–255 Debit
 
 Changing any slider or stepper button sends `POST /control` with `{"action": "mosfet_pwm", "pin": "D3"|"D7"|"D4", "pwm": 0..255}`, which transmits `PWM:<pin>:<0-255>` to the Master Arduino. Each MOSFET channel slews smoothly over 3 seconds (`3000 ms`) to/from its configured `0–255` target ceiling according to its operating mode.
 
+## Dormant Clean User Template (`templates/Clean User Version.html`)
+
+[`legacy/pi/water-control-system/templates/Clean User Version.html`](../../legacy/pi/water-control-system/templates/Clean%20User%20Version.html) stores the pre-developer 5-tab UI layout (based on commit `c4eb81d` plus the Settings centering fix from `65983a3`), kept dormant beside `templates/index.html`:
+
+- **Inactive by default**: `web_control.py` renders only `index.html` on `/`; `Clean User Version.html` is not served unless `render_template('index.html')` is explicitly switched to it (or it replaces `index.html`).
+- **Removed developer widgets**: Omits the `MOSFET Speed Control (0–255 Debit Test)` card, live `Out:` PWM counters, clickable `WATER LEVEL` ADC/Volt/Threshold drawer, dual Pump 1 / Pump 2 split, and hardware pin labels (`A9`, `A8`, `D5`, `D3`, `D7`, `D4`).
+- **Preserved current backend compatibility**: Uses the unified `POST /control` `pump` action (which controls both Pump 1 and Pump 2 together in `web_control.py`), `500 ms` `/status` polling (1.5 s live log tail), server clock synchronization (`data.clock`), `water_crit` / `water_low` / `water_full` status mapping, `OFF` / safety stop actuator badges with continuous Controls button sync, Bottle ID `1..4` filtering and empty-grid reset, and `"Over Limit"` formatting for methane (`>= 10000` ppm) and CO2 (`>= 5000` ppm).
+
 ---
-Updated at 2026-11-21-11:04.
+Updated at 2026-11-21-12:56.

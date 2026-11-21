@@ -822,9 +822,9 @@
     "semantic_hash": ""
   },
   "docs/pi-water-control-system-mirror.md": {
-    "mtime": 1794975602.968719,
-    "seen": 1795233883.7108603,
-    "ast_hash": "606ac727f06a10dbe034994afe61270a",
+    "mtime": 1795240602.5684943,
+    "seen": 1795240636.7327712,
+    "ast_hash": "9e568e75c740b556ed3fc6318a8b25ea",
     "semantic_hash": ""
   },
   "docs/plans-and-audits/captive-portal-workaround.md": {
@@ -918,9 +918,9 @@
     "semantic_hash": ""
   },
   "docs/raspi-docs/05-frontend-ui.md": {
-    "mtime": 1795233860.7871287,
-    "seen": 1795233883.7108603,
-    "ast_hash": "c6dbf0dd4760701fa8e4246082ff5c9c",
+    "mtime": 1795240598.8688362,
+    "seen": 1795240636.7397885,
+    "ast_hash": "7380786a49153f8d8f5cbd5f52043aa8",
     "semantic_hash": ""
   },
   "docs/raspi-docs/06-master-firmware.md": {
@@ -1023,6 +1023,12 @@
     "mtime": 1795232860.6422257,
     "seen": 1795233883.7108603,
     "ast_hash": "387c7a3b0db7a8af931839b623a777e8",
+    "semantic_hash": ""
+  },
+  "legacy/pi/water-control-system/templates/Clean User Version.html": {
+    "mtime": 1795240539.6854582,
+    "seen": 1795240636.7447765,
+    "ast_hash": "bb562625f2f219b9b8f7b42cba8e4d8c",
     "semantic_hash": ""
   }
 }
