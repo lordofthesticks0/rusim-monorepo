@@ -84,7 +84,7 @@ one address (`index 0`) without a bus scan.
 
 ### 4.1 pH
 
-`readPhVoltage(i)` samples the channel in a burst before conversion:
+`readPhRaw(i)` samples the channel in a burst before conversion:
 
 - The first `analogRead` after the multiplexer moves is discarded, because the
   ADC sample-and-hold capacitor still holds the previous channel's voltage.
@@ -93,7 +93,9 @@ one address (`index 0`) without a bus scan.
   mean). The 100 ms window is a whole number of 50 Hz and 60 Hz cycles, so
   mains hum averages out instead of aliasing into the reading; the trim removes
   switching spikes.
-- The averaged raw count is scaled with `5.0f / 1023.0f` and passed to
+- `readPhRaw` returns that averaged raw ADC count (0-1023). `updatePhAndTemp()`
+  caches it as `ph_raw`, then scales it with `5.0f / 1023.0f` and passes the
+  voltage to
   `convertPhVoltage(v, i)`.
 
 `convertPhVoltage()` is a 3-point piecewise linear conversion per bottle:
@@ -112,7 +114,8 @@ one address (`index 0`) without a bus scan.
   the CSV records.
 
 The serialised `ph` field is therefore **pH units**. The same reading is also
-emitted as `ph_v`, the averaged input voltage in volts before conversion, so an
+emitted as `ph_raw`, the averaged raw ADC count (0-1023, 10-bit, 5 V reference)
+before any conversion, so an
 invalid `ph` (`-1`) can still be diagnosed. The Flask server used to apply this
 conversion on ingest; it now passes the value through, so the two must be
 deployed together.
@@ -268,14 +271,14 @@ and is discarded.
 One JSON object followed by `\n`:
 
 ```json
-{"bottles":[{"id":1,"ph":6.84,"ph_v":3.84,"methane":812.4,"temp":38.5,"co2":1204,"press":1013.2},{"id":2,"ph":6.81,"ph_v":3.84,"methane":790.1,"temp":38.2,"co2":1198,"press":1012.8},{"id":3,"ph":6.87,"ph_v":3.83,"methane":824.9,"temp":38.7,"co2":1210,"press":1013.5},{"id":4,"ph":6.80,"ph_v":3.84,"methane":801.3,"temp":38.4,"co2":1202,"press":1013.0}]}
+{"bottles":[{"id":1,"ph":6.84,"ph_raw":786,"methane":812.4,"temp":38.5,"co2":1204,"press":1013.2},{"id":2,"ph":6.81,"ph_raw":786,"methane":790.1,"temp":38.2,"co2":1198,"press":1012.8},{"id":3,"ph":6.87,"ph_raw":784,"methane":824.9,"temp":38.7,"co2":1210,"press":1013.5},{"id":4,"ph":6.80,"ph_raw":786,"methane":801.3,"temp":38.4,"co2":1202,"press":1013.0}]}
 ```
 
 | Field | Type | Unit | Invalid marker |
 |---|---|---|---|
 | `id` | integer | — | never invalid |
 | `ph` | float | pH units (see §4.1) | `-1` |
-| `ph_v` | float | V (averaged, before conversion) | `-1` |
+| `ph_raw` | float | ADC counts (averaged, 0-1023, before conversion) | `-1` |
 | `methane` | float | ppm | `-1` |
 | `temp` | float | °C | `-999` |
 | `co2` | integer | ppm | `-1` |
@@ -356,4 +359,4 @@ valid cached reading.
 - `plans-and-audits/esp-db-sync.md` §3 — the planned Modbus replacement for this program.
 
 ---
-Updated at 2026-11-20-15:27.
+Updated at 2026-11-20-16:05.

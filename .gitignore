@@ -21,3 +21,6 @@ graphify-out/cache/
 3d-designs/
 .taste-skill/
 personal/
+
+# Local Netlify folder
+.netlify

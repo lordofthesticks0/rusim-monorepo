@@ -108,7 +108,7 @@ bool pressInitialized[NUM_BOTTLES]  = {false, false, false, false};
 
 // Latest valid readings sent immediately upon Master "#1:PING*"
 float cachedPh[NUM_BOTTLES]      = {-1.0f, -1.0f, -1.0f, -1.0f};
-float cachedPhV[NUM_BOTTLES]     = {-1.0f, -1.0f, -1.0f, -1.0f};
+float cachedPhRaw[NUM_BOTTLES]   = {-1.0f, -1.0f, -1.0f, -1.0f};
 float cachedMethane[NUM_BOTTLES] = {-1.0f, -1.0f, -1.0f, -1.0f};
 float cachedTemp[NUM_BOTTLES]    = {-999.0f, -999.0f, -999.0f, -999.0f};
 long  cachedCo2[NUM_BOTTLES]     = {-1, -1, -1, -1};
@@ -299,7 +299,8 @@ float convertPhVoltage(float v, int idx) {
   return roundf(ph * 100.0f) / 100.0f;
 }
 
-float readPhVoltage(int idx) {
+// Returns the trimmed-mean raw ADC count (0-1023), not volts.
+float readPhRaw(int idx) {
   // Discard the first conversion after the multiplexer moves: the
   // sample-and-hold capacitor still holds the previous channel's voltage.
   (void)analogRead(PIN_PH[idx]);
@@ -318,14 +319,14 @@ float readPhVoltage(int idx) {
 
   // Trimmed mean: one high and one low sample are dropped.
   const float rawAvg = (sum - lo - hi) / float(PH_SAMPLES - 2);
-  return rawAvg * (5.0f / 1023.0f);
+  return rawAvg;
 }
 
 void updatePhAndTemp() {
   for (int i = 0; i < NUM_BOTTLES; i++) {
-    const float v = readPhVoltage(i);
-    cachedPhV[i] = v;
-    cachedPh[i] = convertPhVoltage(v, i);
+    const float raw = readPhRaw(i);
+    cachedPhRaw[i] = raw;
+    cachedPh[i] = convertPhVoltage(raw * (5.0f / 1023.0f), i);
     serviceMasterPing();
   }
 
@@ -395,7 +396,7 @@ void sendTelemetryJson(Stream &port) {
     JsonObject bottle = bottles.createNestedObject();
     bottle["id"]      = i + 1;
     bottle["ph"]      = cachedPh[i];
-    bottle["ph_v"]    = cachedPhV[i];
+    bottle["ph_raw"]  = cachedPhRaw[i];
     bottle["methane"] = cachedMethane[i];
     bottle["temp"]    = cachedTemp[i];
     bottle["co2"]     = cachedCo2[i];
