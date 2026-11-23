@@ -7,7 +7,7 @@ friendly subcommand names. Stdlib only (no requests needed).
 Examples:
   flask_cli.py --base-url http://10.92.128.23:5000 status
   flask_cli.py heater ON
-  flask_cli.py thresholds --out-stop 400 --dry 460 --in-stop 550 --leak 200
+  flask_cli.py thresholds --out-stop 385 --dry 445 --in-stop 535 --leak 200
   flask_cli.py --help
   flask_cli.py help
 """
@@ -37,7 +37,7 @@ Controls (POST /control):
   pwm PIN 0-255               PIN is D3, D7 or D4
   stirrer MODE [MIN SEC]      MODE is OFF|ON|PULSE|TIMED
   temp-target TARGET HYST     e.g. 39.0 0.3
-  thresholds OUT DRY IN LEAK  Trip-only, e.g. 400 460 550 200
+  thresholds OUT DRY IN LEAK  Trip-only, e.g. 385 445 535 200
   mode AUTO|OFF               System mode (POST /set_mode)
 
 Server (POST, no /control):

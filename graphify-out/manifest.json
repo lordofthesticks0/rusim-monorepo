@@ -336,9 +336,9 @@
     "semantic_hash": ""
   },
   "legacy/master/master.cpp": {
-    "mtime": 1795233785.6205451,
-    "seen": 1795405902.6294122,
-    "ast_hash": "416096d2a3baaa8dba107de429859d88",
+    "mtime": 1795421987.1963832,
+    "seen": 1795422008.8558514,
+    "ast_hash": "7d8ba8a84dbccc66d1107a258b978136",
     "semantic_hash": ""
   },
   "legacy/pi/captive-portal-login.sh": {
@@ -354,9 +354,9 @@
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/web_control.py": {
-    "mtime": 1795233785.6225467,
-    "seen": 1795405902.6294122,
-    "ast_hash": "d5d7a716a94eac08aef0e726650b4ea8",
+    "mtime": 1795421987.1980417,
+    "seen": 1795422008.8578625,
+    "ast_hash": "af6510461259c83c2527a1d243140b18",
     "semantic_hash": ""
   },
   "legacy/slave/new-slave.cpp": {
@@ -396,9 +396,9 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1794975602.9518614,
-    "seen": 1795405902.6294122,
-    "ast_hash": "b72678a37233ec95a366494d1908a818",
+    "mtime": 1795419338.7598424,
+    "seen": 1795422008.8578625,
+    "ast_hash": "0eb800a05924e78225a17bae2af63005",
     "semantic_hash": ""
   },
   "README.md": {
@@ -438,9 +438,9 @@
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/templates/index.html": {
-    "mtime": 1795233773.058762,
-    "seen": 1795405902.6294122,
-    "ast_hash": "73ee676234f3932a9b8b5c1fc811cb9a",
+    "mtime": 1795421987.2013464,
+    "seen": 1795422008.864075,
+    "ast_hash": "e26700cb48e3005e546204342abdbcff",
     "semantic_hash": ""
   },
   "firmware/tests/pwm-50-hold/main.cpp": {
@@ -474,9 +474,9 @@
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/flask_cli.py": {
-    "mtime": 1793954622.7175097,
-    "seen": 1795405902.6294122,
-    "ast_hash": "09a1afa653a900d043c5e43dbebe57a6",
+    "mtime": 1795421987.2033496,
+    "seen": 1795422008.8578625,
+    "ast_hash": "7d1987ff29671edd0bb3bc593696caf4",
     "semantic_hash": ""
   },
   "firmware/tests/test_methane_calibration.py": {
@@ -737,12 +737,6 @@
     "ast_hash": "acfa986a1a129954d81d577f6e06008a",
     "semantic_hash": ""
   },
-  "docs/learned-mistakes.md": {
-    "mtime": 1795232860.5837238,
-    "seen": 1795405902.6294122,
-    "ast_hash": "3f2d6d7b7f6d2bdb65bf9ab332abed9f",
-    "semantic_hash": ""
-  },
   "docs/legacy-flask-cli.md": {
     "mtime": 1794975602.9628632,
     "seen": 1795405902.6294122,
@@ -756,9 +750,9 @@
     "semantic_hash": ""
   },
   "docs/legacy-master.md": {
-    "mtime": 1795233860.7821295,
-    "seen": 1795405902.6294122,
-    "ast_hash": "dc60834a3c8e58b82e8dc4f3ded2d8c9",
+    "mtime": 1795421987.2063496,
+    "seen": 1795422008.8618703,
+    "ast_hash": "d0f4119143ac102fdd126565d19ae2dd",
     "semantic_hash": ""
   },
   "docs/legacy-pi-remote-monitor.md": {
@@ -906,21 +900,21 @@
     "semantic_hash": ""
   },
   "docs/raspi-docs/04-backend-web-control.md": {
-    "mtime": 1795233860.7851298,
-    "seen": 1795405902.6294122,
-    "ast_hash": "9c34632c35db6df092bfd5d5131139de",
+    "mtime": 1795421987.2080617,
+    "seen": 1795422008.864075,
+    "ast_hash": "513063b7bdbaf80f623374c0277aaed1",
     "semantic_hash": ""
   },
   "docs/raspi-docs/05-frontend-ui.md": {
-    "mtime": 1795240598.8688362,
-    "seen": 1795405902.6294122,
-    "ast_hash": "7380786a49153f8d8f5cbd5f52043aa8",
+    "mtime": 1795421987.2094104,
+    "seen": 1795422008.864075,
+    "ast_hash": "1025f45c4bc5d6c291d95f66e5076cd1",
     "semantic_hash": ""
   },
   "docs/raspi-docs/06-master-firmware.md": {
-    "mtime": 1795233860.7881305,
-    "seen": 1795405902.6294122,
-    "ast_hash": "6506b17c35b81bbb53f4188e5696fd9c",
+    "mtime": 1795421987.2094104,
+    "seen": 1795422008.864075,
+    "ast_hash": "d026ae062606d59ca08826b70282a2f1",
     "semantic_hash": ""
   },
   "docs/raspi-docs/07-data-and-logging.md": {
@@ -960,9 +954,9 @@
     "semantic_hash": ""
   },
   "docs/raspi-docs/13-rest-api-reference.md": {
-    "mtime": 1794975602.979722,
-    "seen": 1795405902.6294122,
-    "ast_hash": "2bdc00368817c5deec8840fc2e8dd3ad",
+    "mtime": 1795421987.2104115,
+    "seen": 1795422008.864075,
+    "ast_hash": "7c3f8845e2f026b3a1fbe6dcdbcd3b13",
     "semantic_hash": ""
   },
   "docs/raspi-docs/14-leaf-reader.md": {
@@ -1050,15 +1044,9 @@
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/templates/Clean User Version.html": {
-    "mtime": 1795240539.6854582,
-    "seen": 1795405902.6294122,
-    "ast_hash": "bb562625f2f219b9b8f7b42cba8e4d8c",
-    "semantic_hash": ""
-  },
-  "legacy/pi/water-control-system/clean-user-version-walkthrough.mp4": {
-    "mtime": 1795274426.2535808,
-    "seen": 1795405902.6294122,
-    "ast_hash": "3c350a31581eca479d81d483070adcbf",
+    "mtime": 1795421987.2023497,
+    "seen": 1795422008.864075,
+    "ast_hash": "e439d46fd2a0e482f49a9beebb008a29",
     "semantic_hash": ""
   }
 }

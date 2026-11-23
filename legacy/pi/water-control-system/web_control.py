@@ -47,9 +47,9 @@ REQUIRED_BOTTLE_KEYS = ('id', 'temp', 'ph', 'methane', 'co2', 'press')
 # forgets them on reboot and falls back to these same defaults.
 # To tweak: edit these values and restart Flask, or POST them live (see
 # /control action "thresholds"). No reflash needed.
-OUT_PUMP_STOP_ADC = 400
-WATER_DRY_THRESHOLD = 460
-IN_PUMP_STOP_ADC = 550
+OUT_PUMP_STOP_ADC = 385
+WATER_DRY_THRESHOLD = 445
+IN_PUMP_STOP_ADC = 535
 LEAK_THRESHOLD = 200
 
 # Volatile runtime copy of the thresholds. Initialised from the file
@@ -156,9 +156,9 @@ current_data = {
     'water_crit': False,
     'water_full': False,
     'water_adc': -1,
-    'water_thr': 460,
-    'out_stop_thr': 400,
-    'in_stop_thr': 550,
+    'water_thr': 445,
+    'out_stop_thr': 385,
+    'in_stop_thr': 535,
     'leak_enabled': False,
     'pump_leak': False,
     'leak_adc': -1,

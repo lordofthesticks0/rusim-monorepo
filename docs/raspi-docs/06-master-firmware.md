@@ -31,9 +31,9 @@ a copy of this file.
 - Slave poll cadence: **3500 ms**
 - Stirrer & pump ramp: **3000 ms** soft-start and soft-stop, full duty **255** (AUTO pump cap **200**, dry Pump 2 throttle **100**)
 - Water-level sensing (`A9`): sampled every **25 ms** (40 Hz) into an 8-sample (**200 ms**) rolling ring buffer where the middle 4 sorted samples are averaged (`waterRaw`), and evaluated every **100 ms** (10 Hz) with **5** checks (**0.5 s**) to trip and **15** checks (**1.5 s**) with leaky-bucket (`+2` penalty on fault glitch) to clear. The thresholds are trip-only, with no recovery deadband, because the level can move fast:
-  - `waterCriticalLow` (Heater & Pump 2 hard cutoff): trips `<= 400`, clears above `400`
-  - `waterDepleted` (Pump 2 throttle to `100` PWM): trips `<= 460`, clears above `460`
-  - `inletWaterFull` (Pump 1 hard cutoff): trips `>= 550`, clears below `550`
+  - `waterCriticalLow` (Heater & Pump 2 hard cutoff): trips `<= 385`, clears above `385`
+  - `waterDepleted` (Pump 2 throttle to `100` PWM): trips `<= 445`, clears above `445`
+  - `inletWaterFull` (Pump 1 hard cutoff): trips `>= 535`, clears below `535`
   The three thresholds are RAM-only and set by the Pi with `THRESH:...`; they revert to these defaults on reboot.
 
 ## Stirrer modes
@@ -106,4 +106,4 @@ last successful hash is stored in
 [legacy-master.md](../legacy-master.md).
 
 ---
-Updated at 2026-11-21-11:04.
+Updated at 2026-11-23-15:20.

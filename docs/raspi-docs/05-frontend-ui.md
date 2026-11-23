@@ -16,9 +16,9 @@ Single-page kiosk dashboard rendered by Flask. The live copy uses a **CarPlay-st
 
 On the Home (`water`) tab, the right-hand system status card (`#waterStatusCard`) is clickable (`onclick="toggleWaterDetails()"`):
 - `WATER LEVEL (A9)` displays `NORMAL`, `FULL`, `LOW`, or `CRITICAL LOW` using the master's debounced flags (`data.water_crit`, `data.water_low`, `data.water_full`), with `0.5 s` trip and `1.5 s` leaky-bucket recovery:
-  - `CRITICAL LOW` reflects `data.water_crit` (tripped at `ADC <= out_stop_thr`, default `400`), when both the Heater and Pump 2 stop.
-  - `LOW` reflects `data.water_low` (tripped at `ADC <= water_thr`, default `460`), when Pump 2 is throttled to `100` PWM.
-  - `FULL` reflects `data.water_full` (tripped at `ADC >= in_stop_thr`, default `550`), when Pump 1 stops filling.
+  - `CRITICAL LOW` reflects `data.water_crit` (tripped at `ADC <= out_stop_thr`, default `385`), when both the Heater and Pump 2 stop.
+  - `LOW` reflects `data.water_low` (tripped at `ADC <= water_thr`, default `445`), when Pump 2 is throttled to `100` PWM.
+  - `FULL` reflects `data.water_full` (tripped at `ADC >= in_stop_thr`, default `535`), when Pump 1 stops filling.
 - Tapping `#waterStatusCard` toggles `.expanded`, revealing `.water-adc-drawer` with the bath sensor pills:
   - **BATH A9 ADC** (`#waterAdcVal`), **BATH VOLT** (`#waterVoltVal`), **BATH THR** (`#waterThrVal`, following `data.water_thr`), and **OUT PUMP STOP** (`#outPumpStopVal`, following `data.out_stop_thr`).
 - Optional `PUMP LEAK (A8)` row (`#pumpLeakRow`) and its three drawer pills (`#leakAdcPill`, `#leakVoltPill`, `#leakThrPill`) are hidden (`display: none`) while `data.leak_enabled` is false (`ENABLE_LEAK_SENSOR == 0` in `master.cpp`).
@@ -46,4 +46,4 @@ Changing any slider or stepper button sends `POST /control` with `{"action": "mo
 - **Preserved current backend compatibility**: Uses the unified `POST /control` `pump` action (which controls both Pump 1 and Pump 2 together in `web_control.py`), `500 ms` `/status` polling (1.5 s live log tail), server clock synchronization (`data.clock`), `water_crit` / `water_low` / `water_full` status mapping, `OFF` / safety stop actuator badges with continuous Controls button sync, Bottle ID `1..4` filtering and empty-grid reset, and `"Over Limit"` formatting for methane (`>= 10000` ppm) and CO2 (`>= 5000` ppm).
 
 ---
-Updated at 2026-11-21-12:56.
+Updated at 2026-11-23-15:20.

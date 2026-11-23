@@ -26,9 +26,9 @@ float bottleHysteresis  = 0.3;  // Adjustable hysteresis band (°C)
 // Water thresholds are RAM-only variables so the Pi can change them at
 // runtime via THRESH:... — they revert to these defaults on reboot.
 // Trip-only (no recover deadbands): water fills too fast for a deadband.
-int outPumpStopAdc    = 400;  // Trip critical dry cutoff (Heater & Pump 2 OFF) at or below this ADC
-int waterDryThreshold = 460;  // Trip low-water Pump 2 throttle at or below this ADC
-int inPumpStopAdc     = 550;  // Trip high-water cutoff (Pump 1 OFF) at or above this ADC
+int outPumpStopAdc    = 385;  // Trip critical dry cutoff (Heater & Pump 2 OFF) at or below this ADC
+int waterDryThreshold = 445;  // Trip low-water Pump 2 throttle at or below this ADC
+int inPumpStopAdc     = 535;  // Trip high-water cutoff (Pump 1 OFF) at or above this ADC
 #define ENABLE_LEAK_SENSOR     0      // 0 = disabled (only A9 water presence sensor installed); 1 = enable A8 leak probe
 int leakThreshold     = 200;  // Pump leak wet-detection ADC threshold
 #define WATER_SAMPLE_MS        25UL   // Time-spread ADC sampling cadence (25ms = 40 Hz, cancels 50/60 Hz)
