@@ -60,6 +60,38 @@ struct PushRow {
   uint8_t nullMask;
 };
 
+// A device with `bottleCount` bottles accepts ids 0..bottleCount-1. The server
+// rejects the WHOLE batch (SQLSTATE 22023) when any row has another id, and the
+// firmware keeps a rejected batch and retries it, so one out-of-range row would
+// block every later upload. The firmware therefore never queues such rows.
+// An unknown count (<= 0) accepts everything: the count is only known after a
+// successful database pull, and the run start already requires one.
+inline bool bottleInRange(uint8_t bottleId, int bottleCount) {
+  return bottleCount <= 0 || (int)bottleId < bottleCount;
+}
+
+// Removes rows with an out-of-range bottle id from a ring buffer, keeping the
+// order of the rest. `head` is the oldest row; `tail` and `count` are updated.
+// Needed when the device's bottle_count is lowered while rows are queued: those
+// rows were valid when collected but would now poison their batch. Compacts in
+// place; the write position never passes the read position. Returns the number
+// of rows removed.
+inline size_t purgeOutOfRangeRows(PushRow* ring, size_t cap, size_t head,
+                                  size_t& tail, size_t& count, int bottleCount) {
+  if (ring == nullptr || cap == 0) return 0;
+  size_t kept = 0;
+  for (size_t i = 0; i < count; ++i) {
+    const PushRow& r = ring[(head + i) % cap];
+    if (!bottleInRange(r.bottleId, bottleCount)) continue;
+    if (kept != i) ring[(head + kept) % cap] = r;
+    ++kept;
+  }
+  const size_t removed = count - kept;
+  count = kept;
+  tail = (head + kept) % cap;
+  return removed;
+}
+
 // True for values that can be serialised as a JSON number. NaN and infinities
 // are rejected because JSON has no representation for them and the server's
 // `::real` cast would accept a NaN silently.

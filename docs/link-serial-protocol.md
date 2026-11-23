@@ -105,8 +105,15 @@ Rules:
 | Command | Payload | Sender cadence | WT32 action |
 |---|---|---|---|
 | `HELLO` | - | once at display boot | log link-up; immediately re-send current truth (`NET`, `DB`, `LOGINREQ` if needed, `RESULT OK` if running) |
-| `EXPERIMENT` | `run=<0\|1> num=<n> dur=<1-99>` | on every change + every heartbeat | store; log only on change |
+| `EXPERIMENT` | `run=<0\|1> num=<n> dur=<1-99>` | on every change + every heartbeat, after the boot gate opens (below) | store; log only on change |
 | `DUMP` | - | bench only, `IS_DEBUG` builds | emit a `LOG [DUMP] ...` snapshot of local state |
+
+**Boot gate (display side).** After a display boot no `EXPERIMENT` is sent
+until the first `DB` line has arrived (normally from the `HELLO` snapshot).
+If that line reports an active run (`aexp`, `adur`), the display adopts it and
+then sends `run=1`; otherwise it sends its own state. This stops a display
+reboot from sending `run=0` into a running experiment. A WT32 `HELLO` does not
+re-close the gate. Details: `display-docs.md` §10.
 
 The display ignores display-direction words arriving on its RX; the WT32
 likewise. Loopback benching (RX shorted to TX) therefore produces no loops.
@@ -342,8 +349,8 @@ with this port.
    `PASSTH ON` echoes typed characters; every emitted command logs one
    `[LINK>]` line, and its looped-back copy is silently ignored (direction
    check).
-2. **One board, display only:** expect an `EXPERIMENT` heartbeat every 5 s and
-   no errors.
+2. **One board, display only:** expect no `EXPERIMENT` line (the boot gate
+   waits for a `DB` line that never comes) and no errors.
 3. **Both boards:** see `[W32]`-forwarded WT32 logs, then `NET`/`DB`/
    `LOGINREQ`; `/info` shows the live IP after the HELLO exchange.
 4. **Portal round trip:** open the WT32 IP page, submit credentials;
@@ -360,4 +367,4 @@ with this port.
    `display-sim`, `network-master`.
 
 ---
-Updated at 2026-11-19-15:38.
+Updated at 2026-11-21-14:22.

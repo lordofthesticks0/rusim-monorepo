@@ -1,308 +1,226 @@
 #include "screen_control.h"
 
+#include <string.h>
+
 #include "fake_data.h"
 #include "link_serial.h"
 #include "ui_config.h"
 #include "ui_hold_button.h"
 #include "ui_shell.h"
 
+// Layout (content coordinates, 16 px grid):
+//   title row "Control" (+ debug PUSH EXP on the right, kept for development)
+//   left top    (16, 56, 376 x 140): temperature setpoint
+//   left bottom (16, 212, 376 x 204): experiment number + duration + status
+//   right       (408, 56, 376 x 360): run, then equipment (stirrers, pump)
+// Widgets are built once in show(); refresh() only changes text and colours.
+//
+// Setpoint, stirrers and water pump have no hardware transport yet (backlog):
+// they change display state only and say so on screen.
+
 static lv_obj_t *s_setpoint = nullptr;
-static lv_obj_t *s_btnTempDown = nullptr;
-static lv_obj_t *s_btnTempUp = nullptr;
-static lv_obj_t *s_btnStirrer = nullptr;
-static lv_obj_t *s_btnRun = nullptr;
-static lv_obj_t *s_btnDurDown = nullptr;
-static lv_obj_t *s_btnDurUp = nullptr;
 static lv_obj_t *s_durValue = nullptr;
-static lv_obj_t *s_btnExpDown = nullptr;
-static lv_obj_t *s_btnExpUp = nullptr;
 static lv_obj_t *s_expValue = nullptr;
 static lv_obj_t *s_expDesc = nullptr;
-static lv_obj_t *s_intBtn = nullptr;
+static lv_obj_t *s_btnRun = nullptr;
+static lv_obj_t *s_runState = nullptr;
+static lv_obj_t *s_runHint = nullptr;
+static lv_obj_t *s_btnStirrer = nullptr;
+static lv_obj_t *s_stirrerState = nullptr;
+static lv_obj_t *s_btnPump = nullptr;
+static lv_obj_t *s_pumpState = nullptr;
 static lv_obj_t *s_intHint = nullptr;
 
-static bool s_dbSuggested = false;
-
-static void exp_mirror_link() {
-  link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
-}
-
-static void setpoint_show() {
+static void render() {
   if (s_setpoint == nullptr) return;
-  char t[32];
-  snprintf(t, sizeof(t), "%.1f C", g.tempSetpointC);
+  char t[64];
+  snprintf(t, sizeof(t), "%.1f " UI_DEG_C, g.tempSetpointC);
   lv_label_set_text(s_setpoint, t);
-}
-
-static void dur_show() {
-  if (s_durValue == nullptr) return;
-  char t[16];
-  snprintf(t, sizeof(t), "%d", g.durationH);
-  lv_label_set_text(s_durValue, t);
-}
-
-static void exp_show() {
-  if (s_expValue == nullptr) return;
-  char t[16];
   snprintf(t, sizeof(t), "%d", g.expNum);
   lv_label_set_text(s_expValue, t);
-}
+  snprintf(t, sizeof(t), "%d h", g.durationH);
+  lv_label_set_text(s_durValue, t);
 
-// Explains which configuration the next start will use, and why a start is
-// blocked. While a run is active it reports the FROZEN snapshot instead, so
-// edits on this screen are visibly pending rather than silently applied.
-static void db_refresh_warn() {
-  if (!ui_is_control()) return;
-  if (s_expDesc == nullptr) return;
-  char t[64];
-
-  if (g.experimentRunning) {
-    int aexp = link_serial_get_db_active_exp();
-    if (aexp < 0) {
-      // Older WT32 firmware sends no active-run fields.
-      lv_label_set_text(s_expDesc, "run: config unknown");
-      lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_WARN), LV_PART_MAIN);
-      return;
-    }
-    int src = link_serial_get_db_active_src();
-    snprintf(t, sizeof(t), "run %d: %dh %s", aexp, link_serial_get_db_active_dur(),
-             src == 1 ? "DB" : src == 2 ? "local" : "?");
-    lv_label_set_text(s_expDesc, t);
-    lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_OK), LV_PART_MAIN);
-    return;
-  }
-
-  if (!link_serial_db_ready()) {
-    lv_label_set_text(s_expDesc, "DB not loaded: blocked");
-    lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_ALARM), LV_PART_MAIN);
-    return;
-  }
-
-  int latest = link_serial_get_db_latest();
-  if (latest == -2) {
-    lv_label_set_text(s_expDesc, "DB: waiting for sync");
-    lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_DIM), LV_PART_MAIN);
-    return;
-  }
-  if (!s_dbSuggested) {
-    s_dbSuggested = true;
-    // Consider configured-but-unread experiments too: suggesting latest+1 would
-    // reuse an id that already has a reserved configuration row.
-    int cfgMax = link_serial_get_db_cfg_max();
-    int base = latest > cfgMax ? latest : cfgMax;
-    int next = base + 1;
-    if (next < UI_EXP_NUM_MIN) next = UI_EXP_NUM_MIN;
-    if (next > UI_EXP_NUM_MAX) next = UI_EXP_NUM_MAX;
-    if (g.expNum != next) {
-      g.expNum = next;
-      exp_show();
-      exp_mirror_link();
-      ui_update_bell();
-      Serial.printf("[DB] auto-suggest exp=%d (latest=%d)\n", next, latest);
-    }
-  }
-  if (g.expNum <= latest) {
-    snprintf(t, sizeof(t), "exp %d exists, use %d", g.expNum, latest + 1);
-    lv_label_set_text(s_expDesc, t);
-    lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_WARN), LV_PART_MAIN);
-    return;
-  }
-  // The DB row for the selected id supplies duration/interval at run start.
-  // No row means the display values are used, which is shown before starting.
-  int pendingDur = link_serial_get_db_pending_dur();
-  if (pendingDur > 0) {
-    snprintf(t, sizeof(t), "exp %d: DB %dh", g.expNum, pendingDur);
-  } else {
-    snprintf(t, sizeof(t), "exp %d: local %dh", g.expNum, g.durationH);
-  }
+  const uint32_t col = ui_exp_status_text(t, sizeof(t));
   lv_label_set_text(s_expDesc, t);
-  lv_obj_set_style_text_color(s_expDesc, lv_color_hex(UI_COL_OK), LV_PART_MAIN);
+  lv_obj_set_style_text_color(s_expDesc, lv_color_hex(col), LV_PART_MAIN);
+
+  ui_hold_button_set_symbol(s_btnRun, g.experimentRunning ? LV_SYMBOL_STOP : LV_SYMBOL_PLAY);
+  ui_hold_button_set_state(s_btnRun, g.experimentRunning);
+  lv_label_set_text(s_runState, g.experimentRunning ? "Running" : "Idle");
+  lv_obj_set_style_text_color(s_runState,
+                              lv_color_hex(g.experimentRunning ? UI_COL_OK : UI_COL_TEXT),
+                              LV_PART_MAIN);
+  lv_label_set_text(s_runHint, g.experimentRunning ? "Hold 2 s to stop" : "Hold 2 s to start");
+
+  ui_hold_button_set_state(s_btnStirrer, g.stirrerOn);
+  lv_label_set_text(s_stirrerState, g.stirrerOn ? "Stirrers: On" : "Stirrers: Off");
+  ui_hold_button_set_state(s_btnPump, g.pumpOn);
+  lv_label_set_text(s_pumpState, g.pumpOn ? "Water pump: On" : "Water pump: Off");
 }
+
+void screen_control_refresh() { render(); }
 
 void screen_control_poll() {
   if (!ui_is_control()) return;
-  db_refresh_warn();
+  // DB state arrives from the WT32 at any time; keep the status line current.
+  if (s_expDesc == nullptr) return;
+  char t[64];
+  const uint32_t col = ui_exp_status_text(t, sizeof(t));
+  if (strcmp(lv_label_get_text(s_expDesc), t) != 0) {
+    lv_label_set_text(s_expDesc, t);
+    lv_obj_set_style_text_color(s_expDesc, lv_color_hex(col), LV_PART_MAIN);
+  }
 }
 
 void screen_control_hide() {
   s_setpoint = nullptr;
-  s_btnTempDown = nullptr;
-  s_btnTempUp = nullptr;
-  s_btnStirrer = nullptr;
-  s_btnRun = nullptr;
-  s_btnDurDown = nullptr;
-  s_btnDurUp = nullptr;
   s_durValue = nullptr;
-  s_btnExpDown = nullptr;
-  s_btnExpUp = nullptr;
   s_expValue = nullptr;
   s_expDesc = nullptr;
-  s_intBtn = nullptr;
+  s_btnRun = nullptr;
+  s_runState = nullptr;
+  s_runHint = nullptr;
+  s_btnStirrer = nullptr;
+  s_stirrerState = nullptr;
+  s_btnPump = nullptr;
+  s_pumpState = nullptr;
   s_intHint = nullptr;
-  s_dbSuggested = false;
 }
 
-static void on_temp_down(lv_event_t *e) {
-  (void)e;
-  g.tempSetpointC -= UI_TEMP_STEP_C;
+static void on_temp(lv_event_t *e) {
+  const int dir = (int)(intptr_t)lv_event_get_user_data(e);
+  g.tempSetpointC += dir * UI_TEMP_STEP_C;
   if (g.tempSetpointC < UI_TEMP_MIN_C) g.tempSetpointC = UI_TEMP_MIN_C;
-  setpoint_show();
+  if (g.tempSetpointC > UI_TEMP_MAX_C) g.tempSetpointC = UI_TEMP_MAX_C;
   Serial.printf("[FAKE->WT32] SETPOINT %.1f\n", g.tempSetpointC);
-  ui_update_bell();
+  render();
 }
 
-static void on_temp_up(lv_event_t *e) {
-  (void)e;
-  g.tempSetpointC += UI_TEMP_STEP_C;
-  if (g.tempSetpointC > UI_TEMP_MAX_C) g.tempSetpointC = UI_TEMP_MAX_C;
-  setpoint_show();
-  Serial.printf("[FAKE->WT32] SETPOINT %.1f\n", g.tempSetpointC);
-  ui_update_bell();
+static void on_dur(lv_event_t *e) {
+  const int dir = (int)(intptr_t)lv_event_get_user_data(e);
+  g.durationH += dir;
+  if (g.durationH < UI_DURATION_MIN_H) g.durationH = UI_DURATION_MIN_H;
+  if (g.durationH > UI_DURATION_MAX_H) g.durationH = UI_DURATION_MAX_H;
+  link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
+  render();
+}
+
+static void on_exp(lv_event_t *e) {
+  const int dir = (int)(intptr_t)lv_event_get_user_data(e);
+  // Accelerates to steps of 10 after ~2 s of auto-repeat (range 0-9999).
+  ui_exp_set_user(g.expNum + dir * ui_stepper_mult(e));
+  render();
+}
+
+static void on_run_commit(void *user) {
+  (void)user;
+  ui_experiment_toggle();  // refreshes this route in place
+  render();
 }
 
 static void on_stirrer_commit(void *user) {
   (void)user;
   g.stirrerOn = !g.stirrerOn;
-  Serial.printf("[FAKE->WT32] STIRRER %s\n", g.stirrerOn ? "ON" : "OFF");
-  if (s_btnStirrer != nullptr) ui_hold_button_set_state(s_btnStirrer, g.stirrerOn);
-  ui_update_bell();
+  Serial.printf("[FAKE->WT32] STIRRER %s (no transport yet)\n", g.stirrerOn ? "ON" : "OFF");
+  render();
 }
 
-static void on_run_commit(void *user) {
+static void on_pump_commit(void *user) {
   (void)user;
-  ui_experiment_toggle();
-  if (s_btnRun != nullptr) {
-    ui_hold_button_set_symbol(s_btnRun, g.experimentRunning ? LV_SYMBOL_STOP : LV_SYMBOL_PLAY);
-    ui_hold_button_set_state(s_btnRun, g.experimentRunning);
-  }
-  ui_update_bell();
-}
-
-static void on_dur_down(lv_event_t *e) {
-  (void)e;
-  g.durationH--;
-  if (g.durationH < UI_DURATION_MIN_H) g.durationH = UI_DURATION_MIN_H;
-  dur_show();
-  exp_mirror_link();
-  ui_update_bell();
-}
-
-static void on_dur_up(lv_event_t *e) {
-  (void)e;
-  g.durationH++;
-  if (g.durationH > UI_DURATION_MAX_H) g.durationH = UI_DURATION_MAX_H;
-  dur_show();
-  exp_mirror_link();
-  ui_update_bell();
-}
-
-static void on_exp_down(lv_event_t *e) {
-  (void)e;
-  g.expNum--;
-  if (g.expNum < UI_EXP_NUM_MIN) g.expNum = UI_EXP_NUM_MIN;
-  exp_show();
-  exp_mirror_link();
-  ui_update_bell();
-  db_refresh_warn();
-}
-
-static void on_exp_up(lv_event_t *e) {
-  (void)e;
-  g.expNum++;
-  if (g.expNum > UI_EXP_NUM_MAX) g.expNum = UI_EXP_NUM_MAX;
-  exp_show();
-  exp_mirror_link();
-  ui_update_bell();
-  db_refresh_warn();
+  g.pumpOn = !g.pumpOn;
+  Serial.printf("[FAKE->WT32] PUMP %s (no transport yet)\n", g.pumpOn ? "ON" : "OFF");
+  render();
 }
 
 static void on_int_test(lv_event_t *e) {
   (void)e;
   link_serial_emit_experiment();
   Serial.println("[LINK] EXPERIMENT pushed to the WT32 now");
-  if (s_intHint != nullptr) {
-    lv_label_set_text(s_intHint, "sent EXPERIMENT now");
-  }
+  if (s_intHint != nullptr) lv_label_set_text(s_intHint, "EXPERIMENT sent");
+}
+
+// "Label  [-]  value  [+]" stepper row inside a card.
+static lv_obj_t *mk_stepper_row(lv_obj_t *card, const char *label, int y, int bw, int bh,
+                                lv_event_cb_t cb, const lv_font_t *valueFont) {
+  ui_mk_label(card, label, 0, y + bh / 2 - 9, 84, UI_COL_TEXT, &lv_font_montserrat_14);
+  lv_obj_t *minus = ui_mk_button(card, LV_SYMBOL_MINUS, 88, y, bw, bh, UI_COL_CARD);
+  ui_stepper_events(minus, cb, (void *)(intptr_t)-1);
+  const int vx = 88 + bw + 4;
+  const int vw = 236 - 2 * bw;
+  lv_obj_t *value =
+      ui_mk_label(card, "", vx, y + bh / 2 - (valueFont == &lv_font_montserrat_28 ? 17 : 12), vw,
+                  UI_COL_TEXT, valueFont);
+  lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_t *plus = ui_mk_button(card, LV_SYMBOL_PLUS, vx + vw + 4, y, bw, bh, UI_COL_CARD);
+  ui_stepper_events(plus, cb, (void *)(intptr_t)1);
+  return value;
+}
+
+// One equipment hold button with its name/state line and the "not connected"
+// note, centred in a 175 px column of the right card.
+static lv_obj_t *mk_equipment(lv_obj_t *card, int x0, const char *symbol, bool on,
+                              UiHoldFn cb, lv_obj_t **stateOut) {
+  lv_obj_t *btn = ui_hold_button_create(card, x0 + 47, 194, 80, symbol, on, cb, nullptr);
+  *stateOut = ui_mk_label(card, "", x0, 290, 175, UI_COL_TEXT, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(*stateOut, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_t *note = ui_mk_label(card, "Not connected yet", x0, 310, 175, UI_COL_DIM,
+                               &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  return btn;
 }
 
 void screen_control_show(lv_obj_t *parent) {
-  s_dbSuggested = false;
+  ui_mk_page_title(parent, "Control", nullptr, nullptr);
 
-  // Setpoint row
-  s_btnTempDown = ui_mk_button(parent, LV_SYMBOL_DOWN, 274, 16, 64, 52, UI_COL_CARD);
-  lv_obj_add_event_cb(s_btnTempDown, on_temp_down, LV_EVENT_CLICKED, nullptr);
-  lv_obj_set_style_text_color(lv_obj_get_child(s_btnTempDown, 0), lv_color_hex(UI_COL_ACCENT),
-                             LV_PART_MAIN);
-  s_setpoint = ui_mk_label(parent, "", 350, 32, 100, UI_COL_TEXT, &lv_font_montserrat_20);
+  // Development tool (kept for now, audit 3.10): forces one EXPERIMENT line.
+  s_intHint = ui_mk_label(parent, "", 380, 18, 228, UI_COL_DIM, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(s_intHint, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+  lv_obj_t *push = ui_mk_button(parent, "Push EXPERIMENT", 616, 6, 168, 40, UI_COL_CARD);
+  lv_obj_add_event_cb(push, on_int_test, LV_EVENT_CLICKED, nullptr);
+
+  // --- Temperature setpoint (inner 350 x 114) ---
+  lv_obj_t *temp = ui_mk_card(parent, UI_MARGIN, UI_PAGE_TOP, 376, 140);
+  ui_mk_caption(temp, "TEMPERATURE SETPOINT", 0, 0, 350);
+  lv_obj_t *minus = ui_mk_button(temp, LV_SYMBOL_MINUS, 0, 24, 64, 56, UI_COL_CARD);
+  ui_stepper_events(minus, on_temp, (void *)(intptr_t)-1);
+  s_setpoint = ui_mk_label(temp, "", 68, 36, 150, UI_COL_TEXT, &lv_font_montserrat_28);
   lv_obj_set_style_text_align(s_setpoint, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  s_btnTempUp = ui_mk_button(parent, LV_SYMBOL_UP, 462, 16, 64, 52, UI_COL_CARD);
-  lv_obj_add_event_cb(s_btnTempUp, on_temp_up, LV_EVENT_CLICKED, nullptr);
-  lv_obj_set_style_text_color(lv_obj_get_child(s_btnTempUp, 0), lv_color_hex(UI_COL_ACCENT),
-                             LV_PART_MAIN);
-  setpoint_show();
+  lv_obj_t *plus = ui_mk_button(temp, LV_SYMBOL_PLUS, 222, 24, 64, 56, UI_COL_CARD);
+  ui_stepper_events(plus, on_temp, (void *)(intptr_t)1);
+  ui_mk_label(temp, "0.1 " UI_DEG_C " steps. Display only, not sent to the rig yet.", 0, 90,
+              350, UI_COL_DIM, &lv_font_montserrat_14);
 
-  // Stirrer hold button
-  s_btnStirrer = ui_hold_button_create(parent, 352, 76, 96, LV_SYMBOL_POWER, g.stirrerOn,
-                                       on_stirrer_commit, nullptr);
-  ui_mk_label(parent, "Hold 2s to turn the stirrer on or off", 200, 182, 400, UI_COL_DIM,
-              &lv_font_montserrat_14);
-  // center desc
-  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1),
-                             LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  // --- Experiment (inner 350 x 178) ---
+  lv_obj_t *exp = ui_mk_card(parent, UI_MARGIN, 212, 376, 204);
+  ui_mk_caption(exp, "EXPERIMENT", 0, 0, 350);
+  s_expValue = mk_stepper_row(exp, "Number", 24, 56, 52, on_exp, &lv_font_montserrat_20);
+  s_durValue = mk_stepper_row(exp, "Duration", 86, 56, 52, on_dur, &lv_font_montserrat_20);
+  s_expDesc = ui_mk_label(exp, "", 0, 154, 350, UI_COL_DIM, &lv_font_montserrat_14);
 
-  // Run hold button
-  s_btnRun = ui_hold_button_create(parent, 352, 206, 96,
+  // --- Run + equipment (inner 350 x 334) ---
+  lv_obj_t *right = ui_mk_card(parent, 408, UI_PAGE_TOP, 376, 360);
+  ui_mk_caption(right, "RUN", 0, 0, 350);
+  s_btnRun = ui_hold_button_create(right, 8, 30, 96,
                                    g.experimentRunning ? LV_SYMBOL_STOP : LV_SYMBOL_PLAY,
                                    g.experimentRunning, on_run_commit, nullptr);
-  ui_mk_label(parent, "Hold 2s to start or stop the experiment", 200, 312, 400, UI_COL_DIM,
-              &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1),
-                             LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  ui_mk_label(right, "Experiment", 128, 34, 222, UI_COL_DIM, &lv_font_montserrat_14);
+  s_runState = ui_mk_label(right, "", 128, 54, 222, UI_COL_TEXT, &lv_font_montserrat_20);
+  s_runHint = ui_mk_label(right, "", 128, 84, 222, UI_COL_DIM, &lv_font_montserrat_14);
 
-  // Duration block
-  ui_mk_label(parent, "Duration", 100, 340, 200, UI_COL_TEXT, &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1),
-                             LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  ui_mk_label(parent, "hours 1-99", 100, 358, 200, UI_COL_DIM, &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1),
-                             LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  s_btnDurDown = ui_mk_button(parent, LV_SYMBOL_DOWN, 116, 376, 48, 40, UI_COL_CARD);
-  lv_obj_add_event_cb(s_btnDurDown, on_dur_down, LV_EVENT_CLICKED, nullptr);
-  lv_obj_set_style_text_color(lv_obj_get_child(s_btnDurDown, 0), lv_color_hex(UI_COL_ACCENT),
-                             LV_PART_MAIN);
-  s_durValue = ui_mk_label(parent, "", 172, 384, 56, UI_COL_TEXT, &lv_font_montserrat_20);
-  lv_obj_set_style_text_align(s_durValue, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  s_btnDurUp = ui_mk_button(parent, LV_SYMBOL_UP, 236, 376, 48, 40, UI_COL_CARD);
-  lv_obj_add_event_cb(s_btnDurUp, on_dur_up, LV_EVENT_CLICKED, nullptr);
-  lv_obj_set_style_text_color(lv_obj_get_child(s_btnDurUp, 0), lv_color_hex(UI_COL_ACCENT),
-                             LV_PART_MAIN);
-  dur_show();
+  // Divider between the run and the equipment (1 px, flat).
+  lv_obj_t *div = lv_obj_create(right);
+  lv_obj_set_pos(div, 0, 152);
+  lv_obj_set_size(div, 350, 1);
+  lv_obj_set_style_bg_color(div, lv_color_hex(UI_COL_LINE), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(div, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(div, 0, LV_PART_MAIN);
+  lv_obj_set_style_radius(div, 0, LV_PART_MAIN);
 
-  // Experiment number block
-  ui_mk_label(parent, "Experiment number", 500, 340, 200, UI_COL_TEXT, &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(lv_obj_get_child(parent, lv_obj_get_child_count(parent) - 1),
-                             LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  s_expDesc = ui_mk_label(parent, "DB: waiting for sync", 500, 358, 200, UI_COL_DIM,
-                          &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(s_expDesc, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  s_btnExpDown = ui_mk_button(parent, LV_SYMBOL_DOWN, 516, 376, 48, 40, UI_COL_CARD);
-  lv_obj_add_event_cb(s_btnExpDown, on_exp_down, LV_EVENT_CLICKED, nullptr);
-  lv_obj_set_style_text_color(lv_obj_get_child(s_btnExpDown, 0), lv_color_hex(UI_COL_ACCENT),
-                             LV_PART_MAIN);
-  s_expValue = ui_mk_label(parent, "", 572, 384, 56, UI_COL_TEXT, &lv_font_montserrat_20);
-  lv_obj_set_style_text_align(s_expValue, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  s_btnExpUp = ui_mk_button(parent, LV_SYMBOL_UP, 636, 376, 48, 40, UI_COL_CARD);
-  lv_obj_add_event_cb(s_btnExpUp, on_exp_up, LV_EVENT_CLICKED, nullptr);
-  lv_obj_set_style_text_color(lv_obj_get_child(s_btnExpUp, 0), lv_color_hex(UI_COL_ACCENT),
-                             LV_PART_MAIN);
-  exp_show();
+  ui_mk_caption(right, "EQUIPMENT  (HOLD 2 S TO SWITCH)", 0, 164, 350);
+  s_btnStirrer = mk_equipment(right, 0, LV_SYMBOL_REFRESH, g.stirrerOn, on_stirrer_commit,
+                              &s_stirrerState);
+  s_btnPump = mk_equipment(right, 175, LV_SYMBOL_TINT, g.pumpOn, on_pump_commit, &s_pumpState);
 
-  // Link push test, left column
-  ui_mk_label(parent, "Link test (EXPERIMENT push)", 16, 96, 180, UI_COL_TEXT,
-              &lv_font_montserrat_14);
-  s_intBtn = ui_mk_button(parent, "PUSH EXP", 16, 136, 160, 42, UI_COL_CARD);
-  lv_obj_add_event_cb(s_intBtn, on_int_test, LV_EVENT_CLICKED, nullptr);
-  s_intHint = ui_mk_label(parent, "", 16, 184, 180, UI_COL_DIM, &lv_font_montserrat_14);
-
-  db_refresh_warn();
+  render();
 }

@@ -19,6 +19,9 @@ There is no UI framework, no state library, and no chart library. The chart is h
 | File | Lines | Responsibility |
 |---|---|---|
 | `index.tsx` | 5 | Mounts `<App/>` into `#root`, imports the stylesheet |
+| `index.html` | 18 | Page shell, fonts, theme colour, and favicon links |
+| `public/favicon.svg` | 7 | Browser-tab icon: the `BrandMark` glyph on an off-white tile, served at `/favicon.svg` |
+| `public/favicon-32.png` | — | 32×32 raster fallback of the same mark for browsers without SVG favicon support |
 | `src/App.tsx` | 1343 | Everything visible: login screen, all three views, all components, all chart math |
 | `src/data.ts` | 278 | Every Supabase read, the auth RPCs, and the non-numbering domain logic |
 | `src/chambers.ts` | 58 | Maps stored 0-based bottle ids to displayed chamber numbers and splits current presence |
@@ -258,7 +261,7 @@ Security therefore rests entirely on token entropy. The stated guidance is to is
 
 ### 5.1 Page load
 
-`index.html` loads `/index.tsx`, which calls `createRoot(...).render(<App/>)`.
+`index.html` loads `/index.tsx`, which calls `createRoot(...).render(<App/>)`. It also links `public/favicon.svg` and the `public/favicon-32.png` fallback, so the browser tab shows the same rounded-square mark and accent dot as the in-app `BrandMark` (§5.10). Vite copies `public/` verbatim into `dist/`.
 
 `App()` calls `useAuth()`, whose `useState` initialiser calls `readStoredSession()` **synchronously**. It parses `localStorage["rusim.device_session"]`, returns null if the token is not a string or `expiresAt` is in the past, and otherwise returns the stored session. A valid stored session therefore renders the dashboard with no network call and no loading flash.
 
@@ -285,7 +288,8 @@ for (let offset = 0; offset < MAX_READING_ROWS; offset += PAGE_SIZE) {
 | Constant | Value | Reasoning in the source |
 |---|---|---|
 | `PAGE_SIZE` | 1000 | *"Must stay at or below the server's `max_rows` setting, otherwise every page returns a truncated response and the paging loop misreads the last one as the end of the data."* |
-| `MAX_READING_ROWS` | 5000 | Client-side ceiling. Callers hitting it receive a partial result, so anything presenting itself as complete must check and say so. |
+| `MAX_READING_ROWS` | 5000 | Client-side ceiling for `fetchReadings` (newest first). Callers hitting it receive a partial result, so anything presenting itself as complete must check and say so. |
+| `MAX_EXPERIMENT_ROWS` | 50,000 | Ceiling for `fetchExperimentReadings` (oldest first). Sized for a 99 h run at one round per 30 s: about 47,500 rows for four bottles. |
 
 `config.toml` sets `max_rows = 1000`, matching `PAGE_SIZE` exactly.
 
@@ -313,7 +317,7 @@ The consequence is a worst-case latency of 5m30s for a device that samples every
 
 The default view, reached by the "Monitoring" nav tab.
 
-**Shell** — a tinted L-frame (sidebar + 56px top bar on an off-white ground) with the work on a white sheet inset 8px from the right and bottom edges, 10px radius, 1px edge, no shadow. The sidebar names the product (RuSim / Telemetry with a chamber mark), scopes to `Device {id}` with owner, and holds the three views (Monitoring, Experiment history, Compare). The active view sits on a white pill with a 2px magenta bar; the pill slides between items when the view changes. The top bar holds a breadcrumb (`Device {id} / {view}`), a freshness stamp (`Data loaded · Updated …`) whose green dot pulses twice when a load succeeds, and the black `Refresh data` primary, whose icon spins while a load runs. Sign out lives at the sidebar bottom with the session expiry. Below 860px the frame disappears: the sidebar becomes a drawer (at most 320px wide) behind a menu button, with a dimmed backdrop that closes it, and the sheet becomes the screen.
+**Shell** — a tinted L-frame (sidebar + 56px top bar on an off-white ground) with the work on a white sheet inset 8px from the right and bottom edges, 10px radius, 1px edge, no shadow. The sidebar names the product (RuSim / Telemetry with a chamber mark), scopes to `Device {id}` with owner, and holds the three views (Monitoring, Experiment history, Compare). The active view sits on a white pill with a 2px blue bar; the pill slides between items when the view changes. The top bar holds a breadcrumb (`Device {id} / {view}`), a freshness stamp (`Data loaded · Updated …`) whose green dot pulses twice when a load succeeds, and the black `Refresh data` primary, whose icon spins while a load runs. Sign out lives at the sidebar bottom with the session expiry. Below 860px the frame disappears: the sidebar becomes a drawer (at most 320px wide) behind a menu button, with a dimmed backdrop that closes it, and the sheet becomes the screen.
 
 **Title** — the view name as the page heading, with a one-line summary under it. On Monitoring a line above the heading names the live experiment (`Live experiment Experiment 999`).
 
@@ -325,11 +329,11 @@ The default view, reached by the "Monitoring" nav tab.
 
 **Disconnection notice** — rendered only when a latest sample exists *and* at least one configured chamber is missing from it. With the default dev configuration (24 configured, chambers 1–8 reporting) this reads: "Disconnected at …: chambers Chamber 9, Chamber 10, … Chamber 24 sent no data."
 
-**Five KPI cells as parameter tabs** — pH, Temperature, CO₂, CH₄, Pressure (`PARAMETER_DISPLAY`; stored and exported names stay `PARAMETER_NAMES`), read from the selected chamber's newest sample in the active experiment, in one container split by 1px dividers. Each cell shows its label, unit, value, and a sparkline of the chamber's last 40 samples of that parameter (real rows, gaps kept). Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as a grey dash. Selecting a cell switches the chart below to that parameter; a 2px magenta bar slides under the selected cell and its sparkline turns magenta. The strip has five columns on a desktop, three below 1100px and two below 860px.
+**Five KPI cells as parameter tabs** — pH, Temperature, CO₂, CH₄, Pressure (`PARAMETER_DISPLAY`; stored and exported names stay `PARAMETER_NAMES`), read from the selected chamber's newest sample in the active experiment, in one container split by 1px dividers. Each cell shows its label, unit, value, and a sparkline of the chamber's last 40 samples of that parameter (real rows, gaps kept). Decimal places come from `PARAMETER_DIGITS`: pH 2, Temp 2, CO2 1, CH4 2, Pressure 2. A `null` renders as a grey dash. Selecting a cell switches the chart below to that parameter; a 2px blue bar slides under the selected cell and its sparkline turns blue. The strip has five columns on a desktop, three below 1100px and two below 860px.
 
 **Status line** — chamber, connection state (`Disconnected` / `Concluded` / `Live` / `No data`), sample count, and latest sample time, in one 12px line under the KPI strip.
 
-**One chart** — plotting the selected chamber's rows for the **active experiment only**, headed `Chamber {n} · {parameter}` with the record count. The line is 2px in magenta (`--chart-1`) over a soft area fill, with round y ticks and gridlines; a `null` breaks both the line and the fill. Each sample is a focusable point; hovering, focusing or clicking shows a dashed vertical guide and a tooltip with value and timestamp. Fewer than two rows renders "Not enough data for chart."
+**One chart** — plotting the selected chamber's rows for the **active experiment only**, headed `Chamber {n} · {parameter}` with the record count. The line is 2px in blue (`--chart-1`) over a soft area fill, with round y ticks and gridlines; a `null` breaks both the line and the fill. Each sample is a focusable point; hovering, focusing or clicking shows a dashed vertical guide and a tooltip with value and timestamp. Fewer than two rows renders "Not enough data for chart."
 
 ### 5.6 Live vs concluded is inferred, never stored
 
@@ -356,7 +360,13 @@ Reached by the "Experiment History" nav tab. Two-stage drill-down.
 
 Selection starts empty; clicking the selected item clears it (`toggleExperimentSelection()`), and choosing another replaces it. A notice asks the operator to select an experiment until one is chosen.
 
-**Stage 2 — the detail.** A `useEffect` keyed on `activeExperimentId` fires `fetchExperimentReadings`, which pages identically but adds `.eq("experiment_id", id)` and orders by `bottle_id` ascending then `timestamp` ascending. A `cancelled` closure flag prevents state updates from a superseded request or an unmounted component.
+**Stage 2 — the detail.** A `useEffect` keyed on `activeExperimentId` fires `fetchExperimentReadings`. It filters with `.eq("experiment_id", id)` and uses **keyset paging** instead of offsets: rows are ordered by `timestamp` ascending then `bottle_id` ascending, and each page after the first adds a filter for rows after the last one seen:
+
+```
+or=(timestamp.gt."T", and(timestamp.eq."T", bottle_id.gt.B))
+```
+
+`bottle_id` is the tiebreak because all bottles in one round share a timestamp, so a page boundary can fall inside a round. Compared with offsets, this cannot skip or repeat rows while new rows arrive during a run. Because every bottle is sampled at the same instants, reaching `MAX_EXPERIMENT_ROWS` cuts the experiment off at one point in time for all bottles; it no longer drops whole bottles. Before 2026-11-21 the read ordered by `bottle_id` first and capped at 5,000 rows, so any experiment over about 10 h lost its later bottles. A `cancelled` closure flag prevents state updates from a superseded request or an unmounted component.
 
 That ordering is load-bearing, and the comment says so: it keeps a multi-page read contiguous, so each chamber's samples stay together.
 
@@ -368,7 +378,7 @@ That ordering is load-bearing, and the comment says so: it keeps a multi-page re
 
 ### 5.8 Truncation is surfaced, not hidden
 
-`isTruncated(readings.length)` compares against `MAX_READING_ROWS`. When a read hit the cap, the detail pane shows: *"Only the most recent 5,000 readings were loaded, so this experiment is incomplete on screen and any CSV export is truncated too."*
+`isTruncated(readings.length)` compares against `MAX_EXPERIMENT_ROWS`. When a read hit the cap, the detail pane shows: *"Only the first 50,000 readings were loaded, so the end of this experiment is missing on screen and any CSV export is truncated too."*
 
 The export is deliberately of what is on screen rather than a fresh query, and the comment explains the tradeoff: *"This exports what is already on screen rather than re-querying, so the file and the charts always describe the same rows. A truncated read therefore produces a truncated file, which is why the limit is called out on screen next to the button."*
 
@@ -376,7 +386,7 @@ The export is deliberately of what is on screen rather than a fresh query, and t
 
 Reached by the "Compare" nav tab. Overlays up to four chamber series on one chart; chambers may come from different experiments.
 
-**Selection** — a panel headed `Chambers to compare` with an Experiment select, a Chamber select (all configured chambers), an `Add chamber` button, and `Clear all`. Each added series becomes a chip with a colour dot, its label (`Experiment 3 · Chamber 5`), and a remove button. The header shows `n of 4`. The rules live in `compare.ts`: `MAX_COMPARE_SERIES` is 4, the same experiment and chamber cannot be added twice, but the same chamber in different experiments can. `Add chamber` is disabled at the cap or on a duplicate. Colours are assigned by position in the selection list (`--chart-1` magenta, `--chart-2` blue, `--chart-3` green, `--chart-4` amber), so removing a middle chip shifts later colours.
+**Selection** — a panel headed `Chambers to compare` with an Experiment select, a Chamber select (all configured chambers), an `Add chamber` button, and `Clear all`. Each added series becomes a chip with a colour dot, its label (`Experiment 3 · Chamber 5`), and a remove button. The header shows `n of 4`. The rules live in `compare.ts`: `MAX_COMPARE_SERIES` is 4, the same experiment and chamber cannot be added twice, but the same chamber in different experiments can. `Add chamber` is disabled at the cap or on a duplicate. Colours are assigned by position in the selection list (`--chart-1` blue, `--chart-2` green, `--chart-3` amber, `--chart-4` violet), so removing a middle chip shifts later colours.
 
 **Data** — each distinct experiment in the selection is fetched once via `fetchExperimentReadings` and cached in `readingsByExperiment`; the chart filters each cache entry with `selectChamberReadings`. Compare uses real data only (the synthetic preview experiment 999 never appears in the experiment list) and does not poll.
 
@@ -395,9 +405,9 @@ The look was redesigned with the `design-taste-frontend` skill. Its scripts deal
 | Ground (frame) | `#f7f7f5` off-white |
 | Sheet and panels | `#ffffff`, 1px `#e3e3de` edge |
 | Ink / muted | `#000000` / `#666662` |
-| Accent | `#d0106f` magenta: selection, focus ring, the main chart line |
+| Accent | `#2563eb` blue: selection, focus ring, the main chart line |
 | Primary button | black with white text |
-| Chart series | `--chart-1` magenta, `--chart-2` blue `#1a5fd0`, `--chart-3` green `#0f8a6a`, `--chart-4` amber `#b86200` |
+| Chart series | `--chart-1` blue `#2563eb`, `--chart-2` green `#0f8a6a`, `--chart-3` amber `#b86200`, `--chart-4` violet `#7c3aed` |
 | Type | Chivo (text and headings), Chivo Mono (ids, units, chamber numbers), from Google Fonts in `index.html` |
 | Radii | 4px controls, 6px panels, 10px sheet |
 
@@ -676,8 +686,8 @@ be inlined.
 
 | Claim | Reality |
 |---|---|
-| `auth.ts:80` — *"server throttle in `device_data.authenticate` (30 failures / 5 min globally)"* | No such throttle exists. It was dropped because a failed call rolls back its own counter. |
-| `data.ts:113` — handles `42900` "too many attempts" | No migration raises `42900`. The branch is dead. |
+| `auth.ts` — *"server throttle in `device_data.authenticate` (30 failures / 5 min globally)"* | No such throttle exists. It was dropped because a failed call rolls back its own counter. The comment was corrected on 2026-11-21 to say the backoff is client-side only. |
+| `data.ts` handled `42900` "too many attempts" | No migration raises `42900`. The dead branch was removed on 2026-11-21; `authenticate()` now throws one generic "Invalid device token." for every failure. |
 | `signOut` comment — *"the session expires on its own within a day"* | TTL is now 12 hours. |
 
 
@@ -731,7 +741,8 @@ Open items:
 |---|---|---|
 | `CONCLUDED_AFTER_MS` | 600,000 (10 min) | `data.ts:61` |
 | `POLL_INTERVAL_MS` | 330,000 (5m30s) | `data.ts:64` |
-| `MAX_READING_ROWS` | 5,000 | `data.ts:74` |
+| `MAX_READING_ROWS` | 5,000 | `data.ts` |
+| `MAX_EXPERIMENT_ROWS` | 50,000 | `data.ts` |
 | `MAX_COMPARE_SERIES` | 4 | `compare.ts` |
 | `PAGE_SIZE` | 1,000 | `data.ts:83` |
 | `TESTING_EXPERIMENT_ID` | `0` | `types/domain.ts:52` |
@@ -777,4 +788,4 @@ The Compare tab overlays up to four (experiment, chamber) series on one chart wi
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Updated at 2026-11-20-12:40.
+Updated at 2026-11-21-16:24.

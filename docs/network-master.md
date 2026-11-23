@@ -116,6 +116,16 @@ unsynced clock, for timestamps outside 2025-01-01..now+10 min, and for a
 sample time that does not advance (second-resolution primary keys, and a
 clock step could otherwise collide silently). Those are counted separately
 from queue overflow and reported by `DUMP`.
+- A bottle whose 0-based id is not below the device's `bottle_count` is never
+queued (`dbc::bottleInRange`). The server rejects a whole batch that holds one
+such row (SQLSTATE `22023`), and a rejected batch is kept and retried, so one
+bad row would stop every later upload. Skipped rows are counted in the `skip=`
+field of `DUMP`; the first skipped round and every 20th after it log
+`[PUSH] skipped N bottle(s) beyond bottle_count=...`. The Mega always reports
+four bottles, so a device with `bottle_count` 1-3 uploads only the bottles it
+has. A count above 4 needs no filtering (bottles 5 and up never appear). While
+the count is unknown (`<= 0`) nothing is filtered; a run cannot start before
+one successful database pull, so the count is known.
 - The Mega frame has no per-sensor timestamp. The WT32 collection time is a
 proxy for when the sensors measured, not proof; per-sensor acquisition times
 would need a wire-protocol change.
@@ -355,6 +365,16 @@ is untrustworthy, and `identity` means the authenticated device differs from
 the identity the queue was collected under, in which case uploads are blocked
 rather than delivering rows to the wrong device.
 
+**Lowered bottle count.** If `bottle_count` is lowered while rows are queued,
+those rows were valid when collected but would now make the server reject their
+batch. Before each upload, once the identity check has passed, the firmware
+compares `dbBottleCount` with the count it last purged for. When they differ it
+removes queued rows with an out-of-range bottle id
+(`dbc::purgeOutOfRangeRows`, order preserved), logs
+`[PUSH] purged N queued rows ...` and adds them to the `skip=` counter. The
+purge runs only after the identity check, so a queue that belongs to another
+device is never filtered by this device's count.
+
 ## 7. Expected output
 
 **Bench check (2026-11-10).** Read-only `HELLO` and `DUMP` commands through
@@ -437,4 +457,4 @@ LOG [LOGIN] will wait for a corrected pair from the web form
 - `hardware.md` — board pinouts (read-only reference).
 
 ---
-Updated at 2026-11-19-15:52.
+Updated at 2026-11-21-11:38.

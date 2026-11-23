@@ -12,12 +12,15 @@ it never serves a web page, provisions Wi-Fi, or receives login credentials.
 Sensor values start unavailable and change only when a real `SENS` frame arrives;
 there is no fake seed, random jitter, or simulated sensor fallback. The
 legacy filenames/types `fake_data` and `BottleFake` remain for compatibility.
-Setpoint, stirrer and POST controls still lack real hardware transport.
+Setpoint, stirrers, water pump and POST controls still lack real hardware
+transport; the screen labels them "Display only" / "Not connected yet".
 
 Locked decisions honoured: no staleness UI, no PIN on Control,
 hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
 45 °C breaker two-tier overheat, 60 s backlight sleep, duration 1–99 h,
 5 sensors + trend per bottle, NULL-field bell with live list and no history.
+The 2026-11-21 UX audit (`plans-and-audits/lvgl-ui-ux-audit.md`) reworked
+the layout, the colour rules and the refresh model; §15 describes the result.
 
 ## 2. Hardware / platform notes
 
@@ -34,42 +37,44 @@ hold-to-confirm 2000 ms on binary toggles, no local log storage, 41 °C warn /
 
 | File | Role |
 |---|---|
-| `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_serial_init()` + `ui_init()`; `loop()` polls USB, link, screens, clock, sleep, and LVGL; all LVGL work is suspended while the `PASSTH` tunnel is open |
-| `lv_conf.h` | Enables `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART, BUTTONMATRIX, QRCODE (+CANVAS, required by qrcode)`; fonts +12/+20/+28. `KEYBOARD` is 0 because the display has no credential entry form (§12). **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
+| `main.cpp` | HW init (gfx, touch, flush, draw buf, indev) + `fake_init()` + `link_serial_init()` + `ui_init()`; `loop()` polls USB, link, screens, `ui_poll()`, sleep, and LVGL; all LVGL work is suspended while the `PASSTH` tunnel is open. The touch read passes through `sleep_filter_touch()` (§15.4) |
+| `lv_conf.h` | Enables `BUTTON, SPINBOX (+TEXTAREA, required by spinbox), SWITCH, CHART, BUTTONMATRIX, QRCODE (+CANVAS, required by qrcode)`; fonts 14/20/28/40 (12 is off: unused). `KEYBOARD` is 0 because the display has no credential entry form (§12). **`SLIDER` deliberately left 0** (not needed). `MSGBOX/LIST/TABLE` left 0 — modals and lists are hand-built from `obj+label+button` |
 | `link_serial.h/.cpp` | `rusim-line` v1 peer on `Serial1` (RX 18 / TX 17, 115200 8N1). Line parser, 5 s heartbeats, link gate words (`LOGINREQ`, `RESULT`), network/database/sensor state, log forwarding, and `PASSTH` tunnel. Credentials are not part of the wire protocol. `Serial` stays USB debug only. Full wire spec in §10 and `link-serial-protocol.md` |
-| `screen_setup.h/.cpp` | `/setup` first-class route (route 6): 300 px QR and typed URL for `http://<WT32-IP>/`. The QR stays hidden until the WT32 reports an IP via `NET`; it is refreshed only when that IP changes. `ui_init()` opens the route first; WT32 `LOGINREQ` raises it; `RESULT OK` routes home. The display has no credential form or Wi-Fi provisioning. `RESULT FAIL` shows retry guidance on the panel. |
+| `screen_setup.h/.cpp` | `/setup` first-class route: 280 px QR in a white 316 px box, numbered steps and a 28 px typed URL for `http://<WT32-IP>/`. The QR stays hidden (box shows a waiting note) until the WT32 reports an IP via `NET`; it is refreshed only when that IP changes. `ui_init()` opens the route first; the first `RESULT OK` routes home without touching run state. A later `LOGINREQ` (session expired) shows a modal + status chip instead of pulling the operator away (§11). `RESULT FAIL` shows retry text. No credential form or Wi-Fi provisioning. |
 | `touch.h` | Unchanged GT911 glue |
-| `ui_config.h` | Capacity (6 clusters × 4 bottles; all offline until reported), ranges, 2000 ms / 60 s timings, 5 s sensor apply / 90 s expiry, thresholds, pins, palette, `FW_VERSION`, `IS_DEBUG` |
-| `fake_data.h/.cpp` | `AppState g`: controls and real bottle values; `fake_init()` starts all nodes offline, bottles absent, readings/history unavailable; `sens_apply_real()` applies WT32 frames to node 0 and clears missing/expired data. Every sensor keeps its own 24-sample history (`trend[S_COUNT][UI_TREND_PTS]`, ~11.5 KB for all 24 slots). Bottle presence is independent of database capacity |
+| `ui_config.h` | Capacity (6 clusters × 4 bottles; all offline until reported), ranges, 2000 ms / 60 s timings, 1 s sensor apply / 90 s expiry, thresholds, pins, palette and colour rules, layout grid (`UI_BAR_H`, `UI_PAGE_TOP`, ...), `UI_DEG_C`, link-silence limit, `FW_VERSION`, `IS_DEBUG` |
+| `fake_data.h/.cpp` | `AppState g`: controls (incl. display-only `stirrerOn`/`pumpOn`, `expNumUserSet`, `runStartUnknown`) and real bottle values; `fake_alarm_count()` counts NULL fields on online nodes only (bell); `fake_init()` starts all nodes offline, bottles absent, readings/history unavailable; `sens_apply_real()` applies WT32 frames to node 0 and clears missing/expired data. Every sensor keeps its own 24-sample history (`trend[S_COUNT][UI_TREND_PTS]`, ~11.5 KB for all 24 slots). Bottle presence is independent of database capacity |
 | `serial_cmd.h/.cpp` | Human-typeable debug protocol over USB serial (see §5). Display-local only; no `CREDS` or `AP` commands. |
 | `provision_ap.h/.cpp` | Removed. The display no longer provisions Wi-Fi or serves web pages; login is hosted by the WT32 (§12). |
-| `ui_shell.h/.cpp` | Status bar, content router, single blocking-modal primitive, bell logic, overheat eval, `ui_mk_*` styled helpers (no LVGL theme is enabled, so all styling is explicit) |
-| `screen_home.h/.cpp` | `/home`: DATA / CONTROL / INFO nav + run summary + serial hint |
-| `screen_data.h/.cpp` | `/data` picker (6 clusters, offline greyed); `/data/X` node page = one 180×180 square per bottle, laid out like the `/info` tiles (bottle temperature on top, `Bottle n` caption below), greyed card when the node is offline, red value when the WT32 reported that temperature as NULL, and the square itself opens the chamber; `/data/X/bottle_Y` = `BOTTLE n` header (`NODE n` as secondary text), five 144×144 sensor tiles in the `/info` style (big number, unit in the caption) and a trend card that charts the last 24 polls of the selected sensor — temperature by default, and tapping any tile charts that sensor on its own fixed scale |
-| `screen_control.h/.cpp` | `/control`: setpoint −/+ 0.1 °C (35.0–40.0, logs `[FAKE->WT32]`), duration/experiment-number steppers, and stirrer + run switches built from `ui_hold_button` (2000 ms hold, progress ring), plus a button that sends one immediate `EXPERIMENT` line for bench testing |
-| `screen_info.h/.cpp` | `/info`: real link/database/configuration/queue tiles, firmware version, LVGL UI-thread load; storage usage shows `--` because the protocol supplies no measurement |
-| `screen_sleep.h/.cpp` | Idle timer on last-touch millis; backlight off after 60 s (`UI_SLEEP_MS`), on at next touch tick |
+| `ui_shell.h/.cpp` | Status bar (labelled tabs, link chip, bell), content router with in-place refresh, severity-ranked modal, bell logic, overheat eval, boot run adoption and experiment-number suggestion (`ui_poll()`), shared experiment status text, `ui_mk_*` styled helpers and stepper auto-repeat (no LVGL theme is enabled, so all styling is explicit) |
+| `screen_home.h/.cpp` | `/home` "Overview": run card (progress arc, start/stop hold button, duration stepper locked while running, experiment status line) and status card (bottles, alerts, setpoint, chamber, stirrers, water pump) |
+| `screen_data.h/.cpp` | `/data` "Nodes": six cards (`Node 1`..`Node 6`, bottles reporting, missing readings, status dot); `/data/X`: back button + four bottle tiles (40 px temperature, state line); `/data/X/bottle_Y`: back button, five sensor tiles (selected = 3 px accent outline) and a trend card with an auto-ranged Y axis, min/max labels and the latest value. Operator-facing numbers are 1-based |
+| `screen_control.h/.cpp` | `/control`: setpoint card (−/+ 0.1 °C, 35.0–40.0, display only), experiment card (number and duration steppers with auto-repeat, status line), and a run card with the run hold button plus two equipment hold buttons, **Stirrers** and **Water pump** (display only, logic in the backlog). A title-row button sends one immediate `EXPERIMENT` line (development tool) |
+| `screen_info.h/.cpp` | `/info` "System info": IP, network (same priority as the link chip), firmware, latest DB experiment, active run, upload queue, sensor-feed age, LVGL UI-thread load |
+| `screen_sleep.h/.cpp` | Idle timer on last-touch millis; backlight off after 60 s (`UI_SLEEP_MS`). The waking touch is swallowed (`sleep_filter_touch`); `sleep_wake()` turns it on for modals |
 
 ## 4. Screen tree / state machine (as built)
 
 ```
-/setup (first route after boot; QR to WT32 login page) -> /home on RESULT OK
-/home -> /data (picker) -> /data/X (grid) -> /data/X/bottle_Y (5 tappable tiles + per-sensor trend)
-/home -> /control (setpoint, duration, run/stirrer hold-2000ms)
-/home -> /info (link, database, configuration and queue status)
-[any, post-confirm]  chamber>=41 -> warn modal (ack; re-arms <41)
-                     chamber>=45 -> trip modal (stirrer fake-OFF; re-arms <45)
-[any]  60 s no touch -> backlight off -> touch -> back on
-[status bar] bell red iff any NULL field -> tap -> live NULL list modal
-5-s lv_timer -> sens_apply_real() -> bell + content refresh when data changes
+/setup (first route after boot; QR to WT32 login page) -> /home on first RESULT OK
+/home -> /data (node picker) -> /data/X (4 bottle tiles) -> /data/X/bottle_Y
+/home -> /control (setpoint, experiment number/duration, run, stirrers, pump)
+/home -> /info (link, database, run, queue, feed, UI load)
+[later LOGINREQ]  modal "Network login needed" + chip -> /setup -> back on RESULT OK
+[any, post-login] chamber>=41 -> warn modal (ack; re-arms <41)
+                  chamber>=45 -> trip modal (stirrers off; re-arms <45)
+[any]  60 s no touch -> backlight off -> touch wakes only (swallowed) -> back on
+[status bar] chip = link state (tap: /info or /setup); bell red iff alert fields
+1 s lv_timer -> sens_apply_real() -> bell + in-place refresh of the open route
 ```
 
-There is no boot gate. `ui_init()` calls `ui_show_setup()` and that route
-remains up until the WT32 reports successful login or `IS_DEBUG` bypasses it.
-Overheat modals reuse the single-modal primitive and can stack over any
-screen. `ui_refresh_current()` re-runs the current route builder after
-pushes/serial edits; the modal overlay is a sibling of the content container
-so refreshes never dismiss it.
+There is no boot gate on the UI side: `ui_init()` calls `ui_show_setup()` and
+that route remains up until the WT32 reports a successful login or `IS_DEBUG`
+bypasses it. Swipes switch the four top-level tabs; drill-down pages and
+`/setup` ignore them. `ui_refresh_current()` calls the open route's
+`screen_*_refresh()`, which changes text and colours only; widgets are rebuilt
+only on a route change or a user tap that changes the page (e.g. picking a
+sensor to chart). The modal overlay is a sibling of the content container.
 
 ## 5. USB control and diagnostic protocol
 
@@ -104,16 +109,20 @@ database read.
 
 ## 6. Bell / NULL semantics
 
-`bellRed = fake_null_count() > 0`. At boot all 24 bottle slots are absent and
-all 120 sensor fields are NULL. Only bottles reported by live WT32 frames
-count as online. Tapping the bell lists unavailable fields. Missing/invalid
-sensors show `-- NULL` in the bell list and `--` in `UI_COL_ALARM` on the
-bottle tiles; absent or expired bottles show no live data. Charts
-use gaps for missing samples and never manufacture historical points.
+At boot all 24 bottle slots are absent and all 120 sensor fields are NULL
+(`fake_null_count()`, used by USB `STATUS`). The bell does not use that
+number: `bellRed = fake_alarm_count() > 0`, which counts NULL fields only on
+nodes that are online. A slot on an offline node is "not connected", not a
+fault; a bottle missing from a live node's frame counts (5 fields). The bell
+shows the count; tapping it lists `Node n, bottle m: <sensors> missing` (or
+`no data`), at most 10 bottles. Missing sensors show `--` in
+`UI_COL_ALARM` on the bottle tiles; absent or expired bottles show no live
+data. Charts use gaps for missing samples and never manufacture points.
 
-The separate chamber temperature is `-- C`: `SENS` contains bottle readings,
-not a chamber sensor. No bottle temperature is silently substituted into the
-chamber overheat logic. That logic is not a working hardware safety system.
+The separate chamber temperature is `--` ("No chamber sensor connected"):
+`SENS` contains bottle readings, not a chamber sensor. No bottle temperature
+is silently substituted into the chamber overheat logic. That logic is not a
+working hardware safety system.
 
 ## 7. Hold-to-confirm implementation
 
@@ -122,13 +131,17 @@ progress timer and records the start tick; the timer fills the arc and calls
 the commit callback once `lv_tick_elaps(start) >= UI_HOLD_TO_CONFIRM_MS`
 (2000 ms). `RELEASED` before that deletes the timer and leaves the state
 unchanged. The widget keeps its own `state`, so the caller only reacts to the
-commit callback.
+commit callback. Fill colour: `UI_COL_OK` when on, `UI_COL_IDLE` (grey) when
+off; red is reserved for faults. Every caller shows the state in words next
+to the button. Because routes are refreshed in place, a sensor frame arriving
+mid-hold no longer deletes the button and cancels the hold.
 
 ## 8. Verify without hardware signals
 
 ```sh
 python3 firmware/tests/display-sensors/run_tests.py
 pio run -e display-v9 -e display-sim   # build only; no board required
+SDL_VIDEODRIVER=dummy SIM_SHOTS=<dir> .pio/build/display-sim/program  # screenshots
 ```
 
 The host suite compiles the actual model, link parser, and USB command
@@ -138,7 +151,9 @@ trends, missing bottles, expiry/recovery, HELLO invalidation, wire command
 format/clamps/heartbeat, and USB command routing. Login credentials are not a
 display-side concern and are not sent over the serial link.
 Its UI spy verifies that USB RUN delegates to the shared gate; it does not
-execute LVGL or exercise the real gate itself.
+execute LVGL or exercise the real gate itself. It also covers the EXPERIMENT
+boot gate (§10). Known failure since before 2026-11-21: "trend / one point per
+new frame" (see `backlog.md`).
 
 On device: before sensor frames arrive, confirm zero online bottles and NULL
 readings. After a real Mega reply, check node 0 values and subsequent updates;
@@ -151,12 +166,16 @@ do not replace this hardware check.
 - The current real sensor transport covers only the Mega's four bottles on
   node 0; other nodes remain offline. Database capacity does not imply a
   sensor is connected. A separate chamber-temperature source is not wired.
-- Real `→WT32` transport for setpoint, stirrer and POST (experiment state is
-  real; the rest still only prints `[FAKE->WT32] …`).
+- Real `→WT32` transport for setpoint, stirrers, water pump and POST
+  (experiment state is real; the rest only prints `[FAKE->WT32] …`).
+- After a display reboot an adopted run has no known start time: `/home`
+  shows "elapsed unknown" until the WT32 reports a start time (not on the wire).
+- Trend window is 12 min and a 90 s outage clears it (backlog).
 - Backlight GPIO45 conflict resolution with EE.
-- `LV_MEM_SIZE` is still 64 KB — bump if chart/table-heavy screens OOM.
-- Duration sub-hour steps, wake-confirm UX, breaker power-domain scope: parked
-  open questions, unchanged.
+- `LV_MEM_SIZE` is still 64 KB on the device (the sim uses 4 MB for snapshots).
+- Duration sub-hour steps, breaker power-domain scope: parked open questions.
+- Development tools still in normal builds (decision 2026-11-21): LVGL
+  performance overlay, `IS_DEBUG` login bypass, "Push EXPERIMENT".
 
 ## 10. WT32 link (`rusim-line` v1, production)
 
@@ -178,7 +197,7 @@ Received from the WT32:
 | Word | Meaning |
 |---|---|
 | `HELLO` | WT32 booted; reset display-side link state |
-| `LOGINREQ` | route to `/setup` (idempotent); heartbeat while login is needed |
+| `LOGINREQ` | before the first login: route to `/setup`; after it: modal + `Login needed` chip (§11). Idempotent |
 | `RESULT OK` / `RESULT FAIL` | login verdict: route home / stay on setup with retry text |
 | `NET ip= up= [ping=]` | `/info` IP, link and latency store |
 | `DB latest= time= bottles= drops= ready= aexp= adur= asrc= pexp= pdur= cfgmax= queued= reads= ack= state=` | `/info` DB, run-configuration and queue stores; `/control` start gate, source label and next-id hint. `-` = unknown, `latest=0` = no rows |
@@ -190,8 +209,18 @@ Sent to the WT32:
 | Word | Meaning |
 |---|---|
 | `HELLO` | display booted; the WT32 replies with its full snapshot |
-| `EXPERIMENT run= num= dur=` | on every change and every heartbeat |
+| `EXPERIMENT run= num= dur=` | on every change and every heartbeat, but only after the boot gate opens (below) |
 | `DUMP` | debug-build bench command via `W32CMD`, never automatic |
+
+**EXPERIMENT boot gate.** A freshly booted display does not know whether the
+WT32 is in the middle of a run, and `EXPERIMENT run=0` would stop it. So after
+`link_serial_init()` no `EXPERIMENT` line is sent (no change push, no
+heartbeat). The WT32 answers the display's `HELLO` with its snapshot, whose
+`DB` line carries `aexp`/`adur` for an active run. `link_serial_take_first_db()`
+reports that first `DB` line once; `ui_poll()` then adopts an active run
+(running, experiment number, duration; start time unknown) and calls
+`link_serial_exp_release()`, which sends the current state and resumes normal
+emission. A WT32 `HELLO` (WT32 reboot) does not close the gate again.
 
 The WT32 serves the login page and collects the credentials locally. The
 serial link carries only the gate request and verdict: `LOGINREQ` routes to
@@ -247,13 +276,19 @@ open the port itself (`link-serial-protocol.md` §7).
 ## 11. Setup route
 
 `/setup` is a normal content route, not an overlay. `ui_refresh_current()`
-skips route 6, so sensor refreshes never disturb it.
+does nothing on it; `screen_setup_poll()` keeps the QR and status current.
 
-The route was originally a two-textarea form with an `lv_keyboard`. That is
-gone; §12 describes what replaced it. What survives: the route is raised by
-`LOGINREQ` and lowered to `/home` on `RESULT OK`. The duration
-spinbox moved to `/control`, so experiment duration and number can be
-changed after login without re-authing.
+First login: the route is raised at boot and lowered to `/home` on the first
+`RESULT OK`. The run state is not changed there (it is false at boot unless a
+run was adopted from the WT32, §10).
+
+Later logins (portal session expired, WT32 sends `LOGINREQ` again while
+`g.loggedIn` is true): the operator is not pulled away. A WARN modal "Network
+login needed" offers "Open login", and the status-bar chip shows
+`Login needed` (tap opens `/setup`). The experiment keeps running. On
+`RESULT OK` the modal closes and, if `/setup` is open, the previous route is
+restored (`ui_show_previous()`). `RESULT FAIL` only changes the status text
+unless the first login has not happened yet.
 
 Verify: `pio run -e display-v9`; on device send `LINK` over USB serial to
 print the link state. Short display IO18 to IO17 with the WT32 absent to
@@ -263,7 +298,7 @@ proves the direction check is in place.
 ## 12. WT32 login page QR
 
 The display does not run a web server or provision Wi-Fi. `/setup` shows a
-300 px QR containing `http://<WT32-IP>/` and a typed URL for fallback. The IP
+280 px QR containing `http://<WT32-IP>/` and a typed URL for fallback. The IP
 comes from the WT32's `NET ip=` message. Until an address is available, the QR
 is hidden and the display says it is waiting for the WT32. The QR is re-encoded
 only when the reported IP changes.
@@ -284,15 +319,8 @@ the retired display-hosted provisioning design.
 Two UI changes sit outside the screen-tree logic.
 
 **Light theme.** `LV_USE_THEME_DEFAULT` stays `0`, so nothing is themed and
-styling stays explicit in the `ui_mk_*` helpers. The change is the palette in
-`ui_config.h`: `UI_COL_BG` and the status-bar fill are light, `UI_COL_CARD` is
-white, and the primary foreground is `UI_COL_TEXT` (near-black). That macro was
-renamed from `UI_COL_WHITE`, whose value is no longer white. Two fills were
-added: `UI_COL_BAR` for the status bar and `UI_COL_CARD_OFF` for a button that is
-present but not usable (an offline node). `ui_mk_button()` gained a 1 px accent
-border, which is what now separates a white button from a white card or the light
-background. The modal ack button and the bell label keep light text because both
-sit on a dark fill.
+styling stays explicit in the `ui_mk_*` helpers. The palette and its colour
+rules are in `ui_config.h` and §15.
 
 **Setup QR.** `/setup` encodes only the WT32's HTTP URL. It is hidden until a
 non-empty IP arrives and changes only when that address changes. `/info` shows
@@ -324,5 +352,65 @@ whether for safety (skipping auth, forcing outputs) or any other reason.
 Branch on the existing flag instead of adding a new one, mark debug UI
 with a `DEBUG:` prefix, and never enable it in a production flash.
 
+
+## 15. Layout, colour and refresh rules
+
+These rules came out of the 2026-11-21 UX audit
+(`plans-and-audits/lvgl-ui-ux-audit.md`). New screens must follow them.
+
+### 15.1 Render cost
+
+The ESP32-S3 renders in software through a 1/4-screen buffer. Allowed: flat
+fills, 1–3 px borders, rounded corners, labels, arcs, small circles, opaque
+objects. Not used: animations, transitions, blur, shadows, gradients, partial
+opacity over large areas, image scaling. The modal backdrop is opaque
+(`UI_COL_SCRIM`) for that reason.
+
+### 15.2 Grid
+
+| Item | Value |
+|---|---|
+| Status bar | 800 × 48 (`UI_BAR_H`), `UI_COL_BAR` + 1 px `UI_COL_LINE` divider |
+| Content | 800 × 432 below the bar |
+| Page title | 20 px at y = 15; back button 56 × 40 at (16, 6) on drill-down pages |
+| Cards | from y = 56 (`UI_PAGE_TOP`) to y = 416 (`UI_PAGE_BOTTOM`), 16 px margins and gaps, 12 px padding |
+| Tabs | 100 × 40, icon + word, hit area extended to the bar height |
+| Steppers | at least 56 × 52; −/+ symbols; auto-repeat (400 ms, then 100 ms) |
+| Hold buttons | 96 px (run) and 80 px (equipment) |
+
+### 15.3 Colour and text
+
+| Token | Meaning |
+|---|---|
+| `UI_COL_ACCENT` | tappable outline, active tab, selected tile, links |
+| `UI_COL_OK` | running, healthy, valid |
+| `UI_COL_WARN` | needs attention (login needed, no internet, existing experiment id) |
+| `UI_COL_ALARM` | faults only (missing readings, no WT32, start blocked) |
+| `UI_COL_IDLE` | idle/off hold button fill |
+| `UI_COL_LINE` | grey outline of information cards, chart grid |
+
+All text colours pass 4.5:1 on white and on `UI_COL_BG`. Type scale: 14 px
+captions and detail lines, 20 px titles and word values, 28 px numbers, 40 px
+hero numbers (run progress, bottle temperature). Card captions are UPPERCASE;
+everything else is sentence case. Temperatures use `UI_DEG_C` (°C). The
+built-in fonts lack U+00B7, U+2026 and U+2212, so those characters are not
+used. Changing numbers in status rows are right-aligned so only one edge moves.
+
+### 15.4 Refresh and input
+
+- Each screen builds its widgets in `show()`, keeps static pointers, nulls
+  them in `hide()`, and updates text/colours in `refresh()`.
+- `sleep_filter_touch()` reports the touch that wakes a dark screen as
+  released until the finger lifts, so it cannot press a widget.
+- `ui_modal_show_sev()` ranks INFO < WARN < ALARM; a lower-ranked modal never
+  replaces a higher one. Every modal turns the backlight on.
+- Status-bar chip priority: `No WT32` (no line for 15 s) > `Login needed` >
+  `No internet` > `DB: <state>` > `Online`.
+- The experiment-number suggestion (`max(latest, cfgmax) + 1`) runs from
+  `ui_poll()`, only while idle, only when the DB answer changes, and never
+  after the operator chose a number (stepper or USB `EXP`); the choice is
+  cleared when a run starts.
+
+
 ---
-Updated at 2026-11-19-15:44.
+Updated at 2026-11-21-14:22.

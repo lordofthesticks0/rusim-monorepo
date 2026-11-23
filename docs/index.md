@@ -144,6 +144,7 @@ describes the code as it is.
 | [migration-plan.md](plans-and-audits/migration-plan.md) | ESP pulls telemetry from the legacy Mega slave over UART1 (implemented, log-only); pH converted in the slave; enqueue deferred |
 | [captive-portal-workaround.md](plans-and-audits/captive-portal-workaround.md) | Plan for headless captive portal authentication on the WT32-ETH01 |
 | [lvgl-redesign.md](plans-and-audits/lvgl-redesign.md) | `display-v9` UI redesign working document: as-built layout and behaviour per state and tab, empty redesign tables |
+| [lvgl-ui-ux-audit.md](plans-and-audits/lvgl-ui-ux-audit.md) | `display-v9` UI user-experience and aesthetics audit: findings by severity (run stopped by re-login/reboot, full-screen rebuilds, fake controls, wake tap, touch targets), visual findings within render-cost limits, file references |
 | [migration-notes.md](plans-and-audits/migration-notes.md) | LVGL v8 to v9 migration report: changes made and the required code edits |
 | [display-info-reboot.md](plans-and-audits/display-info-reboot.md) | `/info` reboot triage: heap-walk hang, backtrace decode, CPU gauge + `MEM` command, open corruption hunt |
 | [security-report.md](plans-and-audits/security-report.md) | Dashboard public-deployment audit: findings ordered by severity, with verification queries |
@@ -190,4 +191,4 @@ These describe boards rather than this project's code.
   and is indexed in section 3c.
 
 ---
-Updated at 2026-11-20-15:36.
+Updated at 2026-11-21-13:58.

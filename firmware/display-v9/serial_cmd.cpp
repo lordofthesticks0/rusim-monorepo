@@ -205,6 +205,7 @@ static void handle_line(char *line) {
       int v = atoi(a);
       if (v >= UI_EXP_NUM_MIN && v <= UI_EXP_NUM_MAX) {
         g.expNum = v;
+        g.expNumUserSet = true;  // the DB suggestion must not override it
         link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
         mutated = true;
       } else {

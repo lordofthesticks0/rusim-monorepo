@@ -10,7 +10,7 @@ import {
   fetchExperimentReadings,
   getParameterValue,
   isConcluded,
-  MAX_READING_ROWS,
+  MAX_EXPERIMENT_ROWS,
   PARAMETER_NAMES,
   PARAMETER_UNITS,
   POLL_INTERVAL_MS,
@@ -970,7 +970,7 @@ function ExperimentHistoryView({
       {detailLoading && !detailError && <div className="loading-line" role="status" aria-label="Loading experiment readings" />}
       {!detailLoading && !detailError && experimentReadings.length === 0 && <div className="empty compact">No readings are available for this experiment.</div>}
       {isTruncated(experimentReadings.length) && <div className="notice warn">
-        Only the most recent {MAX_READING_ROWS.toLocaleString()} readings were loaded, so this experiment is incomplete on screen and any CSV export is truncated too.
+        Only the first {MAX_EXPERIMENT_ROWS.toLocaleString()} readings were loaded, so the end of this experiment is missing on screen and any CSV export is truncated too.
       </div>}
 
       {experimentReadings.length > 0 && historyPanel === "readings" && <>
@@ -1062,7 +1062,7 @@ function csvDisabledReason(rowCount: number, loading: boolean, error: string): s
 
 /** Whether a read hit the row limit and therefore holds only part of the data. */
 function isTruncated(rowCount: number): boolean {
-  return rowCount >= MAX_READING_ROWS;
+  return rowCount >= MAX_EXPERIMENT_ROWS;
 }
 
 type ChartInteraction = { index: number; pinned: boolean };

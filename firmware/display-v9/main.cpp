@@ -90,20 +90,21 @@ static void my_disp_flush(lv_display_t *display, const lv_area_t *area, uint8_t 
 }
 
 static void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data) {
+  (void)indev;
+  bool pressed = false;
   if (touch_has_signal()) {
     if (touch_touched()) {
-      data->state = LV_INDEV_STATE_PRESSED;
-
-      /*Set the coordinates*/
+      pressed = true;
       data->point.x = touch_last_x;
       data->point.y = touch_last_y;
-      sleep_note_input();
     } else if (touch_released()) {
-      data->state = LV_INDEV_STATE_RELEASED;
+      pressed = false;
     }
-  } else {
-    data->state = LV_INDEV_STATE_RELEASED;
   }
+  // The tap that wakes a dark screen only wakes it: sleep_filter_touch()
+  // reports it as released so it cannot press the widget under the finger.
+  if (sleep_filter_touch(pressed)) pressed = false;
+  data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
 void setup() {
@@ -223,7 +224,7 @@ void loop() {
     screen_home_poll();
     screen_control_poll(); /* late DB sync -> /control warn label */
     screen_info_poll(); /* info tiles refresh */
-    ui_update_clock();
+    ui_poll(); /* boot run adoption, exp suggestion, status bar */
   }
 
   if (!passthrough) {

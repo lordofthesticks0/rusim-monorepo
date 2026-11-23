@@ -1,28 +1,148 @@
 #include "screen_data.h"
 
+#include <math.h>
+
 #include "fake_data.h"
+#include "link_serial.h"
 #include "ui_config.h"
 #include "ui_shell.h"
 
-#include <math.h>
+// Three pages share this file. Each builds its widgets once; screen_data_refresh()
+// updates whichever page is open in place when a new frame arrives. Numbers
+// shown to the operator are 1-based; c and b stay 0-based in code.
 
-// Which sensor the trend card is charting. Temperature is the default; tapping
-// any tile switches to that sensor. The route re-renders every 5 s when new
-// SENS frames land, so the choice is kept here and only reset when a different
-// bottle is opened.
+enum Page { P_NONE = 0, P_PICKER, P_CLUSTER, P_BOTTLE };
+static Page s_page = P_NONE;
+static int s_c = 0;
+static int s_b = 0;
+
+// Which sensor the trend card charts. Temperature by default; kept while the
+// same bottle stays open, reset when another bottle is opened.
 static int s_chartSensor = S_TEMP;
 static int s_chartC = -1;
 static int s_chartB = -1;
 
-static void on_pick_cluster(lv_event_t *e) {
-  intptr_t c = (intptr_t)lv_event_get_user_data(e);
-  ui_show_cluster((int)c);
+// --- shared state helpers ----------------------------------------------------
+
+// Short state of one bottle slot and the colour it is shown in.
+static const char *bottle_state(int c, int b, uint32_t *col) {
+  const BottleFake &bt = g.cluster[c].bottle[b];
+  if (!g.cluster[c].online) {
+    *col = UI_COL_DIM;
+    return "Offline";
+  }
+  if (!bt.present) {
+    *col = UI_COL_ALARM;
+    return "No data";
+  }
+  const int n = fake_bottle_null_count(c, b);
+  if (n == 0) {
+    *col = UI_COL_OK;
+    return "All readings valid";
+  }
+  *col = UI_COL_ALARM;
+  return n == 1 ? "1 reading missing" : "Readings missing";
 }
 
-static void on_pick_sensor(lv_event_t *e) {
-  intptr_t v = (intptr_t)lv_event_get_user_data(e);
-  s_chartSensor = (int)(v & 0xF);
-  ui_show_bottle((int)((v >> 8) & 0xFF), (int)((v >> 4) & 0xF));
+static void set_offline_look(lv_obj_t *card, bool offline) {
+  lv_obj_set_style_bg_color(card, lv_color_hex(offline ? UI_COL_CARD_OFF : UI_COL_CARD),
+                            LV_PART_MAIN);
+}
+
+static void make_tappable(lv_obj_t *card) {
+  lv_obj_set_clickable(card, true);
+  lv_obj_set_style_bg_color(card, lv_color_hex(UI_COL_BAR), LV_STATE_PRESSED);
+  // Tappable cards get the accent outline; information-only cards keep grey.
+  lv_obj_set_style_border_color(card, lv_color_hex(UI_COL_ACCENT), LV_PART_MAIN);
+}
+
+// --- /data: node picker ------------------------------------------------------
+
+static lv_obj_t *s_nodeCard[UI_CLUSTERS] = {};
+static lv_obj_t *s_nodeTitle[UI_CLUSTERS] = {};
+static lv_obj_t *s_nodeLine1[UI_CLUSTERS] = {};
+static lv_obj_t *s_nodeLine2[UI_CLUSTERS] = {};
+static lv_obj_t *s_nodeDot[UI_CLUSTERS] = {};
+
+static void on_pick_cluster(lv_event_t *e) {
+  ui_show_cluster((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void picker_refresh() {
+  for (int c = 0; c < UI_CLUSTERS; c++) {
+    if (s_nodeCard[c] == nullptr) continue;
+    const bool on = g.cluster[c].online;
+    int present = 0;
+    int missing = 0;
+    for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) {
+      if (g.cluster[c].bottle[b].present) present++;
+    }
+    if (on) missing = fake_alarm_count_node(c);
+    char t[40];
+    set_offline_look(s_nodeCard[c], !on);
+    lv_obj_set_style_text_color(s_nodeTitle[c], lv_color_hex(on ? UI_COL_TEXT : UI_COL_DIM),
+                                LV_PART_MAIN);
+    if (on) {
+      snprintf(t, sizeof(t), "%d of %d bottles reporting", present, UI_BOTTLES_PER_CLUSTER);
+      lv_label_set_text(s_nodeLine1[c], t);
+      if (missing > 0) {
+        snprintf(t, sizeof(t), "%d readings missing", missing);
+        lv_label_set_text(s_nodeLine2[c], t);
+        lv_obj_set_style_text_color(s_nodeLine2[c], lv_color_hex(UI_COL_ALARM), LV_PART_MAIN);
+      } else {
+        lv_label_set_text(s_nodeLine2[c], "All readings valid");
+        lv_obj_set_style_text_color(s_nodeLine2[c], lv_color_hex(UI_COL_OK), LV_PART_MAIN);
+      }
+    } else {
+      lv_label_set_text(s_nodeLine1[c], "Not connected");
+      lv_label_set_text(s_nodeLine2[c], "");
+    }
+    const uint32_t dot = !on ? UI_COL_DISABLED : (missing > 0 ? UI_COL_ALARM : UI_COL_OK);
+    lv_obj_set_style_bg_color(s_nodeDot[c], lv_color_hex(dot), LV_PART_MAIN);
+  }
+}
+
+void screen_data_picker_show(lv_obj_t *parent) {
+  s_page = P_PICKER;
+  ui_mk_page_title(parent, "Nodes", nullptr, nullptr);
+  // 3 x 2 cards, 245 x 172, 16 px gaps: 3*245 + 2*16 = 767.
+  for (int c = 0; c < UI_CLUSTERS; c++) {
+    const int x = UI_MARGIN + (c % 3) * 261;
+    const int y = UI_PAGE_TOP + (c / 3) * 188;
+    lv_obj_t *card = ui_mk_card(parent, x, y, 245, 172);
+    make_tappable(card);
+    lv_obj_add_event_cb(card, on_pick_cluster, LV_EVENT_CLICKED, (void *)(intptr_t)c);
+    char t[16];
+    snprintf(t, sizeof(t), "Node %d", c + 1);
+    s_nodeCard[c] = card;
+    s_nodeTitle[c] = ui_mk_label(card, t, 4, 4, 180, UI_COL_TEXT, &lv_font_montserrat_28);
+    s_nodeLine1[c] = ui_mk_label(card, "", 4, 64, 210, UI_COL_TEXT, &lv_font_montserrat_14);
+    s_nodeLine2[c] = ui_mk_label(card, "", 4, 88, 210, UI_COL_DIM, &lv_font_montserrat_14);
+    lv_obj_t *dot = lv_obj_create(card);
+    lv_obj_set_size(dot, 14, 14);
+    lv_obj_set_pos(dot, 203, 12);
+    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(dot, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_clickable(dot, false);
+    s_nodeDot[c] = dot;
+    lv_obj_t *open = ui_mk_label(card, "Open " LV_SYMBOL_RIGHT, 4, 124, 213, UI_COL_ACCENT,
+                                 &lv_font_montserrat_14);
+    lv_obj_set_style_text_align(open, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+  }
+  picker_refresh();
+}
+
+// --- /data/X: node page ------------------------------------------------------
+
+static lv_obj_t *s_tile[UI_BOTTLES_PER_CLUSTER] = {};
+static lv_obj_t *s_tileValue[UI_BOTTLES_PER_CLUSTER] = {};
+static lv_obj_t *s_tileState[UI_BOTTLES_PER_CLUSTER] = {};
+static lv_obj_t *s_clusterNote = nullptr;
+
+static void on_back_picker(lv_event_t *e) {
+  (void)e;
+  ui_show_data_picker();
 }
 
 static void on_pick_bottle(lv_event_t *e) {
@@ -30,315 +150,310 @@ static void on_pick_bottle(lv_event_t *e) {
   ui_show_bottle((int)(v >> 8), (int)(v & 0xFF));
 }
 
-static void on_back_picker(lv_event_t *e) {
-  (void)e;
-  ui_show_home();
-}
-
-static void on_back_cluster(lv_event_t *e) {
-  intptr_t c = (intptr_t)lv_event_get_user_data(e);
-  (void)c;
-  ui_show_data_picker();
-}
-
-static void on_back_bottle(lv_event_t *e) {
-  intptr_t c = (intptr_t)lv_event_get_user_data(e);
-  s_chartSensor = S_TEMP;  // leaving the screen drops back to the default chart
-  ui_show_cluster((int)c);
-}
-
-void screen_data_picker_show(lv_obj_t *parent) {
-  lv_obj_t *title = ui_mk_label(parent, "NODES", 0, 8, 800, UI_COL_TEXT, &lv_font_montserrat_20);
-  lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  for (int c = 0; c < UI_CLUSTERS; c++) {
-    int row = c / 3, col = c % 3;
-    int x = 68 + col * 232, y = 56 + row * 160;
-    (void)x;
-    (void)y;
-    // Recompute exact per spec: 3*200 + 2*32 = 664, start (800-664)/2=68.
-    x = 68 + col * 232;
-    y = 56 + row * 160;
-    uint32_t bg = g.cluster[c].online ? UI_COL_CARD : UI_COL_CARD_OFF;
-    lv_obj_t *b = ui_mk_button(parent, "", x, y, 200, 140, bg);
-    lv_obj_t *num = lv_label_create(b);
-    char t[8];
-    snprintf(t, sizeof(t), "%d", c);
-    lv_label_set_text(num, t);
-    lv_obj_set_style_text_font(num, &lv_font_montserrat_28, LV_PART_MAIN);
-    uint32_t colr = g.cluster[c].online ? UI_COL_TEXT : UI_COL_DIM;
-    lv_obj_set_style_text_color(num, lv_color_hex(colr), LV_PART_MAIN);
-    lv_obj_align(num, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_width(num, 180);
-    lv_obj_set_style_text_align(num, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_add_event_cb(b, on_pick_cluster, LV_EVENT_CLICKED, (void *)(intptr_t)c);
+static void cluster_refresh() {
+  const int c = s_c;
+  const bool on = g.cluster[c].online;
+  if (s_clusterNote != nullptr)
+    lv_label_set_text(s_clusterNote, on ? "Bottle temperature. Tap a bottle for all sensors."
+                                        : "This node is not connected.");
+  for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) {
+    if (s_tile[b] == nullptr) continue;
+    const BottleFake &bt = g.cluster[c].bottle[b];
+    const bool have = on && bt.present && !bt.sensorNull[S_TEMP];
+    char val[16];
+    if (have) {
+      snprintf(val, sizeof(val), "%.1f", bt.sensor[S_TEMP]);
+    } else {
+      snprintf(val, sizeof(val), "--");
+    }
+    lv_label_set_text(s_tileValue[b], val);
+    // A temperature the WT32 could not fetch is flagged red, not hidden.
+    const bool failed = on && bt.present && bt.sensorNull[S_TEMP];
+    lv_obj_set_style_text_color(
+        s_tileValue[b], lv_color_hex(have ? UI_COL_TEXT : failed ? UI_COL_ALARM : UI_COL_DIM),
+        LV_PART_MAIN);
+    uint32_t col;
+    lv_label_set_text(s_tileState[b], bottle_state(c, b, &col));
+    lv_obj_set_style_text_color(s_tileState[b], lv_color_hex(col), LV_PART_MAIN);
+    set_offline_look(s_tile[b], !on);
   }
-  lv_obj_t *back = ui_mk_button(parent, LV_SYMBOL_NEW_LINE, 364, 372, 72, 48, UI_COL_CARD);
-  lv_obj_add_event_cb(back, on_back_picker, LV_EVENT_CLICKED, nullptr);
-}
-
-// One square per bottle, built like the /info tiles: the measured value on top
-// in the large compressed font, a dim caption underneath. Only the bottle
-// temperature is shown here; the tap opens the full sensor list.
-static lv_obj_t *mk_temp_tile(lv_obj_t *parent, int c, int b) {
-  const bool nodeOn = g.cluster[c].online;
-  const BottleFake &bt = g.cluster[c].bottle[b];
-  const bool haveTemp = nodeOn && bt.present && !bt.sensorNull[S_TEMP];
-  const bool tempNull = nodeOn && bt.present && bt.sensorNull[S_TEMP];
-
-  lv_obj_t *tile = ui_mk_card(parent, 0, 0, 180, 180);
-  // Flex positions the children of the grid, so the x/y above are placeholders.
-  if (!nodeOn) {
-    lv_obj_set_style_bg_color(tile, lv_color_hex(UI_COL_CARD_OFF), LV_PART_MAIN);
-  }
-  lv_obj_set_clickable(tile, true);  // the card itself is the tap target
-  lv_obj_add_event_cb(tile, on_pick_bottle, LV_EVENT_CLICKED,
-                      (void *)(intptr_t)((c << 8) | b));
-
-  char val[24];
-  if (haveTemp) {
-    snprintf(val, sizeof(val), "%.1f C", bt.sensor[S_TEMP]);
-  } else {
-    snprintf(val, sizeof(val), "--");
-  }
-  lv_obj_t *v = lv_label_create(tile);
-  lv_label_set_text(v, val);
-  lv_obj_set_width(v, 164);
-  lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_WRAP);
-  lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_obj_set_style_text_font(v, &lv_font_montserrat_28_compressed, LV_PART_MAIN);
-  // A field the WT32 could not fetch is flagged, not silently shown as a value.
-  lv_obj_set_style_text_color(
-      v, lv_color_hex(tempNull ? UI_COL_ALARM : (haveTemp ? UI_COL_TEXT : UI_COL_DIM)),
-      LV_PART_MAIN);
-  lv_obj_align(v, LV_ALIGN_TOP_MID, 0, 38);
-
-  char cap[24];
-  snprintf(cap, sizeof(cap), "Bottle %d", b);
-  lv_obj_t *cl = lv_label_create(tile);
-  lv_label_set_text(cl, cap);
-  lv_obj_set_width(cl, 164);
-  lv_obj_set_style_text_align(cl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_obj_set_style_text_font(cl, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_text_color(cl, lv_color_hex(UI_COL_DIM), LV_PART_MAIN);
-  lv_obj_align(cl, LV_ALIGN_BOTTOM_MID, 0, -16);
-  return tile;
 }
 
 void screen_cluster_show(lv_obj_t *parent, int c) {
-  char title[48];
-  snprintf(title, sizeof(title), "NODE %d", c);
-  lv_obj_t *ctitle = ui_mk_label(parent, title, 0, 8, 800, UI_COL_TEXT, &lv_font_montserrat_20);
-  lv_obj_set_style_text_align(ctitle, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  s_page = P_CLUSTER;
+  s_c = c;
+  char t[24];
+  snprintf(t, sizeof(t), "Node %d", c + 1);
+  ui_mk_page_title(parent, t, on_back_picker, nullptr);
+  s_clusterNote = ui_mk_label(parent, "", 400, 18, 384, UI_COL_DIM, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(s_clusterNote, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
 
-  // Same tile grid as /info: 180x180 squares, wrapped and centred in the area
-  // above the back button.
-  lv_obj_t *grid = lv_obj_create(parent);
-  lv_obj_set_pos(grid, 0, 40);
-  lv_obj_set_size(grid, 800, 316);
-  lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, LV_PART_MAIN);
-  lv_obj_set_style_border_width(grid, 0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(grid, 16, LV_PART_MAIN);
-  lv_obj_set_style_pad_row(grid, 16, LV_PART_MAIN);
-  lv_obj_set_style_pad_column(grid, 16, LV_PART_MAIN);
-  lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-  lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_scrollable(grid, false);
+  // Four 180 x 252 tiles, 16 px gaps: 4*180 + 3*16 = 768.
   for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) {
-    mk_temp_tile(grid, c, b);
+    lv_obj_t *tile = ui_mk_card(parent, UI_MARGIN + b * 196, 100, 180, 252);
+    make_tappable(tile);
+    lv_obj_add_event_cb(tile, on_pick_bottle, LV_EVENT_CLICKED, (void *)(intptr_t)((c << 8) | b));
+    snprintf(t, sizeof(t), "Bottle %d", b + 1);
+    lv_obj_t *name = ui_mk_label(tile, t, 0, 4, 154, UI_COL_TEXT, &lv_font_montserrat_20);
+    lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    s_tileValue[b] = ui_mk_label(tile, "", 0, 66, 154, UI_COL_TEXT, &lv_font_montserrat_40);
+    lv_obj_set_style_text_align(s_tileValue[b], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_t *unit = ui_mk_label(tile, "Temperature, " UI_DEG_C, 0, 116, 154, UI_COL_DIM,
+                                 &lv_font_montserrat_14);
+    lv_obj_set_style_text_align(unit, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    s_tileState[b] = ui_mk_label(tile, "", 0, 186, 154, UI_COL_DIM, &lv_font_montserrat_14);
+    lv_obj_set_style_text_align(s_tileState[b], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    s_tile[b] = tile;
   }
-
-  lv_obj_t *back = ui_mk_button(parent, LV_SYMBOL_NEW_LINE, 364, 372, 72, 48, UI_COL_CARD);
-  lv_obj_add_event_cb(back, on_back_picker, LV_EVENT_CLICKED, nullptr);
+  cluster_refresh();
 }
 
-// Captions for the chamber detail tiles. The unit lives here, not on the big
-// value line, so every number stays the same size and the eye can compare them.
-// All five fit one 124 px line: a wrapped caption would sit higher than its
-// neighbours and break the row.
-static const char *const SENSOR_CAPTION[S_COUNT] = {
-    "CO2 (ppm)", "CH4 (ppm)", "Pressure (kPa)", "pH", "Temp (\xC2\xB0" "C)"};
+// --- /data/X/bottle_Y: bottle page -------------------------------------------
 
-// Short names for the chart heading.
-static const char *const SENSOR_CHART_NAME[S_COUNT] = {"CO2", "CH4", "Pressure", "pH",
-                                                       "Temperature"};
+// Captions carry the unit, so every big number stays the same size.
+static const char *const SENSOR_CAPTION[S_COUNT] = {"CO2 (ppm)", "CH4 (ppm)", "Pressure (kPa)",
+                                                    "pH", "Temp (" UI_DEG_C ")"};
+static const char *const SENSOR_CHART_NAME[S_COUNT] = {"CO2", "CH4", "PRESSURE", "PH",
+                                                       "TEMPERATURE"};
+static const char *const SENSOR_UNIT_TXT[S_COUNT] = {" ppm", " ppm", " kPa", "", " " UI_DEG_C};
 
-// Fixed Y axis per sensor: CO2 0-5000 ppm, CH4 0-10000 ppm, pressure 0-10 kPa,
-// pH 5-9, temperature 25-45 °C. lv_chart only accepts int32 values, so kPa and
-// pH are carried in hundredths and temperature in tenths.
-static const float kAxisLo[S_COUNT] = {0.0f, 0.0f, 0.0f, 5.0f, 25.0f};
-static const float kAxisHi[S_COUNT] = {5000.0f, 10000.0f, 10.0f, 9.0f, 45.0f};
-static const float kAxisGain[S_COUNT] = {1.0f, 1.0f, 100.0f, 100.0f, 10.0f};
+// lv_chart takes int32 values, so kPa and pH are charted in hundredths and
+// temperature in tenths. The Y range follows the data (min..max of the shown
+// window plus 10 %), but never narrower than kMinSpan, so sensor noise is not
+// blown up into a dramatic-looking line.
+static const float kGain[S_COUNT] = {1.0f, 1.0f, 100.0f, 100.0f, 10.0f};
+static const float kMinSpan[S_COUNT] = {100.0f, 100.0f, 0.5f, 0.2f, 1.0f};
+static const int kDecimals[S_COUNT] = {0, 0, 2, 2, 1};
 
-// Prints the axis in the caption, derived from the constants above so the label
-// cannot drift away from the scale the chart is actually drawn on.
-static void axis_caption(int s, char *out, size_t n) {
-  switch (s) {
-    case S_CO2:
-    case S_CH4:
-      snprintf(out, n, "scale %.0f-%.0f ppm", kAxisLo[s], kAxisHi[s]);
-      break;
-    case S_PRESS:
-      snprintf(out, n, "scale %.0f-%.0f kPa", kAxisLo[s], kAxisHi[s]);
-      break;
-    case S_PH:
-      snprintf(out, n, "scale %.0f-%.0f", kAxisLo[s], kAxisHi[s]);
-      break;
-    default:
-      snprintf(out, n, "scale %.0f-%.0f \xC2\xB0" "C", kAxisLo[s], kAxisHi[s]);
-      break;
-  }
+static lv_obj_t *s_sTile[S_COUNT] = {};
+static lv_obj_t *s_sValue[S_COUNT] = {};
+static lv_obj_t *s_sCap[S_COUNT] = {};
+static lv_obj_t *s_bottleNote = nullptr;
+static lv_obj_t *s_chart = nullptr;
+static lv_chart_series_t *s_ser = nullptr;
+static lv_obj_t *s_chartTitle = nullptr;
+static lv_obj_t *s_chartNow = nullptr;
+static lv_obj_t *s_yTop = nullptr;
+static lv_obj_t *s_yBottom = nullptr;
+static lv_obj_t *s_chartEmpty = nullptr;
+
+static void on_back_cluster(lv_event_t *e) {
+  (void)e;
+  s_chartSensor = S_TEMP;
+  ui_show_cluster(s_c);
 }
 
-// One sensor reading, built like the /info tiles: value in the compressed 28 px
-// face on top, dim caption underneath, colour carrying the field state. The
-// selected tile is filled with the accent colour, the same language the status
-// bar uses for the active tab, and it is also the tap target that charts it.
-static lv_obj_t *mk_sensor_tile(lv_obj_t *parent, int c, int b, int s, int x, int y) {
-  const bool nodeOn = g.cluster[c].online;
-  const BottleFake &bt = g.cluster[c].bottle[b];
-  const bool have = nodeOn && bt.present && !bt.sensorNull[s];
-  const bool failed = nodeOn && bt.present && bt.sensorNull[s];
-  const bool sel = (s == s_chartSensor);
-
-  lv_obj_t *tile = ui_mk_card(parent, x, y, 144, 144);
-  if (!nodeOn) {
-    lv_obj_set_style_bg_color(tile, lv_color_hex(UI_COL_CARD_OFF), LV_PART_MAIN);
-  }
-  if (sel) {
-    lv_obj_set_style_bg_color(tile, lv_color_hex(UI_COL_ACCENT), LV_PART_MAIN);
-    lv_obj_set_style_border_width(tile, 0, LV_PART_MAIN);
-  } else {
-    // Touch feedback before the rebuild replaces the screen (no theme is on).
-    lv_obj_set_style_bg_color(tile, lv_color_hex(UI_COL_BAR), LV_STATE_PRESSED);
-  }
-  lv_obj_set_clickable(tile, true);
-  lv_obj_add_event_cb(tile, on_pick_sensor, LV_EVENT_CLICKED,
-                      (void *)(intptr_t)((c << 8) | (b << 4) | s));
-
-  char val[16];
-  fake_sensor_value_text(c, b, s, val, sizeof(val));
-  lv_obj_t *v = lv_label_create(tile);
-  lv_label_set_text(v, val);
-  lv_obj_set_width(v, 124);
-  lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_WRAP);
-  lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_obj_set_style_text_font(v, &lv_font_montserrat_28_compressed, LV_PART_MAIN);
-  // A field the WT32 could not fetch is flagged, not silently shown as a value.
-  // On the accent-filled tile white is the only legible choice.
-  lv_obj_set_style_text_color(
-      v,
-      sel ? lv_color_white()
-          : lv_color_hex(failed ? UI_COL_ALARM : (have ? UI_COL_TEXT : UI_COL_DIM)),
-      LV_PART_MAIN);
-  lv_obj_align(v, LV_ALIGN_TOP_MID, 0, 30);
-
-  lv_obj_t *cap = lv_label_create(tile);
-  lv_label_set_text(cap, SENSOR_CAPTION[s]);
-  lv_obj_set_width(cap, 124);
-  lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_obj_set_style_text_font(cap, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_text_color(
-      cap, sel ? lv_color_white() : lv_color_hex(UI_COL_DIM), LV_PART_MAIN);
-  lv_obj_align(cap, LV_ALIGN_BOTTOM_MID, 0, -10);
-  return tile;
+static void on_pick_sensor(lv_event_t *e) {
+  s_chartSensor = (int)(intptr_t)lv_event_get_user_data(e);
+  ui_show_bottle(s_c, s_b);
 }
 
-// Trend for the selected sensor. The card carries the series name and its fixed
-// scale, because LVGL v9 charts draw no axis tick labels.
-static void build_trend_card(lv_obj_t *parent, int c, int b, int s) {
-  const BottleFake &bt = g.cluster[c].bottle[b];
-  lv_obj_t *card = ui_mk_card(parent, 16, 196, 768, 160);
-
-  // The card's border and padding leave 748x140 of content.
-  char title[64];
-  snprintf(title, sizeof(title), "%s trend, last %lu min", SENSOR_CHART_NAME[s],
-           (unsigned long)(UI_TREND_PTS * UI_TREND_STEP_MS / 60000UL));
-  ui_mk_label(card, title, 0, 0, 748, UI_COL_DIM, &lv_font_montserrat_14);
-  char axis[40];
-  axis_caption(s, axis, sizeof(axis));
-  lv_obj_t *scale = ui_mk_label(card, axis, 0, 0, 748, UI_COL_DIM, &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(scale, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
-
-  bool haveTrend = false;
-  for (int i = 0; i < UI_TREND_PTS; i++) {
-    if (isfinite(bt.trend[s][i])) haveTrend = true;
-  }
-  if (!haveTrend) {
-    lv_obj_t *empty =
-        ui_mk_label(card, "No samples yet.\nValues appear after the next WT32 poll.",
-                    0, 20, 748, UI_COL_DIM, &lv_font_montserrat_14);
-    lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_align(empty, LV_ALIGN_CENTER, 0, 16);
-    return;
-  }
-
-  lv_obj_t *chart = lv_chart_create(card);
-  lv_obj_set_pos(chart, 0, 20);
-  lv_obj_set_size(chart, 748, 120);
-  lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
-  lv_chart_set_point_count(chart, UI_TREND_PTS);
-  lv_chart_set_axis_range(chart, LV_CHART_AXIS_PRIMARY_Y, (int32_t)(kAxisLo[s] * kAxisGain[s]),
-                          (int32_t)(kAxisHi[s] * kAxisGain[s]));
-  lv_chart_set_div_line_count(chart, 3, 0);
-  // The card is the surface, and no theme is enabled: the line width and the
-  // point background opacity both default to "nothing" and must be set here.
-  lv_obj_set_style_bg_opa(chart, LV_OPA_TRANSP, LV_PART_MAIN);
-  lv_obj_set_style_border_width(chart, 0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(chart, 4, LV_PART_MAIN);
-  lv_obj_set_style_line_width(chart, 1, LV_PART_MAIN);
-  lv_obj_set_style_line_color(chart, lv_color_hex(UI_COL_BAR), LV_PART_MAIN);
-  lv_obj_set_style_line_width(chart, 3, LV_PART_ITEMS);
-  lv_obj_set_style_line_rounded(chart, true, LV_PART_ITEMS);
-  lv_obj_set_style_width(chart, 6, LV_PART_INDICATOR);
-  lv_obj_set_style_height(chart, 6, LV_PART_INDICATOR);
-  lv_obj_set_style_radius(chart, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
-  lv_obj_set_style_bg_opa(chart, LV_OPA_COVER, LV_PART_INDICATOR);
-  lv_obj_set_style_border_width(chart, 0, LV_PART_INDICATOR);
-
-  lv_chart_series_t *ser =
-      lv_chart_add_series(chart, lv_color_hex(UI_COL_ACCENT), LV_CHART_AXIS_PRIMARY_Y);
+static void chart_refresh() {
+  if (s_chart == nullptr) return;
+  const int s = s_chartSensor;
+  const BottleFake &bt = g.cluster[s_c].bottle[s_b];
+  float lo = INFINITY;
+  float hi = -INFINITY;
   for (int i = 0; i < UI_TREND_PTS; i++) {
     const float v = bt.trend[s][i];
-    lv_chart_set_next_value(chart, ser,
-                            isfinite(v) ? (int32_t)lroundf(v * kAxisGain[s])
-                                        : LV_CHART_POINT_NONE);
+    if (!isfinite(v)) continue;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
   }
+  const bool have = isfinite(lo);
+  lv_obj_set_hidden(s_chart, !have);
+  lv_obj_set_hidden(s_yTop, !have);
+  lv_obj_set_hidden(s_yBottom, !have);
+  lv_obj_set_hidden(s_chartEmpty, have);
+  char t[48];
+  if (!have) {
+    lv_label_set_text(s_chartNow, "");
+    return;
+  }
+  const float mid = (lo + hi) * 0.5f;
+  float span = hi - lo;
+  if (span < kMinSpan[s]) span = kMinSpan[s];
+  span *= 1.2f;  // 10 % headroom above and below
+  lo = mid - span * 0.5f;
+  hi = mid + span * 0.5f;
+  lv_chart_set_axis_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, (int32_t)lroundf(lo * kGain[s]),
+                          (int32_t)lroundf(hi * kGain[s]));
+  for (int i = 0; i < UI_TREND_PTS; i++) {
+    const float v = bt.trend[s][i];
+    lv_chart_set_series_value_by_id(s_chart, s_ser, (uint32_t)i,
+                                    isfinite(v) ? (int32_t)lroundf(v * kGain[s])
+                                                : LV_CHART_POINT_NONE);
+  }
+  lv_chart_refresh(s_chart);
+  snprintf(t, sizeof(t), "%.*f", kDecimals[s], hi);
+  lv_label_set_text(s_yTop, t);
+  snprintf(t, sizeof(t), "%.*f", kDecimals[s], lo);
+  lv_label_set_text(s_yBottom, t);
+  const float now = bt.trend[s][UI_TREND_PTS - 1];
+  if (isfinite(now)) {
+    snprintf(t, sizeof(t), "Now %.*f%s", kDecimals[s], now, SENSOR_UNIT_TXT[s]);
+  } else {
+    snprintf(t, sizeof(t), "Now --");
+  }
+  lv_label_set_text(s_chartNow, t);
+}
+
+static void bottle_refresh() {
+  const int c = s_c;
+  const int b = s_b;
+  const bool on = g.cluster[c].online;
+  const BottleFake &bt = g.cluster[c].bottle[b];
+  if (s_bottleNote != nullptr) {
+    if (!on) {
+      lv_label_set_text(s_bottleNote, "Node not connected");
+      lv_obj_set_style_text_color(s_bottleNote, lv_color_hex(UI_COL_DIM), LV_PART_MAIN);
+    } else if (!bt.present) {
+      lv_label_set_text(s_bottleNote, "No live data for this bottle");
+      lv_obj_set_style_text_color(s_bottleNote, lv_color_hex(UI_COL_ALARM), LV_PART_MAIN);
+    } else {
+      lv_label_set_text(s_bottleNote, "Tap a tile to chart that sensor");
+      lv_obj_set_style_text_color(s_bottleNote, lv_color_hex(UI_COL_DIM), LV_PART_MAIN);
+    }
+  }
+  for (int s = 0; s < S_COUNT; s++) {
+    if (s_sTile[s] == nullptr) continue;
+    const bool have = on && bt.present && !bt.sensorNull[s];
+    const bool failed = on && bt.present && bt.sensorNull[s];
+    char val[16];
+    fake_sensor_value_text(c, b, s, val, sizeof(val));
+    lv_label_set_text(s_sValue[s], val);
+    // Value colour always carries the field state, selected or not.
+    lv_obj_set_style_text_color(
+        s_sValue[s], lv_color_hex(failed ? UI_COL_ALARM : (have ? UI_COL_TEXT : UI_COL_DIM)),
+        LV_PART_MAIN);
+    set_offline_look(s_sTile[s], !on);
+  }
+  chart_refresh();
 }
 
 void screen_bottle_show(lv_obj_t *parent, int c, int b) {
+  s_page = P_BOTTLE;
+  s_c = c;
+  s_b = b;
   if (c != s_chartC || b != s_chartB) {
     s_chartC = c;
     s_chartB = b;
     s_chartSensor = S_TEMP;  // temperature is the chart every bottle opens on
   }
 
-  // Header: ownership in words instead of a route path. The node reads as quiet
-  // secondary text on the same baseline.
-  char t[24];
-  snprintf(t, sizeof(t), "BOTTLE %d", b);
-  ui_mk_label(parent, t, 16, 6, 220, UI_COL_TEXT, &lv_font_montserrat_20);
-  snprintf(t, sizeof(t), "NODE %d", c);
-  ui_mk_label(parent, t, 132, 12, 200, UI_COL_DIM, &lv_font_montserrat_14);
+  char t[48];
+  snprintf(t, sizeof(t), "Bottle %d", b + 1);
+  lv_obj_t *title = ui_mk_page_title(parent, t, on_back_cluster, nullptr);
+  snprintf(t, sizeof(t), "Node %d", c + 1);
+  lv_obj_t *node = ui_mk_label(parent, t, 0, 0, 100, UI_COL_DIM, &lv_font_montserrat_14);
+  lv_obj_align_to(node, title, LV_ALIGN_OUT_RIGHT_BOTTOM, 12, -2);
+  s_bottleNote = ui_mk_label(parent, "", 400, 18, 384, UI_COL_DIM, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(s_bottleNote, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
 
-  if (!g.cluster[c].bottle[b].present) {
-    lv_obj_t *note = ui_mk_label(parent, "No live data for this bottle.", 436, 12, 348,
-                                 UI_COL_ALARM, &lv_font_montserrat_14);
-    lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
-  }
-
-  // Five tiles on one line: 5*144 + 4*12 = 768, the same 16 px edges as /info.
+  // Five 144 x 124 tiles: 5*144 + 4*12 = 768. The selected one gets a 3 px
+  // accent outline and an accent caption; its value keeps its state colour.
   for (int s = 0; s < S_COUNT; s++) {
-    mk_sensor_tile(parent, c, b, s, 16 + s * 156, 40);
+    lv_obj_t *tile = ui_mk_card(parent, UI_MARGIN + s * 156, UI_PAGE_TOP, 144, 124);
+    make_tappable(tile);
+    const bool sel = (s == s_chartSensor);
+    if (sel) {
+      lv_obj_set_style_border_width(tile, 3, LV_PART_MAIN);
+      lv_obj_set_style_pad_all(tile, 10, LV_PART_MAIN);  // keep content in place
+    } else {
+      lv_obj_set_style_border_color(tile, lv_color_hex(UI_COL_LINE), LV_PART_MAIN);
+    }
+    lv_obj_add_event_cb(tile, on_pick_sensor, LV_EVENT_CLICKED, (void *)(intptr_t)s);
+    s_sValue[s] = ui_mk_label(tile, "", 0, 18, 118, UI_COL_TEXT, &lv_font_montserrat_28);
+    lv_obj_set_style_text_align(s_sValue[s], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    s_sCap[s] = ui_mk_label(tile, SENSOR_CAPTION[s], 0, 74, 118,
+                            sel ? UI_COL_ACCENT : UI_COL_DIM, &lv_font_montserrat_14);
+    lv_obj_set_style_text_align(s_sCap[s], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    s_sTile[s] = tile;
   }
 
-  build_trend_card(parent, c, b, s_chartSensor);
+  // Trend card (inner 742 x 194): Y labels on the left, chart on the right.
+  lv_obj_t *card = ui_mk_card(parent, UI_MARGIN, 196, 768, 220);
+  snprintf(t, sizeof(t), "%s, LAST %lu MIN", SENSOR_CHART_NAME[s_chartSensor],
+           (unsigned long)(UI_TREND_PTS * UI_TREND_STEP_MS / 60000UL));
+  s_chartTitle = ui_mk_caption(card, t, 0, 0, 400);
+  s_chartNow = ui_mk_label(card, "", 400, 0, 342, UI_COL_TEXT, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(s_chartNow, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+  s_yTop = ui_mk_label(card, "", 0, 26, 56, UI_COL_DIM, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(s_yTop, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+  s_yBottom = ui_mk_label(card, "", 0, 174, 56, UI_COL_DIM, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(s_yBottom, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
 
-  // Discoverability for the tile taps; the selected tile is visually distinct,
-  // but a first-time operator has nothing else to go on.
-  ui_mk_label(parent, "Tap a tile to chart that sensor.", 16, 386, 340, UI_COL_DIM,
-              &lv_font_montserrat_14);
+  s_chart = lv_chart_create(card);
+  lv_obj_set_pos(s_chart, 64, 26);
+  lv_obj_set_size(s_chart, 678, 166);
+  lv_chart_set_type(s_chart, LV_CHART_TYPE_LINE);
+  lv_chart_set_point_count(s_chart, UI_TREND_PTS);
+  lv_chart_set_div_line_count(s_chart, 5, 0);
+  // No theme: line width and point size default to "nothing" and are set here.
+  lv_obj_set_style_bg_opa(s_chart, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_width(s_chart, 0, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(s_chart, 0, LV_PART_MAIN);
+  lv_obj_set_style_line_width(s_chart, 1, LV_PART_MAIN);
+  lv_obj_set_style_line_color(s_chart, lv_color_hex(UI_COL_LINE), LV_PART_MAIN);
+  lv_obj_set_style_line_width(s_chart, 3, LV_PART_ITEMS);
+  // No per-point dots: the line alone reads more calmly ("Now" shows the
+  // latest value in the header).
+  lv_obj_set_style_width(s_chart, 0, LV_PART_INDICATOR);
+  lv_obj_set_style_height(s_chart, 0, LV_PART_INDICATOR);
+  s_ser = lv_chart_add_series(s_chart, lv_color_hex(UI_COL_ACCENT), LV_CHART_AXIS_PRIMARY_Y);
+  lv_chart_set_all_values(s_chart, s_ser, LV_CHART_POINT_NONE);
 
-  lv_obj_t *back = ui_mk_button(parent, LV_SYMBOL_NEW_LINE, 364, 372, 72, 48, UI_COL_CARD);
-  lv_obj_add_event_cb(back, on_back_bottle, LV_EVENT_CLICKED, (void *)(intptr_t)c);
+  s_chartEmpty = ui_mk_label(card, "No samples yet. The chart starts with the next reading.",
+                             0, 90, 742, UI_COL_DIM, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(s_chartEmpty, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+
+  bottle_refresh();
+}
+
+// --- shared ------------------------------------------------------------------
+
+void screen_data_refresh() {
+  switch (s_page) {
+    case P_PICKER:
+      picker_refresh();
+      break;
+    case P_CLUSTER:
+      cluster_refresh();
+      break;
+    case P_BOTTLE:
+      bottle_refresh();
+      break;
+    default:
+      break;
+  }
+}
+
+void screen_data_hide() {
+  s_page = P_NONE;
+  for (int c = 0; c < UI_CLUSTERS; c++) {
+    s_nodeCard[c] = nullptr;
+    s_nodeTitle[c] = nullptr;
+    s_nodeLine1[c] = nullptr;
+    s_nodeLine2[c] = nullptr;
+    s_nodeDot[c] = nullptr;
+  }
+  for (int b = 0; b < UI_BOTTLES_PER_CLUSTER; b++) {
+    s_tile[b] = nullptr;
+    s_tileValue[b] = nullptr;
+    s_tileState[b] = nullptr;
+  }
+  s_clusterNote = nullptr;
+  for (int s = 0; s < S_COUNT; s++) {
+    s_sTile[s] = nullptr;
+    s_sValue[s] = nullptr;
+    s_sCap[s] = nullptr;
+  }
+  s_bottleNote = nullptr;
+  s_chart = nullptr;
+  s_ser = nullptr;
+  s_chartTitle = nullptr;
+  s_chartNow = nullptr;
+  s_yTop = nullptr;
+  s_yBottom = nullptr;
+  s_chartEmpty = nullptr;
 }

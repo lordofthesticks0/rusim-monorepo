@@ -91,6 +91,9 @@ void reset_command_group() {
   link_serial_set_exp_state(false, 0, 24);
   // Re-anchor the production heartbeat without reaching into its statics.
   link_serial_init();
+  // init() closes the boot gate; release it as the UI does after the first
+  // DB line, so these tests see EXPERIMENT lines.
+  link_serial_exp_release();
   Serial.clear();
   Serial1.clear();
   host::toggle_calls = 0;
@@ -497,6 +500,41 @@ void test_fake_init_resets_internal_tracking() {
   CHECK(!sens_apply_real());
 }
 
+// A rebooted display must not send "run=0" (which stops a running experiment)
+// before the WT32 has reported its state on the first DB line.
+void test_experiment_boot_gate_waits_for_wt32_state() {
+  reset_command_group();
+  link_serial_init();  // a display boot closes the gate again
+  Serial1.clear();
+  CHECK(!link_serial_exp_released());
+  link_serial_set_exp_state(false, 5, 24);
+  expect_uart("");
+  host::advance_ms(LINK_BEAT_MS);
+  link_serial_poll();
+  expect_uart("");
+  link_serial_emit_experiment();
+  expect_uart("");
+  CHECK(!link_serial_take_first_db());
+  receive("DB latest=12 ready=1 aexp=7 adur=30 asrc=db\n");
+  CHECK(link_serial_take_first_db());
+  CHECK(!link_serial_take_first_db());
+  CHECK(link_serial_get_db_active_exp() == 7);
+  CHECK(link_serial_get_db_active_dur() == 30);
+  host::advance_ms(LINK_BEAT_MS);
+  link_serial_poll();
+  expect_uart("");  // still silent until the UI releases the gate
+  link_serial_set_exp_state(true, 7, 30);  // the UI adopts the active run
+  expect_uart("");
+  link_serial_exp_release();
+  expect_uart("EXPERIMENT run=1 num=7 dur=30\n");
+  CHECK(link_serial_exp_released());
+  receive("DB latest=12 ready=1 aexp=7 adur=30 asrc=db\n");
+  CHECK(!link_serial_take_first_db());  // only the first DB line after boot
+  host::advance_ms(LINK_BEAT_MS);
+  link_serial_poll();
+  expect_uart("EXPERIMENT run=1 num=7 dur=30\n");
+}
+
 void test_experiment_wire_format_and_no_implicit_increment() {
   reset_command_group();
   link_serial_set_exp_state(false, 42, 18);
@@ -657,6 +695,7 @@ struct TestCase {
 
 int main() {
   link_serial_init();
+  link_serial_exp_release();
   const TestCase tests[] = {
       {"initial state / no synthetic data", test_initial_state_and_no_synthetic_data},
       {"real serial parsing / node isolation", test_real_serial_parsing_and_node_isolation},
@@ -668,6 +707,7 @@ int main() {
       {"staleness boundary / refresh / recovery", test_staleness_boundary_single_refresh_and_recovery},
       {"HELLO invalidates cache and model", test_hello_invalidates_cached_frame_and_model},
       {"fake_init resets internal tracking", test_fake_init_resets_internal_tracking},
+      {"EXPERIMENT boot gate waits for WT32 state", test_experiment_boot_gate_waits_for_wt32_state},
       {"EXPERIMENT format / no implicit increment", test_experiment_wire_format_and_no_implicit_increment},
       {"EXPERIMENT clamps / normalized duplicates", test_experiment_clamps_and_normalized_duplicate},
       {"EXPERIMENT heartbeat replay", test_experiment_heartbeat_replays_exact_state},

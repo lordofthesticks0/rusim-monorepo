@@ -226,7 +226,63 @@ static void test_sanitize() {
   CHECK(s.tempC == 39.0f);
 }
 
+static dbc::PushRow row(uint8_t bottle, int64_t ts) {
+  dbc::PushRow r = {};
+  r.bottleId = bottle;
+  r.sampleUnix = ts;
+  return r;
+}
+
+static void test_bottle_range() {
+  // In-range rule: ids are 0-based, an unknown count accepts everything.
+  CHECK(dbc::bottleInRange(0, 2));
+  CHECK(dbc::bottleInRange(1, 2));
+  CHECK(!dbc::bottleInRange(2, 2));
+  CHECK(!dbc::bottleInRange(3, 2));
+  CHECK(dbc::bottleInRange(3, 4));
+  CHECK(dbc::bottleInRange(3, 24));
+  CHECK(dbc::bottleInRange(3, -1));
+  CHECK(dbc::bottleInRange(3, 0));
+
+  // Purge on a ring whose live rows wrap past the end of the array. Head sits
+  // at slot 6 of 8: three rounds of four bottles = 12 rows is too many, so use
+  // 2 rounds x 3 bottles = 6 rows at slots 6,7,0,1,2,3.
+  dbc::PushRow ring[8] = {};
+  const size_t cap = 8;
+  size_t head = 6, count = 0, tail = 6;
+  const uint8_t ids[6] = {0, 1, 2, 0, 1, 2};
+  const int64_t ts[6] = {100, 100, 100, 130, 130, 130};
+  for (size_t i = 0; i < 6; i++) {
+    ring[tail] = row(ids[i], ts[i]);
+    tail = (tail + 1) % cap;
+    count++;
+  }
+  CHECK(tail == 4);
+
+  size_t removed = dbc::purgeOutOfRangeRows(ring, cap, head, tail, count, 2);
+  CHECK(removed == 2);
+  CHECK(count == 4);
+  CHECK(tail == (head + 4) % cap);
+  // Order is preserved: 0,1 at t=100 then 0,1 at t=130.
+  const uint8_t wantId[4] = {0, 1, 0, 1};
+  const int64_t wantTs[4] = {100, 100, 130, 130};
+  for (size_t i = 0; i < 4; i++) {
+    CHECK(ring[(head + i) % cap].bottleId == wantId[i]);
+    CHECK(ring[(head + i) % cap].sampleUnix == wantTs[i]);
+  }
+
+  // Nothing to remove: unchanged. Everything out of range: empty.
+  removed = dbc::purgeOutOfRangeRows(ring, cap, head, tail, count, 4);
+  CHECK(removed == 0 && count == 4);
+  removed = dbc::purgeOutOfRangeRows(ring, cap, head, tail, count, 1);
+  CHECK(removed == 2 && count == 2);
+  CHECK(ring[head].bottleId == 0 && ring[(head + 1) % cap].bottleId == 0);
+  size_t emptyTail = 0, emptyCount = 0;
+  CHECK(dbc::purgeOutOfRangeRows(ring, cap, head, emptyTail, emptyCount, 1) == 0);
+}
+
 int main() {
+  test_bottle_range();
   test_timestamps();
   test_envelope();
   test_ack_and_errors();

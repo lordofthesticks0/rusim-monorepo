@@ -46,6 +46,20 @@ int link_serial_result();
 void link_serial_set_exp_state(bool running, int expNum, int durationH);
 // Forces one EXPERIMENT push without changing the state (bench tool).
 void link_serial_emit_experiment();
+// Boot gate. After link_serial_init() no EXPERIMENT line (change or 5 s
+// heartbeat) is sent, because a rebooted display does not know whether the
+// WT32 is mid-run and "run=0" would stop that run. set_exp_state() still
+// stores the state. take_first_db() returns true once, when the first DB line
+// (which carries aexp/adur) has arrived; the UI adopts an active run from it
+// and then calls exp_release(), which sends the current state immediately and
+// resumes normal emission. A WT32 HELLO does not re-close the gate.
+bool link_serial_take_first_db();
+void link_serial_exp_release();
+bool link_serial_exp_released();
+// ms since the last complete line from the WT32; 0xFFFFFFFF = never.
+uint32_t link_serial_rx_age_ms();
+// True between a WT32 LOGINREQ and the next RESULT OK.
+bool link_serial_login_requested();
 
 // Consumed by the boot gate when RESULT arrives.
 bool link_serial_take_result(int &out);

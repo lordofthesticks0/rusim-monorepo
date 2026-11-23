@@ -189,6 +189,9 @@ static uint32_t s_pushIdleRounds = 0;    // rounds collected while not running
 static uint32_t s_pushClockRejects = 0;  // rounds with an untrustworthy timestamp
 static uint32_t s_pushDupRejects = 0;    // timestamp reuse after a clock change
 static uint32_t s_pushBadValues = 0;     // non-finite fields converted to null
+static uint32_t s_pushBottleSkips = 0;   // rows skipped: bottle id >= device bottle_count
+static uint32_t s_pushBottleSkipRounds = 0;  // rounds that skipped at least one row
+static int s_pushPurgedForCount = -1;    // bottle_count the queue was last purged for
 static uint32_t s_pushAckRounds = 0;     // rounds acknowledged by the server
 static uint32_t s_lastQueuedUnix = 0;
 // Upload rounds per DB pass: bounds how much one pass spends on POSTs (each
@@ -675,7 +678,7 @@ static void link_log_dump() {
   logf("[DUMP] stage=%d eth=%d ip=%s exp=%d run=%d dur=%d dbLatest=%d ntp=%d "
        "bottles=%d queued=%u drops=%u verdict=%d sensOk=%u sensFail=%u sensAge=%d "
        "ready=%d runActive=%d aexp=%ld adur=%ld asrc=%s ack=%ld reads=%ld "
-       "idle=%u clock=%u dup=%u bad=%u acks=%u state=%s",
+       "idle=%u clock=%u dup=%u bad=%u skip=%u acks=%u state=%s",
        (int)stage, eth_connected ? 1 : 0, ip, expNum, expRunning ? 1 : 0, durationH,
        dbLatest, ntpSynced ? 1 : 0, dbBottleCount, (unsigned)s_pushCount,
        (unsigned)s_pushDrops, haveVerdict ? (lastVerdict ? 1 : 2) : 0,
@@ -687,7 +690,7 @@ static void link_log_dump() {
        dbConfigReadOkMs != 0 ? (long)(millis() - dbConfigReadOkMs) : -1L,
        (unsigned)s_pushIdleRounds, (unsigned)s_pushClockRejects,
        (unsigned)s_pushDupRejects, (unsigned)s_pushBadValues,
-       (unsigned)s_pushAckRounds, dbFaultName(dbFault));
+       (unsigned)s_pushBottleSkips, (unsigned)s_pushAckRounds, dbFaultName(dbFault));
 }
 
 static void handle_line(char* line) {
@@ -1378,8 +1381,24 @@ static void sens_report_round() {
   if (runActive) {
     BottleSample batch[kSensBottles];
     size_t nb = 0;
+    unsigned skipped = 0;
     for (size_t i = 0; i < kSensBottles; i++) {
-      if (seen[i]) batch[nb++] = readings[i];
+      if (!seen[i]) continue;
+      // The server rejects a whole batch holding a bottle the device does not
+      // have, so such a bottle is never queued (see dbc::bottleInRange).
+      if (!dbc::bottleInRange((uint8_t)i, dbBottleCount)) {
+        skipped++;
+        continue;
+      }
+      batch[nb++] = readings[i];
+    }
+    if (skipped > 0) {
+      s_pushBottleSkips += skipped;
+      s_pushBottleSkipRounds++;
+      if (s_pushBottleSkipRounds == 1 || (s_pushBottleSkipRounds % 20) == 0) {
+        logf("[PUSH] skipped %u bottle(s) beyond bottle_count=%d (%u rows total)", skipped,
+             dbBottleCount, (unsigned)s_pushBottleSkips);
+      }
     }
     (void)pushEnqueueRound(time(nullptr), runExperimentId, batch, nb);
   } else if (expRunning) {
@@ -2024,6 +2043,21 @@ static bool sbPushOneRound() {
     dbFault = DB_FAULT_IDENTITY;
     dbNextPushMs = millis() + kDbRetryMaxMs;
     return false;
+  }
+  // The identity check above proves this queue belongs to the logged-in device,
+  // so its bottle_count applies. If the count was lowered since rows were
+  // queued, remove rows it no longer allows: one of them would make the server
+  // reject every batch that contains it.
+  if (dbBottleCount > 0 && dbBottleCount != s_pushPurgedForCount) {
+    size_t removed = dbc::purgeOutOfRangeRows(s_pushQueue, kPushQueueRows, s_pushHead,
+                                              s_pushTail, s_pushCount, dbBottleCount);
+    s_pushPurgedForCount = dbBottleCount;
+    if (removed > 0) {
+      s_pushBottleSkips += (uint32_t)removed;
+      logf("[PUSH] purged %u queued rows beyond bottle_count=%d", (unsigned)removed,
+           dbBottleCount);
+    }
+    if (s_pushCount == 0) return true;
   }
   size_t rows = pushFormatHeadRound();
   if (rows == 0) {

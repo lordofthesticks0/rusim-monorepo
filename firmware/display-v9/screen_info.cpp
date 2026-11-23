@@ -1,234 +1,232 @@
 #include "screen_info.h"
 
+#include <string.h>
+
 #include "fake_data.h"
 #include "link_serial.h"
 #include "ui_config.h"
 #include "ui_shell.h"
 
-static lv_obj_t *s_tileIp = nullptr;
-static lv_obj_t *s_valIp = nullptr;
-static lv_obj_t *s_tileNet = nullptr;
-static lv_obj_t *s_valNet = nullptr;
-static lv_obj_t *s_tileFw = nullptr;
-static lv_obj_t *s_valFw = nullptr;
-static lv_obj_t *s_tileDb = nullptr;
-static lv_obj_t *s_valDb = nullptr;
-static lv_obj_t *s_tileCfg = nullptr;
-static lv_obj_t *s_valCfg = nullptr;
-static lv_obj_t *s_tileQueue = nullptr;
-static lv_obj_t *s_valQueue = nullptr;
+// Eight 180 x 172 information tiles (4 x 2, 16 px gaps). Each tile: value on
+// top (20 px for words, 28 px for numbers), a dim detail line, and a caption at
+// the bottom. Tiles are not tappable, so they keep the grey card outline.
 
-static lv_obj_t *s_gaugeStorage = nullptr;
-static lv_obj_t *s_ctrStorage = nullptr;
-static lv_obj_t *s_gaugeCpu = nullptr;
-static lv_obj_t *s_ctrCpu = nullptr;
-
+enum {
+  T_IP = 0,
+  T_NET,
+  T_FW,
+  T_DB,
+  T_RUN,
+  T_QUEUE,
+  T_FEED,
+  T_COUNT
+};
+static lv_obj_t *s_val[T_COUNT] = {};
+static lv_obj_t *s_sub[T_COUNT] = {};
+static lv_obj_t *s_cpuArc = nullptr;
+static lv_obj_t *s_cpuVal = nullptr;
 static uint32_t s_lastPollMs = 0;
 
-static lv_obj_t *mk_tile(lv_obj_t *parent, const char *caption, lv_obj_t **valueOut) {
-  lv_obj_t *card = ui_mk_card(parent, 0, 0, 180, 180);
-  *valueOut = lv_label_create(card);
-  lv_label_set_text(*valueOut, "");
-  lv_obj_set_width(*valueOut, 164);
-  lv_label_set_long_mode(*valueOut, LV_LABEL_LONG_MODE_WRAP);
-  lv_obj_set_style_text_align(*valueOut, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_obj_set_style_text_font(*valueOut, &lv_font_montserrat_28_compressed, LV_PART_MAIN);
-  lv_obj_set_style_text_color(*valueOut, lv_color_hex(UI_COL_TEXT), LV_PART_MAIN);
-  lv_obj_align(*valueOut, LV_ALIGN_TOP_MID, 0, 34);
-
-  lv_obj_t *cap = ui_mk_label(card, caption, 8, 142, 164, UI_COL_DIM, &lv_font_montserrat_14);
-  lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  (void)cap;
-  return card;
+static void tile_pos(int i, int *x, int *y) {
+  *x = UI_MARGIN + (i % 4) * 196;
+  *y = UI_PAGE_TOP + (i / 4) * 188;
 }
 
-static lv_obj_t *mk_gauge(lv_obj_t *parent, const char *caption, lv_obj_t **centreOut,
-                          lv_obj_t **arcOut) {
-  lv_obj_t *card = ui_mk_card(parent, 0, 0, 180, 180);
-  lv_obj_t *arc = lv_arc_create(card);
-  lv_obj_set_size(arc, 132, 132);
-  lv_obj_align(arc, LV_ALIGN_TOP_MID, 0, 10);
-  lv_arc_set_range(arc, 0, 100);
-  lv_arc_set_value(arc, 0);
-  lv_obj_remove_style(arc, nullptr, LV_PART_KNOB);
-  lv_obj_set_clickable(arc, false);  // gauge only, not a control
-  lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(arc, 10, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(arc, 10, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(arc, lv_color_hex(UI_COL_BAR), LV_PART_MAIN);
-  if (arcOut != nullptr) *arcOut = arc;
-
-  *centreOut = lv_label_create(card);
-  lv_label_set_text(*centreOut, "");
-  lv_obj_set_width(*centreOut, 92);
-  lv_label_set_long_mode(*centreOut, LV_LABEL_LONG_MODE_WRAP);
-  lv_obj_set_style_text_align(*centreOut, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_obj_set_style_text_font(*centreOut, &lv_font_montserrat_20, LV_PART_MAIN);
-  lv_obj_set_style_text_color(*centreOut, lv_color_hex(UI_COL_TEXT), LV_PART_MAIN);
-  lv_obj_align(*centreOut, LV_ALIGN_TOP_MID, 0, 58);
-
-  lv_obj_t *cap = ui_mk_label(card, caption, 8, 142, 164, UI_COL_DIM, &lv_font_montserrat_14);
+static void mk_tile(lv_obj_t *parent, int i, const char *caption, const lv_font_t *font) {
+  int x, y;
+  tile_pos(i, &x, &y);
+  lv_obj_t *card = ui_mk_card(parent, x, y, 180, 172);  // inner 154 x 146
+  s_val[i] = ui_mk_label(card, "", 0, 8, 154, UI_COL_TEXT, font);
+  lv_obj_set_style_text_align(s_val[i], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  s_sub[i] = ui_mk_label(card, "", 0, 56, 154, UI_COL_DIM, &lv_font_montserrat_14);
+  lv_obj_set_style_text_align(s_sub[i], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_t *cap = ui_mk_caption(card, caption, 0, 126, 154);
   lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  (void)cap;
-  return card;
 }
 
+static void set_tile(int i, const char *value, uint32_t col, const char *sub) {
+  if (s_val[i] == nullptr) return;
+  if (strcmp(lv_label_get_text(s_val[i]), value) != 0) lv_label_set_text(s_val[i], value);
+  lv_obj_set_style_text_color(s_val[i], lv_color_hex(col), LV_PART_MAIN);
+  if (strcmp(lv_label_get_text(s_sub[i]), sub) != 0) lv_label_set_text(s_sub[i], sub);
+}
 
-static void gauge_set(lv_obj_t *arc, lv_obj_t *centre, int pct, const char *centreText) {
-  if (arc != nullptr) {
-    lv_arc_set_value(arc, pct);
-    lv_color_t lo = lv_color_hex(UI_COL_OK);
-    lv_color_t hi = lv_color_hex(UI_COL_ALARM);
-    // mix=255 yields c1, mix=0 yields c2: full load reads red, idle green.
-    lv_color_t c = lv_color_mix(hi, lo, (uint8_t)(pct * 255 / 100));
-    lv_obj_set_style_arc_color(arc, c, LV_PART_INDICATOR);
-  }
-  if (centre != nullptr && centreText != nullptr) {
-    lv_label_set_text(centre, centreText);
+// "12 s", "4 min", "3 h".
+static void fmt_age(uint32_t ms, bool never, char *out, size_t n) {
+  if (never) {
+    snprintf(out, n, "never");
+  } else if (ms < 60000UL) {
+    snprintf(out, n, "%lu s", (unsigned long)(ms / 1000));
+  } else if (ms < 3600000UL) {
+    snprintf(out, n, "%lu min", (unsigned long)(ms / 60000UL));
+  } else {
+    snprintf(out, n, "%lu h", (unsigned long)(ms / 3600000UL));
   }
 }
 
-static void info_render() {
-  // IP tile
+static void render() {
+  char v[32];
+  char sub[64];
+  char a[40];
+  char b[40];
+
   char ip[LINK_IP_MAX + 1];
   link_serial_get_ip(ip, sizeof(ip));
-  if (s_valIp != nullptr) {
-    lv_label_set_text(s_valIp, ip[0] != '\0' ? ip : "--");
+  set_tile(T_IP, ip[0] != '\0' ? ip : "--", ip[0] != '\0' ? UI_COL_TEXT : UI_COL_DIM,
+           "WT32 Ethernet");
+
+  // Network: same priority as the status-bar chip.
+  const uint32_t rx = link_serial_rx_age_ms();
+  const int ping = link_serial_get_ping_ms();
+  if (ping >= 0) {
+    snprintf(sub, sizeof(sub), "Ping %d ms", ping);
+  } else {
+    snprintf(sub, sizeof(sub), "No ping result");
+  }
+  if (rx > UI_LINK_SILENT_MS) {
+    set_tile(T_NET, "No WT32", UI_COL_ALARM, "No line received");
+  } else if (link_serial_login_requested()) {
+    set_tile(T_NET, "Login needed", UI_COL_WARN, "Open the login screen");
+  } else if (!link_serial_net_up()) {
+    set_tile(T_NET, "No internet", UI_COL_WARN, sub);
+  } else {
+    set_tile(T_NET, "Online", UI_COL_OK, sub);
   }
 
-  // Network tile
-  if (s_valNet != nullptr) {
-    if (!g.loggedIn) {
-      lv_label_set_text(s_valNet, "Blocked");
-      lv_obj_set_style_text_color(s_valNet, lv_color_hex(UI_COL_WARN), LV_PART_MAIN);
-    } else if (ip[0] == '\0') {
-      lv_label_set_text(s_valNet, "Offline");
-      lv_obj_set_style_text_color(s_valNet, lv_color_hex(UI_COL_ALARM), LV_PART_MAIN);
-    } else {
-      lv_label_set_text(s_valNet, "Online");
-      lv_obj_set_style_text_color(s_valNet, lv_color_hex(UI_COL_OK), LV_PART_MAIN);
-    }
+  snprintf(sub, sizeof(sub), "LVGL %d.%d.%d", LVGL_VERSION_MAJOR, LVGL_VERSION_MINOR,
+           LVGL_VERSION_PATCH);
+  set_tile(T_FW, FW_VERSION, UI_COL_TEXT, sub);
+
+  // Latest experiment id in the database (-2 = never synced, -1 = none yet).
+  const int latest = link_serial_get_db_latest();
+  const int bottles = link_serial_get_db_bottles();
+  if (bottles >= 0) {
+    snprintf(sub, sizeof(sub), "%d bottles configured", bottles);
+  } else {
+    snprintf(sub, sizeof(sub), "Bottle count unknown");
+  }
+  if (latest == -2) {
+    set_tile(T_DB, "--", UI_COL_DIM, "Not synced yet");
+  } else if (latest == -1) {
+    set_tile(T_DB, "None", UI_COL_TEXT, sub);
+  } else {
+    snprintf(v, sizeof(v), "Exp %d", latest);
+    set_tile(T_DB, v, UI_COL_TEXT, sub);
   }
 
-  // Firmware tile
-  if (s_valFw != nullptr) {
-    lv_label_set_text(s_valFw, FW_VERSION);
+  // Active run as frozen on the WT32, or whether a start is possible.
+  const int aexp = link_serial_get_db_active_exp();
+  if (aexp >= 0) {
+    snprintf(v, sizeof(v), "Exp %d", aexp);
+    snprintf(sub, sizeof(sub), "%d h, %s", link_serial_get_db_active_dur(),
+             link_serial_get_db_active_src() == 1 ? "from DB" : "from display");
+    set_tile(T_RUN, v, UI_COL_OK, sub);
+  } else if (link_serial_db_ready()) {
+    set_tile(T_RUN, "None", UI_COL_TEXT, "Ready to start");
+  } else {
+    set_tile(T_RUN, "None", UI_COL_TEXT, "Start blocked:\nDB not loaded");
+    lv_obj_set_style_text_color(s_sub[T_RUN], lv_color_hex(UI_COL_ALARM), LV_PART_MAIN);
+  }
+  if (aexp >= 0 || link_serial_db_ready())
+    lv_obj_set_style_text_color(s_sub[T_RUN], lv_color_hex(UI_COL_DIM), LV_PART_MAIN);
+
+  // Upload queue: rows waiting on the WT32 + ages of the last config read and
+  // the last acknowledged upload.
+  const uint32_t readAge = link_serial_get_db_read_age_ms();
+  const uint32_t ackAge = link_serial_get_db_ack_age_ms();
+  if (readAge == 0) {
+    snprintf(a, sizeof(a), "never");
+  } else {
+    fmt_age(readAge, false, v, sizeof(v));
+    snprintf(a, sizeof(a), "%s ago", v);
+  }
+  if (ackAge == 0) {
+    snprintf(b, sizeof(b), "never");
+  } else {
+    fmt_age(ackAge, false, v, sizeof(v));
+    snprintf(b, sizeof(b), "%s ago", v);
+  }
+  const int queued = link_serial_get_db_queued();
+  snprintf(v, sizeof(v), "%d %s", queued, queued == 1 ? "row" : "rows");
+  snprintf(sub, sizeof(sub), "Config read: %s\nUpload ack: %s", a, b);
+  set_tile(T_QUEUE, v, UI_COL_TEXT, sub);
+
+  // Sensor feed: age of the newest SENS frame.
+  const int32_t sensAge = link_serial_get_sens(nullptr);
+  if (sensAge < 0) {
+    set_tile(T_FEED, "No data", UI_COL_DIM, "No reading since start");
+  } else {
+    fmt_age((uint32_t)sensAge, false, a, sizeof(a));
+    snprintf(v, sizeof(v), "%s ago", a);
+    const bool stale = (uint32_t)sensAge > UI_SENS_STALE_MS;
+    set_tile(T_FEED, v, stale ? UI_COL_WARN : UI_COL_TEXT,
+             stale ? "Too old: shown as offline" : "Newest bottle reading");
   }
 
-  // DB tile: latest experiment id plus the bottle_count from authenticate()
-  // ("12 (24bt)"). "--" while never synced ("latest=-" on the wire).
-  if (s_valDb != nullptr) {
-    int db = link_serial_get_db_latest();
-    if (db == -2) {
-      lv_label_set_text(s_valDb, "--");
-    } else {
-      int bottles = link_serial_get_db_bottles();
-      char t[32];
-      if (bottles < 0) snprintf(t, sizeof(t), "%d", db);
-      else snprintf(t, sizeof(t), "%d (%dbt)", db, bottles);
-      lv_label_set_text(s_valDb, t);
-    }
-  }
-
-  // Run configuration tile: the FROZEN snapshot while running (experiment,
-  // duration, source), otherwise whether a start is allowed yet. Pending edits
-  // on /control are not shown here until they are frozen by the next start.
-  if (s_valCfg != nullptr) {
-    const int aexp = link_serial_get_db_active_exp();
-    if (aexp < 0) {
-      const bool ready = link_serial_db_ready();
-      lv_label_set_text(s_valCfg, ready ? "ready" : "waiting");
-      lv_obj_set_style_text_color(
-          s_valCfg, lv_color_hex(ready ? UI_COL_OK : UI_COL_ALARM), LV_PART_MAIN);
-    } else {
-      char t[32];
-      snprintf(t, sizeof(t), "%d/%ldh/%s", aexp, (long)link_serial_get_db_active_dur(),
-               link_serial_get_db_active_src() == 1 ? "db" : "loc");
-      lv_label_set_text(s_valCfg, t);
-      lv_obj_set_style_text_color(s_valCfg, lv_color_hex(UI_COL_TEXT), LV_PART_MAIN);
-    }
-  }
-
-  // Queue tile: rows waiting on the WT32 plus the age of the last successful
-  // configuration read and acknowledged upload. "--" means never.
-  if (s_valQueue != nullptr) {
-    char rb[12];
-    char ab[12];
-    const uint32_t readAge = link_serial_get_db_read_age_ms();
-    const uint32_t ackAge = link_serial_get_db_ack_age_ms();
-    if (readAge == 0) {
-      snprintf(rb, sizeof(rb), "--");
-    } else {
-      snprintf(rb, sizeof(rb), "%lus", (unsigned long)(readAge / 1000));
-    }
-    if (ackAge == 0) {
-      snprintf(ab, sizeof(ab), "--");
-    } else {
-      snprintf(ab, sizeof(ab), "%lus", (unsigned long)(ackAge / 1000));
-    }
-    char t[40];
-    snprintf(t, sizeof(t), "%d\n%s/%s", link_serial_get_db_queued(), rb, ab);
-    lv_label_set_text(s_valQueue, t);
-  }
-
-  // Storage usage is not provided by the WT32 protocol.
-  gauge_set(s_gaugeStorage, s_ctrStorage, 0, "--");
-
-  // CPU gauge. lv_timer_get_idle() is LVGL's own busy measurement (render +
-  // input + timers), maintained as O(1) counters inside lv_timer_handler():
-  // no heap walk, no FreeRTOS dependency. 100 - idle = UI-thread load %.
-  // This is not whole-chip load: the WiFi stack, other tasks and ISRs are
-  // not counted. (FreeRTOS run-time stats would cover those but
-  // CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS is off in this Arduino core,
-  // and the prebuilt lib has no stats functions to link against.)
-  {
+  // UI-thread load from LVGL's own idle counter (render + input + timers).
+  // Not whole-chip load: WiFi, other tasks and ISRs are not counted.
+  if (s_cpuArc != nullptr) {
     uint32_t idle = lv_timer_get_idle();
     if (idle > 100) idle = 100;
-    int pct = 100 - (int)idle;
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%d%%", pct);
-    gauge_set(s_gaugeCpu, s_ctrCpu, pct, buf);
+    const int pct = 100 - (int)idle;
+    lv_arc_set_value(s_cpuArc, pct);
+    snprintf(v, sizeof(v), "%d%%", pct);
+    lv_label_set_text(s_cpuVal, v);
   }
+}
+
+void screen_info_refresh() {
+  if (s_val[T_IP] == nullptr) return;
+  render();
 }
 
 void screen_info_poll() {
-  if (!ui_is_info()) return;
-  if (s_gaugeStorage == nullptr) return;
-  uint32_t now = millis();
+  if (!ui_is_info() || s_val[T_IP] == nullptr) return;
+  const uint32_t now = millis();
   if (now - s_lastPollMs < 1000) return;
   s_lastPollMs = now;
-  info_render();
+  render();
+}
+
+void screen_info_hide() {
+  for (int i = 0; i < T_COUNT; i++) {
+    s_val[i] = nullptr;
+    s_sub[i] = nullptr;
+  }
+  s_cpuArc = nullptr;
+  s_cpuVal = nullptr;
 }
 
 void screen_info_show(lv_obj_t *parent) {
-  lv_obj_t *cont = lv_obj_create(parent);
-  lv_obj_set_pos(cont, 0, 0);
-  lv_obj_set_size(cont, 800, 436);
-  lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, LV_PART_MAIN);
-  lv_obj_set_style_border_width(cont, 0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(cont, 16, LV_PART_MAIN);
-  lv_obj_set_style_pad_row(cont, 16, LV_PART_MAIN);
-  lv_obj_set_style_pad_column(cont, 16, LV_PART_MAIN);
-  lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_ROW_WRAP);
-  lv_obj_set_flex_align(cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-  lv_obj_set_scrollable(cont, false);
+  ui_mk_page_title(parent, "System info", nullptr, nullptr);
+  mk_tile(parent, T_IP, "IP ADDRESS", &lv_font_montserrat_20);
+  mk_tile(parent, T_NET, "NETWORK", &lv_font_montserrat_20);
+  mk_tile(parent, T_FW, "FIRMWARE", &lv_font_montserrat_20);
+  mk_tile(parent, T_DB, "LATEST EXPERIMENT", &lv_font_montserrat_28);
+  mk_tile(parent, T_RUN, "ACTIVE RUN", &lv_font_montserrat_28);
+  mk_tile(parent, T_QUEUE, "UPLOAD QUEUE", &lv_font_montserrat_28);
+  mk_tile(parent, T_FEED, "SENSOR FEED", &lv_font_montserrat_20);
 
-  s_tileIp = mk_tile(cont, "IP Address", &s_valIp);
-  s_tileNet = mk_tile(cont, "Network", &s_valNet);
-  s_tileFw = mk_tile(cont, "Firmware", &s_valFw);
-  s_tileDb = mk_tile(cont, "DB experiment", &s_valDb);
-  s_tileCfg = mk_tile(cont, "Run config", &s_valCfg);
-  s_tileQueue = mk_tile(cont, "Queue: rows, read/ack", &s_valQueue);
+  // UI-thread load gauge in the last slot.
+  int x, y;
+  tile_pos(7, &x, &y);
+  lv_obj_t *card = ui_mk_card(parent, x, y, 180, 172);
+  s_cpuArc = lv_arc_create(card);
+  lv_obj_set_size(s_cpuArc, 110, 110);
+  lv_obj_align(s_cpuArc, LV_ALIGN_TOP_MID, 0, 4);
+  lv_arc_set_range(s_cpuArc, 0, 100);
+  lv_obj_remove_style(s_cpuArc, nullptr, LV_PART_KNOB);
+  lv_obj_set_clickable(s_cpuArc, false);
+  lv_obj_set_style_arc_width(s_cpuArc, 10, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(s_cpuArc, 10, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(s_cpuArc, lv_color_hex(UI_COL_BAR), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(s_cpuArc, lv_color_hex(UI_COL_ACCENT), LV_PART_INDICATOR);
+  s_cpuVal = ui_mk_label(card, "", 0, 0, 80, UI_COL_TEXT, &lv_font_montserrat_20);
+  lv_obj_set_style_text_align(s_cpuVal, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_align_to(s_cpuVal, s_cpuArc, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_t *cap = ui_mk_caption(card, "UI THREAD LOAD", 0, 126, 154);
+  lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
 
-  {
-    lv_obj_t *card = mk_gauge(cont, "Storage", &s_ctrStorage, &s_gaugeStorage);
-    (void)card;
-  }
-  {
-    lv_obj_t *card = mk_gauge(cont, "CPU", &s_ctrCpu, &s_gaugeCpu);
-    (void)card;
-  }
-
-  info_render();
+  render();
   s_lastPollMs = millis();
 }
