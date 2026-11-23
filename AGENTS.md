@@ -142,9 +142,3 @@ graphify --help
 - Read source files only after establishing which files are relevant.
 - Do not open entire documentation directories. Read only the documents necessary for the current task.
 - When running raw commands, a lot of the text will be mostly noise. Greatly utilize `tail` or `grep` to filter out unnecessary output.
-
-### Backlog and Continuity
-
-- When the user decides to postpone work to another session, document the outstanding tasks in `backlog.md`.
-- When the user corrects an agent, document the mistake and its lesson in `docs/learned-mistakes.md`.
-- Agents may read `learned-mistakes.md` when relevant to avoid repeating previous mistakes.
