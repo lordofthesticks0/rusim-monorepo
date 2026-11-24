@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <new>
 
+#include "metrics.h"
 #include "ui_config.h"
 
 struct HoldBtnCtx {
@@ -49,6 +50,7 @@ static void ring_show(HoldBtnCtx *ctx) {
 static void hold_commit(HoldBtnCtx *ctx) {
   if (ctx == nullptr || ctx->completed) return;
   ctx->completed = true;
+  met_hold("commit", lv_tick_elaps(ctx->start));
   ctx->state = !ctx->state;
   if (ctx->btn != nullptr) {
     lv_obj_set_style_bg_color(ctx->btn, lv_color_hex(ctx->state ? UI_COL_OK : UI_COL_IDLE),
@@ -82,6 +84,7 @@ static void on_pressed(lv_event_t *e) {
   if (ctx->timer != nullptr) ring_hide(ctx);
   ctx->completed = false;
   ctx->start = lv_tick_get();
+  met_hold("start", 0);
   ring_show(ctx);
   ctx->timer = lv_timer_create(hold_tick, 20, ctx);
 }
@@ -91,6 +94,7 @@ static void on_released(lv_event_t *e) {
   if (ctx == nullptr) return;
   if (ctx->timer != nullptr) {
     // Released early: cancel, state unchanged, callback not called.
+    met_hold("cancel", lv_tick_elaps(ctx->start));
     ring_hide(ctx);
   } else if (ctx->completed) {
     // Already fired from hold_tick the moment the duration elapsed;

@@ -16,6 +16,7 @@ user instead.
 | [`firmware/tests/`](../firmware/tests/) | One-off test sketches, one subdirectory per PlatformIO environment. Scratch code, not a subsystem, and not documented. |
 | [`dashboard/`](../dashboard/) | React + TypeScript + Vite dashboard, its Supabase project, and the dev database script. |
 | [`scripts-hardware/`](../scripts-hardware/) | Bun hardware tools and the PlatformIO WT32 passthrough upload hook. |
+| [`verification/`](../verification/) | Report data collection: serial capture, analysis, boot loop, fake Mega slave, fidelity check, SQL check suites, live write-contract test, dashboard load test. Runs land in `verification/runs/` (git-ignored). [verification-toolkit.md](verification-toolkit.md) |
 | [`platformio.ini`](../platformio.ini) | Every firmware build environment. |
 | [`docs/`](.) | All documentation, human and agent-written. |
 | [`docs/raspi-docs/`](raspi-docs/) | Documentation of the live Raspberry Pi `invitrocontroller` system: board, OS, kiosk, backend, firmware, logging, network. |
@@ -31,9 +32,9 @@ documented. Test sketches in `firmware/tests/` are not subsystems.
 
 | Directory | Board | Document |
 |---|---|---|
-| [`firmware/display-v9/`](../firmware/display-v9/) | ESP32-S3 DevKitC-1 | [display-docs.md](display-docs.md), [link-serial-protocol.md](link-serial-protocol.md), [display-provisioning-ap.md](display-provisioning-ap.md) (retired), [display-sim.md](display-sim.md), [display-debug-flag.md](display-debug-flag.md) |
+| [`firmware/display-v9/`](../firmware/display-v9/) | ESP32-S3 DevKitC-1 | [display-docs.md](display-docs.md), [link-serial-protocol.md](link-serial-protocol.md), [display-provisioning-ap.md](display-provisioning-ap.md) (retired), [display-sim.md](display-sim.md), [display-debug-flag.md](display-debug-flag.md), [verification-toolkit.md](verification-toolkit.md) (`display-v9-metrics`) |
 | [`firmware/wt32-eth01_captive-recon/`](../firmware/wt32-eth01_captive-recon) | WT32-ETH01 | [wt32-eth01-captive-recon.md](wt32-eth01-captive-recon.md) |
-| [`firmware/network-master/`](../firmware/network-master) | WT32-ETH01 | [network-master.md](network-master.md) (production), [link-serial-protocol.md](link-serial-protocol.md) |
+| [`firmware/network-master/`](../firmware/network-master) | WT32-ETH01 | [network-master.md](network-master.md) (production), [link-serial-protocol.md](link-serial-protocol.md), [verification-toolkit.md](verification-toolkit.md) (`network-master-metrics`) |
 | [`firmware/motor-driver/`](../firmware/motor-driver) | ATmega328 Nano | [platformio-environments.md](platformio-environments.md) §3 (L298N PWM ramp demo) |
 | [`firmware/methane-calibrate/`](../firmware/methane-calibrate) | ATmega2560 Mega Mini | [sensor-calibration-firmware.md](sensor-calibration-firmware.md) §4 |
 | [`firmware/pressure-calibrate/`](../firmware/pressure-calibrate) | ATmega328 Uno | [sensor-calibration-firmware.md](sensor-calibration-firmware.md) §3 |
@@ -46,6 +47,7 @@ documented. Test sketches in `firmware/tests/` are not subsystems.
 | Document | Covers |
 |---|---|
 | [platformio-environments.md](platformio-environments.md) | `platformio.ini`: environment table, source filters, display build flags, commands, fixed defects |
+| [verification-toolkit.md](verification-toolkit.md) | Report data collection: `display-v9-metrics` / `network-master-metrics` builds, `MET` line reference, `DBG` fault injection, host tools in `verification/`, procedures per measurement, what each number includes, `sample_interval_s` enqueue change |
 | [compile-commands.md](compile-commands.md) | `compile_commands.json` and `gen-compile-db.sh`: the clangd compilation database, regeneration, and which errors it cannot remove |
 | [display-docs.md](display-docs.md) | The `display-v9` UI: real WT32 sensor model, unavailable-data semantics, USB controls, hold-to-confirm |
 | [sensor-calibration-firmware.md](sensor-calibration-firmware.md) | The five sensor calibration programs |
@@ -77,6 +79,7 @@ documented. Test sketches in `firmware/tests/` are not subsystems.
 | [`dashboard/src/csv.ts`](../dashboard/src/csv.ts) | RFC 4180 export of an experiment's readings |
 | [`dashboard/src/types/domain.ts`](../dashboard/src/types/domain.ts) | Domain types shared across the app |
 | [`dashboard/src/types/database.ts`](../dashboard/src/types/database.ts) | Generated from the live database |
+| [`dashboard/src/metrics.ts`](../dashboard/src/metrics.ts) | Opt-in (`?metrics`) timing records for the verification report |
 | [`dashboard/src/styles.css`](../dashboard/src/styles.css) | All styling and the motion layer |
 | [`dashboard/src/motion.ts`](../dashboard/src/motion.ts) | Sliding indicator and once-per-visit entrance hooks |
 | [`dashboard/scripts/dev-db.ts`](../dashboard/scripts/dev-db.ts) | Local Postgres bootstrap, migrations, seeding, token application |
@@ -191,4 +194,4 @@ These describe boards rather than this project's code.
   and is indexed in section 3c.
 
 ---
-Updated at 2026-11-21-13:58.
+Updated at 2026-11-24-12:34.

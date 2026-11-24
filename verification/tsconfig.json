@@ -1,0 +1,19 @@
+{
+  // Type-checks the verification tools with the dashboard's TypeScript and
+  // Bun types: dashboard/node_modules/.bin/tsc -p verification/tsconfig.json
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "types": ["bun"],
+    "typeRoots": ["../dashboard/node_modules/@types"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["./**/*.ts"],
+  "exclude": ["runs"]
+}

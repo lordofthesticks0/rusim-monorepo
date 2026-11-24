@@ -264,6 +264,22 @@ static const size_t kSensBottles = 4;
 // than kSensPollMs so one or two missed polls do not blank the screen.
 static const uint32_t kSensMaxWireAgeMs = 90000;
 
+// Spacing of enqueued rounds. While a run is active the run's frozen
+// sample_interval_s (experiments row, see dbApplyRunState) sets it; idle
+// rounds, and a run whose row has no interval, keep kSensSlowMs. Rounds come
+// from the 5 s poll, so the spacing is quantised to the poll: an interval
+// below kSensPollMs is raised to it, and other values are met on average
+// (see sens_slow_due()). 24 h is a sanity cap, not a supported setting.
+static uint32_t sensSlowPeriodMs() {
+  if (runActive && runSampleIntervalS > 0) {
+    uint64_t ms = (uint64_t)runSampleIntervalS * 1000ULL;
+    if (ms < kSensPollMs) ms = kSensPollMs;
+    if (ms > 86400000ULL) ms = 86400000ULL;
+    return (uint32_t)ms;
+  }
+  return kSensSlowMs;
+}
+
 // nullMask bits, matching PushRow below.
 static const uint8_t kSensNullAll = 0x1F;
 static const uint8_t kSensNullPh = 0x01;
@@ -276,7 +292,7 @@ static char sensRx[kSensFrameCap];
 static size_t sensRxLen = 0;
 static bool sensRxOverflow = false;
 static uint32_t lastSensPollMs = 0;
-static uint32_t s_sensSlowMs = 0;      // millis() of the last slow-cadence round
+static uint32_t s_sensSlowDueMs = 0;   // millis() when the next slow round is due
 static bool s_sensSlowSeen = false;    // false until the first accepted round
 static uint32_t sensRoundsOk = 0;    // rounds with a parseable frame
 static uint32_t sensRoundsFail = 0;  // timeouts, overlong or non-JSON frames
@@ -332,6 +348,108 @@ static void logf(const char* fmt, ...) {
   Serial.print("LOG ");
   Serial.println(escaped);
 }
+
+// --- Verification metrics (RUSIM_METRICS builds only) ----------------------
+// docs/verification-toolkit.md. A metrics build ([env:network-master-metrics])
+// adds machine-readable "LOG MET <kind> key=value ..." lines and the DBG test
+// commands. A production build compiles none of it: MET() expands to nothing,
+// so its arguments are never evaluated and may name metrics-only state.
+#ifndef RUSIM_METRICS
+#define RUSIM_METRICS 0
+#endif
+#if RUSIM_METRICS
+#define MET(fmt, ...) logf("MET " fmt, ##__VA_ARGS__)
+#include <esp_system.h>
+#include <sys/time.h>
+
+// Boot milestones, each logged once with millis() since reset.
+enum MetBoot : uint8_t {
+  MB_SETUP = 0,
+  MB_ETH_START,
+  MB_ETH_LINK,
+  MB_GOT_IP,
+  MB_NTP,
+  MB_PORTAL_OK,
+  MB_AUTH,
+  MB_READY,
+  MB_SENS_FIRST,
+  MB_ENQ_FIRST,
+  MB_ACK_FIRST,
+  MB_COUNT
+};
+static const char* const kMetBootName[MB_COUNT] = {
+    "setup", "eth_start", "eth_link", "got_ip", "ntp", "portal_ok",
+    "auth", "ready", "sens_first", "enq_first", "ack_first"};
+static uint32_t s_metBootMs[MB_COUNT] = {0};
+static bool s_metBootSeen[MB_COUNT] = {false};
+// Ethernet events arrive on the event task; it only stamps, loop() logs.
+static volatile uint32_t s_metEthStampMs[MB_COUNT] = {0};
+
+static void met_boot(MetBoot b) {
+  if (s_metBootSeen[b]) return;
+  s_metBootSeen[b] = true;
+  s_metBootMs[b] = millis();
+  MET("BOOT stage=%s ms=%u", kMetBootName[b], (unsigned)s_metBootMs[b]);
+}
+
+static void met_boot_dump() {
+  for (int i = 0; i < MB_COUNT; i++) {
+    if (s_metBootSeen[i]) {
+      MET("BOOT stage=%s ms=%u replay=1", kMetBootName[i], (unsigned)s_metBootMs[i]);
+    }
+  }
+}
+
+static const char* met_reset_reason() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: return "poweron";
+    case ESP_RST_EXT: return "ext";
+    case ESP_RST_SW: return "sw";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "int_wdt";
+    case ESP_RST_TASK_WDT: return "task_wdt";
+    case ESP_RST_WDT: return "wdt";
+    case ESP_RST_DEEPSLEEP: return "deepsleep";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_SDIO: return "sdio";
+    default: return "unknown";
+  }
+}
+
+// Link (display -> WT32) counters, loop responsiveness and the window they
+// cover. Reported and reset every kMetPeriodMs.
+static const uint32_t kMetPeriodMs = 60000;
+static uint32_t s_metWindowMs = 0;
+static uint32_t s_metRxLines = 0, s_metRxExp = 0, s_metRxHello = 0, s_metRxOther = 0;
+static uint32_t s_metRxGap = 0, s_metRxOvf = 0;
+static uint32_t s_metLastExpMs = 0, s_metExpGapMaxMs = 0;
+static uint32_t s_metLoopIters = 0, s_metLoopMaxMs = 0;
+static uint32_t s_metLastPullMs = 0, s_metPullGapMaxMs = 0;
+static uint32_t s_metLoopStartMs = 0;
+
+// Sensor poll and SENS forwarding.
+static uint32_t s_metPollStartMs = 0;   // request written
+static uint32_t s_metReplyMs = 0;       // request -> reply complete (or timeout)
+static uint32_t s_metReplyDoneUs = 0;   // micros() when the reply line ended
+static uint32_t s_metSensSeq = 0;       // SENS lines emitted since boot
+static bool s_metSensFromPoll = false;  // next link_emit_sens() follows a poll
+static uint32_t s_metLastEnqMs = 0;     // millis() of the previous enqueue
+
+// Database pass and authentication.
+static uint32_t s_metPassStartMs = 0;
+static bool s_metAuthEver = false;
+
+// DBG fault injection. Every flag is RAM-only and cleared by a reboot.
+static bool s_metDbDown = false;        // DB requests go to an unroutable host
+static bool s_metBadPushOnce = false;   // next push sends a malformed body
+static bool s_metBadPathOnce = false;   // next push calls a missing function
+static bool s_metIdentityForced = false;
+static int32_t s_metIdentitySaved = -1;
+#else
+#define MET(fmt, ...) \
+  do {                \
+  } while (0)
+#endif
 
 static void link_emit_hello() { Serial.println("HELLO"); }
 
@@ -481,7 +599,16 @@ static void link_emit_sens() {
     return;
   }
   char line[512];  // worst case is ~340 bytes for four bottles
+#if RUSIM_METRICS
+  // "seq=" before the first b<i> group is ignored by every display parser
+  // (fields before a bottle token are dropped), so the line stays valid
+  // rusim-line v1. The display metrics build reads it to pair the frame
+  // with this board's MET SENSTX line.
+  s_metSensSeq++;
+  int used = snprintf(line, sizeof(line), "SENS seq=%u", (unsigned)s_metSensSeq);
+#else
   int used = snprintf(line, sizeof(line), "SENS");
+#endif
   if (used < 0) return;
   size_t pos = (size_t)used < sizeof(line) ? (size_t)used : sizeof(line) - 1;
   for (size_t i = 0; i < kSensBottles; i++) {
@@ -506,6 +633,17 @@ static void link_emit_sens() {
     pos += (size_t)w;
   }
   Serial.printf("%s\n", line);
+#if RUSIM_METRICS
+  // proc_us: reply line complete -> SENS written to the UART driver. The
+  // display adds its own receive -> rendered time for the same seq.
+  if (s_metSensFromPoll) {
+    MET("SENSTX seq=%u src=poll proc_us=%u bytes=%u", (unsigned)s_metSensSeq,
+        (unsigned)(micros() - s_metReplyDoneUs), (unsigned)(pos + 1));
+  } else {
+    MET("SENSTX seq=%u src=snapshot bytes=%u", (unsigned)s_metSensSeq, (unsigned)(pos + 1));
+  }
+  s_metSensFromPoll = false;
+#endif
 }
 
 static void link_send_snapshot() {
@@ -693,12 +831,91 @@ static void link_log_dump() {
        (unsigned)s_pushBottleSkips, (unsigned)s_pushAckRounds, dbFaultName(dbFault));
 }
 
+#if RUSIM_METRICS
+// DBG <word> [arg]: bench fault injection for the verification runs
+// (docs/verification-toolkit.md). Sent from the display console as
+// "W32CMD DBG <word>". Compiled into metrics builds only.
+static void met_handle_dbg(const char* args) {
+  char word[24] = {0};
+  char arg[24] = {0};
+  if (args == nullptr || sscanf(args, "%23s %23s", word, arg) < 1) {
+    MET("DBG err=usage");
+    return;
+  }
+  if (strcmp(word, "REBOOT") == 0) {
+    MET("DBG ok=REBOOT queued=%u", (unsigned)s_pushCount);
+    Serial.flush();
+    delay(50);
+    ESP.restart();
+  } else if (strcmp(word, "BOOTLOG") == 0) {
+    met_boot_dump();
+  } else if (strcmp(word, "SESSION_CORRUPT") == 0) {
+    // Same length, still hex, but not a live session: the next request is
+    // rejected (401/403 or 28000) and must take the re-authentication path.
+    size_t n = strlen(dbSession);
+    for (size_t i = 0; i < n; i++) dbSession[i] = '0';
+    MET("DBG ok=SESSION_CORRUPT valid=%d", dbSessionValid ? 1 : 0);
+  } else if (strcmp(word, "SESSION_EXPIRE") == 0) {
+    // Inside the renewal margin, so the next pass renews before using it.
+    dbSessionExpiryUnix = (uint32_t)time(nullptr) + kDbRenewMarginS / 2;
+    MET("DBG ok=SESSION_EXPIRE expiry=%u", (unsigned)dbSessionExpiryUnix);
+  } else if (strcmp(word, "CLOCK_STEP") == 0) {
+    long step = strtol(arg, nullptr, 10);
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    tv.tv_sec += step;
+    settimeofday(&tv, nullptr);
+    MET("DBG ok=CLOCK_STEP step_s=%ld unix=%ld", step, (long)tv.tv_sec);
+  } else if (strcmp(word, "IDENTITY") == 0) {
+    if (strcmp(arg, "OFF") == 0) {
+      if (s_metIdentityForced) dbQueueDeviceId = s_metIdentitySaved;
+      s_metIdentityForced = false;
+    } else if (!s_metIdentityForced) {
+      s_metIdentitySaved = dbQueueDeviceId;
+      dbQueueDeviceId = (dbSessionDevice >= 0 ? dbSessionDevice : 0) + 1000;
+      s_metIdentityForced = true;
+    }
+    MET("DBG ok=IDENTITY forced=%d queue_device=%ld", s_metIdentityForced ? 1 : 0,
+        (long)dbQueueDeviceId);
+  } else if (strcmp(word, "BADPUSH") == 0) {
+    s_metBadPushOnce = true;
+    MET("DBG ok=BADPUSH");
+  } else if (strcmp(word, "BADPATH") == 0) {
+    s_metBadPathOnce = true;
+    MET("DBG ok=BADPATH");
+  } else if (strcmp(word, "DBDOWN") == 0) {
+    s_metDbDown = (strcmp(arg, "OFF") != 0);
+    MET("DBG ok=DBDOWN on=%d", s_metDbDown ? 1 : 0);
+  } else {
+    MET("DBG err=unknown word=%s", word);
+  }
+}
+#endif
+
 static void handle_line(char* line) {
   char* args = strchr(line, ' ');
   if (args != nullptr) {
     *args++ = '\0';
     while (*args == ' ') args++;
   }
+#if RUSIM_METRICS
+  s_metRxLines++;
+  if (strcmp(line, "EXPERIMENT") == 0) {
+    s_metRxExp++;
+    uint32_t now = millis();
+    if (s_metLastExpMs != 0 && now - s_metLastExpMs > s_metExpGapMaxMs) {
+      s_metExpGapMaxMs = now - s_metLastExpMs;
+    }
+    s_metLastExpMs = now;
+  } else if (strcmp(line, "HELLO") == 0) {
+    s_metRxHello++;
+  } else if (strcmp(line, "DBG") == 0) {
+    met_handle_dbg(args);
+    return;
+  } else if (strcmp(line, "DUMP") != 0) {
+    s_metRxOther++;
+  }
+#endif
   if (strcmp(line, "HELLO") == 0) {
     logf("[LINK] HELLO from display, sending snapshot");
     link_send_snapshot();
@@ -714,6 +931,17 @@ static void handle_line(char* line) {
 }
 
 static void link_line_pull() {
+#if RUSIM_METRICS
+  // Longest time the display link went unserviced: the WT32's responsiveness
+  // while HTTPS or the sensor poll is blocking.
+  {
+    uint32_t now = millis();
+    if (s_metLastPullMs != 0 && now - s_metLastPullMs > s_metPullGapMaxMs) {
+      s_metPullGapMaxMs = now - s_metLastPullMs;
+    }
+    s_metLastPullMs = now;
+  }
+#endif
   while (Serial.available() > 0) {
     int c = Serial.read();
     if (c < 0) break;
@@ -734,12 +962,18 @@ static void link_line_pull() {
     if (linkRxLen >= LINK_LINE_MAX) {
       linkRxLen = 0;
       linkRxOverflow = true;
+#if RUSIM_METRICS
+      s_metRxOvf++;
+#endif
       continue;
     }
     linkRx[linkRxLen++] = (char)c;
   }
   // A stalled partial line never wedges the parser.
   if (linkRxLen > 0 && (millis() - linkLastByteMs) > LINK_GAP_MS) {
+#if RUSIM_METRICS
+    s_metRxGap++;
+#endif
     linkRxLen = 0;
     linkRxOverflow = false;
   }
@@ -758,11 +992,20 @@ void onEthEvent(WiFiEvent_t event) {
     case ARDUINO_EVENT_ETH_START:
       ETH.setHostname("rusim-master");
       ethEventCode = 1;
+#if RUSIM_METRICS
+      if (s_metEthStampMs[MB_ETH_START] == 0) s_metEthStampMs[MB_ETH_START] = millis();
+#endif
       break;
     case ARDUINO_EVENT_ETH_CONNECTED:
       ethEventCode = 2;
+#if RUSIM_METRICS
+      if (s_metEthStampMs[MB_ETH_LINK] == 0) s_metEthStampMs[MB_ETH_LINK] = millis();
+#endif
       break;
     case ARDUINO_EVENT_ETH_GOT_IP:
+#if RUSIM_METRICS
+      if (s_metEthStampMs[MB_GOT_IP] == 0) s_metEthStampMs[MB_GOT_IP] = millis();
+#endif
       eth_connected = true;
       lastPingMs = -1;
       ethEventCode = 3;
@@ -1139,6 +1382,9 @@ static void ensureNtpSync() {
     time_t now = time(nullptr);
     if (now > 1700000000) {
       ntpSynced = true;
+#if RUSIM_METRICS
+      met_boot(MB_NTP);
+#endif
       struct tm tmv;
       gmtime_r(&now, &tmv);
       logf("[NTP] synced: %04d-%02d-%02d %02d:%02d:%02d UTC", tmv.tm_year + 1900,
@@ -1233,6 +1479,19 @@ static bool pushEnqueueRound(time_t sampleUnix, int experimentId,
     s_pushCount++;
   }
   s_lastQueuedUnix = (uint32_t)sampleUnix;
+#if RUSIM_METRICS
+  met_boot(MB_ENQ_FIRST);
+  {
+    uint32_t nowMs = millis();
+    // dt_ms is the real spacing of enqueued rounds; compare it with
+    // period_ms, the run's sample_interval_s (docs/verification-toolkit.md).
+    long dt = s_metLastEnqMs != 0 ? (long)(nowMs - s_metLastEnqMs) : -1L;
+    s_metLastEnqMs = nowMs;
+    MET("ENQ unix=%ld exp=%d rows=%u queued=%u drops=%u dt_ms=%ld period_ms=%u",
+        (long)sampleUnix, experimentId, (unsigned)n, (unsigned)s_pushCount,
+        (unsigned)s_pushDrops, dt, (unsigned)sensSlowPeriodMs());
+  }
+#endif
   return true;
 }
 
@@ -1294,6 +1553,15 @@ static void sens_take(BottleReading& r, const char* begin, const char* end,
 // disconnected Mega cannot flood the display's log.
 static void sens_log_failure(const char* why) {
   sensRoundsFail++;
+#if RUSIM_METRICS
+  const char* code = strstr(why, "timeout")  ? "timeout"
+                     : strstr(why, "512")    ? "overflow"
+                     : strstr(why, "JSON")   ? "nojson"
+                     : strstr(why, "bottle") ? "nobottle"
+                                             : "other";
+  MET("POLL ok=0 why=%s reply_ms=%u bytes=%u", code, (unsigned)s_metReplyMs,
+      (unsigned)sensRxLen);
+#endif
   if (sensRoundsFail == 1 || (sensRoundsFail % 20) == 0) {
     logf("[SENS] poll failed: %s (fail=%u)", why, (unsigned)sensRoundsFail);
   }
@@ -1360,6 +1628,9 @@ static void sens_report_round() {
   // HELLO once at boot (its 5 s heartbeat carries EXPERIMENT), so a snapshot-
   // only feed gave the data screens one frame per display reboot and let them
   // go stale after UI_SENS_STALE_MS.
+#if RUSIM_METRICS
+  s_metSensFromPoll = true;
+#endif
   link_emit_sens();
 
   // Queue the round only for an accepted frame collected during an active run.
@@ -1368,15 +1639,31 @@ static void sens_report_round() {
   // counted but not queued, so nothing is mislabelled later.
   //
   // Polling runs every kSensPollMs for the display, but queueing and logging
-  // stay at kSensSlowMs: only the first accepted round and then one per
-  // kSensSlowMs pass this gate, so the database sees the same row rate as
-  // before the poll was sped up.
+  // run at sensSlowPeriodMs(): the run's sample_interval_s while a run is
+  // active, otherwise kSensSlowMs. The due times sit on a fixed grid
+  // (due += period), and the poll nearest a due time takes it (half a poll
+  // period of tolerance either side). Measuring from the previous round
+  // instead would let reply-time jitter push a round to the NEXT poll, a
+  // spacing of period + 5 s, and the average would drift late. After a gap
+  // longer than one period (slave silent, poll blocked) the grid restarts.
   sensRoundsOk++;
-  const bool slowDue =
-      !s_sensSlowSeen || (millis() - s_sensSlowMs) >= kSensSlowMs;
-  if (!slowDue) return;
-  s_sensSlowSeen = true;
-  s_sensSlowMs = millis();
+#if RUSIM_METRICS
+  met_boot(MB_SENS_FIRST);
+  MET("POLL ok=1 reply_ms=%u bytes=%u present=%u valid=%u", (unsigned)s_metReplyMs,
+      (unsigned)sensRxLen, present, valid);
+#endif
+  {
+    const uint32_t now = millis();
+    const uint32_t period = sensSlowPeriodMs();
+    const int32_t late = (int32_t)(now - s_sensSlowDueMs);
+    if (s_sensSlowSeen && late < -(int32_t)(kSensPollMs / 2)) return;
+    if (!s_sensSlowSeen || late > (int32_t)period) {
+      s_sensSlowDueMs = now + period;
+    } else {
+      s_sensSlowDueMs += period;
+    }
+    s_sensSlowSeen = true;
+  }
 
   if (runActive) {
     BottleSample batch[kSensBottles];
@@ -1454,6 +1741,9 @@ static void sens_poll() {
 
   bool complete = false;
   uint32_t start = millis();
+#if RUSIM_METRICS
+  s_metPollStartMs = start;
+#endif
   while (millis() - start < kSensReplyMs) {
     int c = Serial1.read();
     if (c < 0) {
@@ -1473,6 +1763,12 @@ static void sens_poll() {
     sensRx[sensRxLen++] = (char)c;
   }
   sensRx[sensRxLen] = '\0';
+#if RUSIM_METRICS
+  // Request written -> reply line complete (or the wait ended). The Mega's
+  // own measurement time is not visible here.
+  s_metReplyMs = millis() - s_metPollStartMs;
+  s_metReplyDoneUs = micros();
+#endif
 
   if (!complete) {
     sens_log_failure(sensRxOverflow ? "reply over 512 bytes" : "reply timeout");
@@ -1579,13 +1875,43 @@ static DbReply dbRequest(DbMethod method, const char* pathAndQuery, const char* 
                          const char* sessionToken, uint16_t& retryAfterS) {
   DbReply rep = {0, 0, false};
   retryAfterS = 0;
-  int w = snprintf(s_dbUrl, sizeof(s_dbUrl), "%s%s", SUPABASE_URL, pathAndQuery);
+#if RUSIM_METRICS
+  // DBG DBDOWN: same request to an unroutable address, so the TCP connect
+  // really times out (the "Supabase unreachable" scenario).
+  const char* base = s_metDbDown ? "https://10.255.255.1" : SUPABASE_URL;
+#else
+  const char* base = SUPABASE_URL;
+#endif
+  int w = snprintf(s_dbUrl, sizeof(s_dbUrl), "%s%s", base, pathAndQuery);
   if (w <= 0 || (size_t)w >= sizeof(s_dbUrl)) {
     rep.code = -100;  // URL will not fit: configuration fault, not a network one
     return rep;
   }
   WiFiClientSecure client;
   sbApplyTls(client);
+#if RUSIM_METRICS
+  // Connect (TCP + TLS handshake) explicitly so it can be timed apart from
+  // the request. HTTPClient reuses an already connected client, so the
+  // request below still makes exactly one connection. A failed connect
+  // returns the same code HTTPClient would (-1, connection refused).
+  const char* op = strstr(pathAndQuery, "rpc/authenticate")  ? "auth"
+                   : strstr(pathAndQuery, "rpc/push_")       ? "push"
+                   : strstr(pathAndQuery, "device_config")   ? "device_config"
+                   : strstr(pathAndQuery, "devices")         ? "devices"
+                   : strstr(pathAndQuery, "experiments")     ? "experiments"
+                   : strstr(pathAndQuery, "readings")        ? "latest"
+                                                             : "other";
+  const uint32_t metT0 = millis();
+  const bool metConnected = client.connect(base + 8, 443, 5000);  // skip "https://"
+  const uint32_t metTlsMs = millis() - metT0;
+  if (!metConnected) {
+    rep.code = -1;
+    MET("HTTP op=%s code=-1 ms=%u tls_ms=%u req=%u resp=0 trunc=0", op,
+        (unsigned)(millis() - metT0), (unsigned)metTlsMs,
+        (unsigned)(jsonBody != nullptr ? strlen(jsonBody) : 0));
+    return rep;
+  }
+#endif
   HTTPClient http;
   http.begin(client, s_dbUrl);
   http.setTimeout(10000);
@@ -1612,6 +1938,12 @@ static DbReply dbRequest(DbMethod method, const char* pathAndQuery, const char* 
     }
   }
   http.end();
+#if RUSIM_METRICS
+  MET("HTTP op=%s code=%d ms=%u tls_ms=%u req=%u resp=%u trunc=%d", op, rep.code,
+      (unsigned)(millis() - metT0), (unsigned)metTlsMs,
+      (unsigned)(method == DB_POST && jsonBody != nullptr ? strlen(jsonBody) : 0),
+      (unsigned)rep.len, rep.truncated ? 1 : 0);
+#endif
   return rep;
 }
 
@@ -1664,7 +1996,7 @@ static bool dbIntField(const char* ob, const char* oe, const char* key, int32_t&
   return dbc::parseInt(vb, ve, out);
 }
 
-static bool sbAuthenticate() {
+static bool sbAuthenticateImpl() {
   if (!sbConfigured()) {
     logf("[DB] Supabase not configured (SUPABASE_URL/ANON_KEY/DEVICE_TOKEN empty)");
     dbFault = DB_FAULT_AUTH;
@@ -1792,6 +2124,25 @@ static bool sbAuthenticate() {
   logf("[DB] authenticated device=%ld bottles=%d expires_in=%us owner='%s'",
        (long)dev, (int)bottles, (unsigned)(expiresUnix - now), dbOwnerName);
   return true;
+}
+
+// why=initial (first since boot), renew (live session inside the renewal
+// margin) or reauth (session invalidated after a rejection).
+static bool sbAuthenticate() {
+#if RUSIM_METRICS
+  const char* why = dbSessionValid ? "renew" : (s_metAuthEver ? "reauth" : "initial");
+  const uint32_t t0 = millis();
+  const bool ok = sbAuthenticateImpl();
+  MET("AUTH why=%s ok=%d ms=%u fault=%s", why, ok ? 1 : 0, (unsigned)(millis() - t0),
+      dbFaultName(dbFault));
+  if (ok) {
+    s_metAuthEver = true;
+    met_boot(MB_AUTH);
+  }
+  return ok;
+#else
+  return sbAuthenticateImpl();
+#endif
 }
 
 enum DbFetch : uint8_t { DB_FETCH_OK, DB_FETCH_AUTH, DB_FETCH_FAIL, DB_FETCH_PAYLOAD };
@@ -1972,16 +2323,29 @@ static void dbApplyRunState() {
     runStartUnix = ntpSynced ? (uint32_t)time(nullptr) : 0;
     runActive = true;
     runStartRefused = false;
+    // The enqueue grid restarts at the start, so the first accepted round of
+    // the run is queued at once and later rounds follow sample_interval_s.
+    s_sensSlowSeen = false;
+#if RUSIM_METRICS
+    s_metLastEnqMs = 0;
+#endif
+    if (runSampleIntervalS > 0 && (uint32_t)runSampleIntervalS * 1000u < kSensPollMs) {
+      logf("[DB] sample_interval_s=%ld is below the %u ms sensor poll; using %u ms",
+           (long)runSampleIntervalS, (unsigned)kSensPollMs, (unsigned)kSensPollMs);
+    }
+    // interval= is the enqueue spacing in effect; db_interval= is the raw
+    // column (-1 = null, which falls back to kSensSlowMs).
     logf("[DB] run exp=%ld started at %lu: src=%s dur=%ldh interval=%lds "
-         "setpoints=%s",
+         "db_interval=%ld setpoints=%s",
          (long)runExperimentId, (unsigned long)runStartUnix,
          runConfigFromDb ? "db" : "local", (long)runDurationH,
-         (long)runSampleIntervalS,
+         (long)(sensSlowPeriodMs() / 1000u), (long)runSampleIntervalS,
          (cfg != nullptr && cfg->setpoints[0] != '\0') ? cfg->setpoints : "{}");
     // Setpoints are recorded, not actuated: this build has no actuator path
     // for them, and applying them is out of scope for telemetry.
   } else if (!expRunning && runActive) {
     runActive = false;
+    s_sensSlowSeen = false;  // idle rounds go back to the kSensSlowMs grid
     logf("[PUSH] run stopped: %u rows retained, uploads paused",
          (unsigned)s_pushCount);
   }
@@ -2026,6 +2390,8 @@ static void dbPushBackoff(DbFault fault, uint16_t retryAfterS) {
   if ((uint32_t)retryAfterS * 1000u > wait) wait = (uint32_t)retryAfterS * 1000u;
   dbNextPushMs = millis() + wait;
   dbFault = fault;
+  MET("BACKOFF fault=%s wait_ms=%u retry_after_s=%u queued=%u", dbFaultName(fault),
+      (unsigned)wait, (unsigned)retryAfterS, (unsigned)s_pushCount);
 }
 
 // POSTs the oldest queued round to push_readings(). The RPC takes the device
@@ -2068,8 +2434,20 @@ static bool sbPushOneRound() {
   }
   for (int attempt = 0; attempt < 2; attempt++) {
     uint16_t retryAfter = 0;
-    DbReply rep =
-        dbRequest(DB_POST, "/rest/v1/rpc/push_readings", s_pushBody, dbSession, retryAfter);
+    const char* pushPath = "/rest/v1/rpc/push_readings";
+    const char* pushBody = s_pushBody;
+#if RUSIM_METRICS
+    // One-shot DBG faults. The queued batch itself is never modified; the
+    // next attempt formats it again from the queue.
+    if (s_metBadPushOnce) {
+      s_metBadPushOnce = false;
+      pushBody = "{\"p_readings\":[{\"bottle_id\":\"x\"}]}";
+    } else if (s_metBadPathOnce) {
+      s_metBadPathOnce = false;
+      pushPath = "/rest/v1/rpc/push_readings_missing";
+    }
+#endif
+    DbReply rep = dbRequest(DB_POST, pushPath, pushBody, dbSession, retryAfter);
     char sqlstate[8];
     DbFault fault = dbClassify(rep, sqlstate, sizeof(sqlstate));
     if (rep.code >= 200 && rep.code < 300) {
@@ -2080,6 +2458,11 @@ static bool sbPushOneRound() {
         s_pushCount -= rows;
         s_pushAckRounds++;
         dbUploadAckMs = millis();
+#if RUSIM_METRICS
+        met_boot(MB_ACK_FIRST);
+        MET("ACK rows=%u inserted=%ld queued=%u", (unsigned)rows, acked,
+            (unsigned)s_pushCount);
+#endif
         dbBackoffMs = 0;
         dbNextPushMs = millis();
         dbFault = DB_FAULT_NONE;
@@ -2109,6 +2492,22 @@ static bool sbPushOneRound() {
   return false;
 }
 
+// Upload rounds allowed per DB pass. kPushFlushRounds covers intervals of
+// kIntervalMs (30 s) and longer. A shorter sample_interval_s collects several
+// rounds per network cycle, and the cycle itself grows by roughly one HTTPS
+// round trip per upload, so the budget is twice the rounds collected per
+// nominal cycle, plus one, capped at 16. Without this the queue would fill
+// at intervals below ~15 s and reach oldest-drop during a healthy run.
+static uint8_t pushFlushBudget() {
+  const uint32_t period = sensSlowPeriodMs();
+  if (period >= kIntervalMs) return (uint8_t)kPushFlushRounds;
+  uint32_t perCycle = (kIntervalMs + period - 1) / period;
+  uint32_t b = 2 * perCycle + 1;
+  if (b < (uint32_t)kPushFlushRounds) b = (uint32_t)kPushFlushRounds;
+  if (b > 16) b = 16;
+  return (uint8_t)b;
+}
+
 // Ends a pass and starts the cycle's wait. The period is measured from the END
 // of the pass, so a slow or failing pass cannot immediately chain into another
 // cycle.
@@ -2116,6 +2515,12 @@ static void dbPassFinish() {
   netCycleEndMs = millis();
   link_emit_db();
   dbPass = DB_PASS_IDLE;
+#if RUSIM_METRICS
+  MET("PASS ms=%u pushes=%u queued=%u drops=%u acks=%u fault=%s ready=%d run=%d",
+      (unsigned)(millis() - s_metPassStartMs), (unsigned)dbPushRoundsThisPass,
+      (unsigned)s_pushCount, (unsigned)s_pushDrops, (unsigned)s_pushAckRounds,
+      dbFaultName(dbFault), dbConfigReady ? 1 : 0, runActive ? 1 : 0);
+#endif
 }
 
 // One cooperative DB pass. Each call performs AT MOST ONE blocking HTTPS
@@ -2128,6 +2533,10 @@ static void dbPassTick() {
     case DB_PASS_IDLE:
       if (!dbPassRequested) return;  // the RUN cycle starts passes, not a timer
       dbPassRequested = false;
+#if RUSIM_METRICS
+      s_metPassStartMs = millis();
+      dbPushRoundsThisPass = 0;
+#endif
       ensureNtpSync();
       if (!ntpSynced) {
         dbFault = DB_FAULT_CLOCK;
@@ -2224,6 +2633,9 @@ static void dbPassTick() {
       }
       dbConfigReady = true;
       dbConfigReadOkMs = millis();
+#if RUSIM_METRICS
+      met_boot(MB_READY);
+#endif
       // A stale identity mismatch keeps uploads blocked and must stay visible
       // even though the reads themselves just succeeded.
       dbFault = (dbQueueDeviceId >= 0 && dbSessionDevice >= 0 &&
@@ -2250,7 +2662,7 @@ static void dbPassTick() {
         dbPass = DB_PASS_REPORT;
         return;
       }
-      if (!ntpSynced || dbPushRoundsThisPass >= (uint8_t)kPushFlushRounds) {
+      if (!ntpSynced || dbPushRoundsThisPass >= pushFlushBudget()) {
         dbPass = DB_PASS_REPORT;
         return;
       }
@@ -2308,6 +2720,47 @@ bool doLogin() {
   return ok;
 }
 
+#if RUSIM_METRICS
+// Periodic metrics, called once per loop() iteration. Ethernet milestones
+// stamped by the event task are logged here so a LOG line is never split by
+// another task. Every kMetPeriodMs: link counters (display -> WT32), loop
+// responsiveness, heap, and the clock (compare unix_ms with the host clock
+// for offset and drift).
+static void met_tick() {
+  for (int b = MB_ETH_START; b <= MB_GOT_IP; b++) {
+    uint32_t t = s_metEthStampMs[b];
+    if (t != 0 && !s_metBootSeen[b]) {
+      s_metBootSeen[b] = true;
+      s_metBootMs[b] = t;
+      MET("BOOT stage=%s ms=%u", kMetBootName[b], (unsigned)t);
+    }
+  }
+  const uint32_t now = millis();
+  if (s_metWindowMs == 0) s_metWindowMs = now;
+  if (now - s_metWindowMs < kMetPeriodMs) return;
+  const uint32_t window = now - s_metWindowMs;
+  s_metWindowMs = now;
+  MET("LINK window_ms=%u rx=%u exp=%u hello=%u other=%u gap=%u ovf=%u exp_gap_max_ms=%u",
+      (unsigned)window, (unsigned)s_metRxLines, (unsigned)s_metRxExp,
+      (unsigned)s_metRxHello, (unsigned)s_metRxOther, (unsigned)s_metRxGap,
+      (unsigned)s_metRxOvf, (unsigned)s_metExpGapMaxMs);
+  MET("LOOP window_ms=%u iters=%u max_iter_ms=%u max_link_gap_ms=%u", (unsigned)window,
+      (unsigned)s_metLoopIters, (unsigned)s_metLoopMaxMs, (unsigned)s_metPullGapMaxMs);
+  MET("MEM uptime_s=%u free=%u min=%u maxblock=%u", (unsigned)(now / 1000u),
+      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+      (unsigned)ESP.getMaxAllocHeap());
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  MET("TIME unix_ms=%lld ntp=%d", (long long)tv.tv_sec * 1000LL + tv.tv_usec / 1000,
+      ntpSynced ? 1 : 0);
+  s_metRxLines = s_metRxExp = s_metRxHello = s_metRxOther = 0;
+  s_metRxGap = s_metRxOvf = 0;
+  s_metExpGapMaxMs = 0;
+  s_metLoopIters = s_metLoopMaxMs = 0;
+  s_metPullGapMaxMs = 0;
+}
+#endif
+
 void setup() {
   Serial.begin(115200);
   // Give the USB-serial monitor time to attach, then push the ROM
@@ -2319,6 +2772,11 @@ void setup() {
   Serial.flush();
 
   logf("network-master (production WT32 portal + rusim-line peer)");
+#if RUSIM_METRICS
+  logf("[MET] metrics build: MET lines and DBG commands enabled");
+  MET("RESET reason=%s", met_reset_reason());
+  met_boot(MB_SETUP);
+#endif
   logf("Ping target: 1.1.1.1");
   logf("Captive probe: %s", kCaptiveProbeUrl);
   logf("Login is entered on the web page (port 80), kept in RAM only.");
@@ -2362,6 +2820,17 @@ void setup() {
 }
 
 void loop() {
+#if RUSIM_METRICS
+  {
+    const uint32_t now = millis();
+    if (s_metLoopStartMs != 0 && now - s_metLoopStartMs > s_metLoopMaxMs) {
+      s_metLoopMaxMs = now - s_metLoopStartMs;
+    }
+    s_metLoopStartMs = now;
+    s_metLoopIters++;
+    met_tick();
+  }
+#endif
   // Consume the link before anything that can block: a heartbeat that waits
   // in the UART FIFO would otherwise age /info and delay LOG draining.
   link_line_pull();
@@ -2423,6 +2892,9 @@ void loop() {
             haveVerdict = true;
             lastVerdict = true;
             link_emit_result(true);
+#if RUSIM_METRICS
+            met_boot(MB_PORTAL_OK);
+#endif
             stage = STAGE_RUN;
             netCycleNow = true;
           }
@@ -2438,6 +2910,9 @@ void loop() {
       link_emit_result(ok);
       clearCreds();
       if (ok) {
+#if RUSIM_METRICS
+        met_boot(MB_PORTAL_OK);
+#endif
         stage = STAGE_RUN;
         netCycleNow = true;  // first full cycle right after login
       } else {

@@ -11,7 +11,7 @@ Source: `legacy/slave/new-slave.cpp`. Build environment: `[env:legacy-slave]` in
 ## 1. What the program does
 
 1. `setup()` starts both serial ports, builds the methane calibration curves,
-   starts the four DS18B20 buses, and probes the four HX711 pressure ADCs.
+   starts three DS18B20 buses, and probes the four HX711 pressure ADCs.
 2. `loop()` samples every sensor into a set of cached arrays.
 3. On `#1:PING*`, it serialises the cache to the port the PING arrived on.
 4. Independently, it serialises the cache to USB every 1000 ms.
@@ -60,7 +60,7 @@ Four bottles, indexed 0–3. Bottle numbers in the JSON are index + 1.
 |---|---|---|---|---|---|
 | pH (PH-402C, analog) | A2 | A5 | A8 | A11 | `PIN_PH` |
 | Methane (TGS2611, analog) | A1 | A4 | A7 | A10 | `PIN_METHANE` |
-| Temperature (DS18B20, 1-Wire) | D4 | D7 | D10 | D22 | `PIN_TEMP` |
+| Temperature (DS18B20, 1-Wire) | D4 | D7 | D7 | D22 | `PIN_TEMP` |
 | CO2 (MH-Z19C, PWM) | D14 | D15 | D16 | D17 | `PIN_CO2_PWM` |
 | Pressure DOUT (HX711) | D2 | D5 | D8 | D11 | `PIN_PRESS_OUT` |
 | Pressure SCK (HX711) | D3 | D6 | D9 | D12 | `PIN_PRESS_SCK` |
@@ -77,8 +77,9 @@ Serial assignment:
 | `Serial` | D0/D1 (USB / FTDI) | 9600 | Telemetry stream and boot marker |
 | `Serial1` | D18 TX / D19 RX | 9600 | master link: WT32 UART1 over TTL, or the old MAX485 bus (`plans-and-audits/migration-plan.md`) |
 
-Each bottle gets its own `OneWire` bus on its own pin, so four DS18B20s can share
-one address (`index 0`) without a bus scan.
+Bottle 1 uses a dedicated bus on D4, Bottles 2 and 3 share D7, and Bottle 4
+uses D22. Each sensor is selected by its hardcoded 64-bit ROM address in
+`TEMP_ADDRESS`, so multiple sensors on D7 remain assigned to the right bottle.
 
 ## 4. Per-sensor processing
 
@@ -94,31 +95,30 @@ one address (`index 0`) without a bus scan.
   mains hum averages out instead of aliasing into the reading; the trim removes
   switching spikes.
 - `readPhRaw` returns that averaged raw ADC count (0-1023). `updatePhAndTemp()`
-  caches it as `ph_raw`, then scales it with `5.0f / 1023.0f` and passes the
-  voltage to
-  `convertPhVoltage(v, i)`.
+  caches it as `ph_raw` and passes the count to `convertPhCount(count)`.
 
-`convertPhVoltage()` is a 3-point piecewise linear conversion per bottle:
+`convertPhCount()` is a temporary linear map shared by all bottles. It matches
+`firmware/ph-calibrate/main.cpp`:
 
-- `PH_V_401`, `PH_V_686`, `PH_V_918` hold the voltages measured at pH 4.01,
-  6.86 and 9.18. They are the table the Pi used to keep in `PH_CALIBRATION`;
-  bottle 1 has its own three points, bottles 2-4 share one set.
-- Acidic segment (`v > v_686`):
-  `pH = 4.01 + (6.86 - 4.01) / (v_686 - v_401) * (v - v_401)`.
-- Alkaline segment (`v <= v_686`):
-  `pH = 6.86 + (9.18 - 6.86) / (v_918 - v_686) * (v - v_686)`.
-- A voltage outside the calibrated span plus `PH_V_MARGIN` (0.15 V) is invalid
-  and reports `-1`; it is not clamped to 0 or 14, so a loose probe or an EMI
-  spike is visible as a fault rather than a full-scale reading.
-- The result is rounded to two decimals, which is what the Pi computed and what
-  the CSV records.
+- `pH = 7.00 + PH_SIGN * (count - 512) * (14 / 1023)`.
+- pH 7.00 is anchored at 512 counts (2.500 V). The full 0-5 V span (1023
+  counts) covers 14 pH, as `hardware.md` section 5.5 states for the PO output.
+- `PH_SIGN` is `-1`: a higher voltage gives a lower pH. This is the polarity
+  measured with the old 3-point table. Set it to `+1` if a probe reads the
+  other way.
+- 0 counts (floating or shorted input) and 1023 counts (5 V rail) are invalid
+  and report `-1`.
+- Valid results are clamped to 0-14 and rounded to two decimals.
+- The map is not linear over the full 0-14 range. The previous per-bottle
+  3-point table (pH 4.01 / 6.86 / 9.18) is kept as a comment in
+  `new-slave.cpp` for reference.
 
 The serialised `ph` field is therefore **pH units**. The same reading is also
 emitted as `ph_raw`, the averaged raw ADC count (0-1023, 10-bit, 5 V reference)
 before any conversion, so an
-invalid `ph` (`-1`) can still be diagnosed. The Flask server used to apply this
-conversion on ingest; it now passes the value through, so the two must be
-deployed together.
+invalid `ph` (`-1`) can still be diagnosed. The Flask server used to apply the
+old 3-point conversion on ingest; it now passes the value through, so the two
+must be deployed together.
 
 ### 4.2 Methane (TGS2611)
 
@@ -359,4 +359,4 @@ valid cached reading.
 - `plans-and-audits/esp-db-sync.md` §3 — the planned Modbus replacement for this program.
 
 ---
-Updated at 2026-11-20-16:05.
+Updated at 2026-11-23-16:40.

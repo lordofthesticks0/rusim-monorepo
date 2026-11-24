@@ -30,6 +30,8 @@ void ui_show_setup();
 // Back to the route that was open before /setup (re-login), else /home.
 void ui_show_previous();
 bool ui_is_setup();
+// Current route as a short path ("/home", "/control", ...), for logs.
+const char *ui_route_name();
 bool ui_is_control();
 bool ui_is_info();
 

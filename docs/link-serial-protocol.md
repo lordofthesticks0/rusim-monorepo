@@ -87,6 +87,11 @@ Rules:
   truth stays visible end to end. Values use `%.4g`, so exponent forms such as
   `1.234e+03` may occur; the entire value token must be accepted by `strtof`.
   Missing or malformed fields remain NULL, never zero.
+- A metrics build of the WT32 (`network-master-metrics`) starts the line with
+  `seq=<n>` before the first `b<i>` group (`SENS seq=12 b1 ...`). Every
+  display build drops fields that come before a bottle token, so the line
+  stays valid; the display metrics build reads it to pair frames for latency
+  measurement (`verification-toolkit.md` §6.2). Production builds never send it.
 - No timestamp on the line. The display stamps arrival and nulls the node when
   no new line arrives for more than 90 s (`UI_SENS_STALE_MS`, 3 missed polls).
 - The WT32 keeps the last accepted round and re-sends it in the `HELLO`
@@ -107,6 +112,7 @@ Rules:
 | `HELLO` | - | once at display boot | log link-up; immediately re-send current truth (`NET`, `DB`, `LOGINREQ` if needed, `RESULT OK` if running) |
 | `EXPERIMENT` | `run=<0\|1> num=<n> dur=<1-99>` | on every change + every heartbeat, after the boot gate opens (below) | store; log only on change |
 | `DUMP` | - | bench only, `IS_DEBUG` builds | emit a `LOG [DUMP] ...` snapshot of local state |
+| `DBG` | `<word> [arg]` | bench only, via `W32CMD`; WT32 metrics builds only | fault injection for verification (`verification-toolkit.md` §4); a production WT32 ignores it as an unknown word |
 
 **Boot gate (display side).** After a display boot no `EXPERIMENT` is sent
 until the first `DB` line has arrived (normally from the `HELLO` snapshot).
@@ -367,4 +373,4 @@ with this port.
    `display-sim`, `network-master`.
 
 ---
-Updated at 2026-11-21-14:22.
+Updated at 2026-11-24-12:34.

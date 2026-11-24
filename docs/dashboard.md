@@ -79,6 +79,19 @@ bun run dev-db       # prepare the development database
 
 ---
 
+### 2.3 Timing records (`?metrics`)
+
+`src/metrics.ts` records timings only when the URL contains `?metrics`; for
+everyone else `metricsEnabled` is false and every call returns at once. When
+on, it prints `[metrics] {...}` to the browser console and keeps the records
+in `window.__rusimMetrics`: `page_load` (navigation timing, transfer size,
+viewport), `fetch` (duration, rows and age of the newest sample for
+`fetchReadings` and `fetchExperimentReadings`) and `render` (data handed to
+React -> two animation frames later, i.e. after the browser painted it).
+Chrome adds `heap_bytes`. `copy(window.__rusimMetricsCsv())` in the console
+copies all records as CSV. Used for the report's dashboard measurements
+(`verification-toolkit.md` §6.7).
+
 ## 3. The database
 
 The application reads exactly one PostgreSQL schema: **`device_data`**. The client pins itself to it (`db: { schema: "device_data" }`) and `supabase/config.toml` exposes only it through PostgREST.
@@ -788,4 +801,4 @@ The Compare tab overlays up to four (experiment, chamber) series on one chart wi
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Updated at 2026-11-21-16:24.
+Updated at 2026-11-24-12:34.

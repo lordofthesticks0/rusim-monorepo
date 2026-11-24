@@ -107,6 +107,7 @@ Device `0` is provisioned by migration `20260930162100` with `bottle_count = 24`
 | `experiment_id` | `integer` | Required, non-negative; `0` is the testing experiment and `1+` are regular experiments. Grouping column, not a foreign key. **Not part of the primary key.** |
 | `timestamp` | `timestamptz` | Required, timezone-aware sample time. **Part of the primary key.** |
 | `ph`, `pressure`, `temp`, `co2`, `ch4` | `real` | Nullable four-byte floating-point sensor values. A null means the bottle reported but that sensor produced no value, which differs from the bottle being absent from the sample entirely (disconnected). |
+| `inserted_at` | `timestamptz` | **Pending migration** `20261124000000_add_readings_inserted_at.sql` (in the repository, not yet applied to the live project). Server time at which `push_readings()` first inserted the row, default `now()`; NULL for rows inserted before the column existed. A replay does not change it. Used for ingest latency (`inserted_at - timestamp`, `verification-toolkit.md` §6.6). |
 
 The primary key is `(device_id, bottle_id, timestamp)`, changed from `(device_id, bottle_id, experiment_id)` by migration `20260930170000` so a chamber can report repeatedly within one experiment. An index on `(experiment_id, timestamp DESC)` supports experiment time-series reads.
 
@@ -170,4 +171,4 @@ It connects directly with `DATABASE_URL` using Bun's built-in Postgres client, s
 Every value reaches the database as a bound parameter rather than interpolated text. The readings are written in a single transaction, so a failure part-way through leaves the database untouched. Experiment `N` is placed one full span (`sample_count * gap`) further into the past than experiment `N-1`, so experiments occupy disjoint timestamp windows and generating one leaves the others intact. Chambers `1..bottleCount` report; higher-numbered chambers never appear, which the dashboard reports as disconnected.
 
 ---
-Updated at 2026-11-18-00:12.
+Updated at 2026-11-24-12:34.

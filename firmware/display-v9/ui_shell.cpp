@@ -634,6 +634,18 @@ void ui_show_previous() {
   go(r, s_prevC, s_prevB);
 }
 bool ui_is_setup() { return s_route == R_SETUP; }
+const char *ui_route_name() {
+  switch (s_route) {
+    case R_HOME: return "/home";
+    case R_PICKER: return "/data";
+    case R_CLUSTER: return "/data/node";
+    case R_BOTTLE: return "/data/bottle";
+    case R_CONTROL: return "/control";
+    case R_INFO: return "/info";
+    case R_SETUP: return "/setup";
+  }
+  return "?";
+}
 bool ui_is_control() { return s_route == R_CONTROL; }
 bool ui_is_info() { return s_route == R_INFO; }
 

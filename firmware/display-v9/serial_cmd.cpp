@@ -4,6 +4,7 @@
 
 #include "fake_data.h"
 #include "link_serial.h"
+#include "metrics.h"
 #include "ui_config.h"
 #include "ui_shell.h"
 
@@ -74,6 +75,9 @@ static void print_help() {
   Serial.println("PASSTH ON|OFF         raw USB <-> IO17/IO18 tunnel (WT32 flash/log)");
 #if IS_DEBUG
   Serial.println("W32CMD <line>         send one arbitrary line to the WT32 (debug)");
+#endif
+#if RUSIM_METRICS
+  Serial.println("REBOOT | BOOTLOG | HEAPCHK   verification metrics build only");
 #endif
 }
 
@@ -245,6 +249,8 @@ static void handle_line(char *line) {
     } else {
       Serial.println("usage: POST ON|OFF");
     }
+  } else if (met_console(cmd)) {
+    // REBOOT / BOOTLOG / HEAPCHK, RUSIM_METRICS builds only.
   } else {
     Serial.println("unknown cmd; send HELP");
   }

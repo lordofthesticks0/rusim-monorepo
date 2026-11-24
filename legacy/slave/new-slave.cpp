@@ -18,7 +18,7 @@ const int NUM_BOTTLES = 4;
 
 const int PIN_PH[NUM_BOTTLES]        = {A2, A5, A8, A11};
 const int PIN_METHANE[NUM_BOTTLES]   = {A1, A4, A7, A10};
-const int PIN_TEMP[NUM_BOTTLES]      = {4, 7, 10, 22};
+const int PIN_TEMP[NUM_BOTTLES]      = {4, 7, 7, 22};
 const int PIN_CO2_PWM[NUM_BOTTLES]   = {14, 15, 16, 17};
 const int PIN_PRESS_OUT[NUM_BOTTLES] = {2, 5, 8, 11};
 const int PIN_PRESS_SCK[NUM_BOTTLES] = {3, 6, 9, 12};
@@ -68,14 +68,23 @@ const float CALIBRATION_FACTORS[NUM_BOTTLES] = {
 };
 
 // ==========================================
-// 5. PH (PH-402C / PH-4502C) 3-POINT CALIBRATION
+// 5. PH (PH-402C / PH-4502C) LINEAR MAP
 // ==========================================
-// Per-bottle voltages measured at pH 4.01 / 6.86 / 9.18. Ported from the Pi's
-// PH_CALIBRATION table so the conversion happens next to the ADC read; the
-// serialised "ph" field is therefore pH units, not volts.
-const float PH_V_401[NUM_BOTTLES] = {4.120f, 4.160f, 4.160f, 4.160f};
-const float PH_V_686[NUM_BOTTLES] = {3.833f, 3.833f, 3.833f, 3.833f};
-const float PH_V_918[NUM_BOTTLES] = {3.620f, 3.630f, 3.630f, 3.630f};
+// Temporary linear map shared by all probes (same as firmware/ph-calibrate):
+//   pH = 7.00 + PH_SIGN * (count - 512) * (14 / 1023)
+// pH 7.00 sits at 512 counts (2.500 V) and the full 0-5 V span covers 14 pH.
+// The serialised "ph" field is pH units, not volts.
+const float PH_ANCHOR_COUNT = 512.0f;
+const float PH_ANCHOR_VALUE = 7.0f;
+const float PH_PER_COUNT    = 14.0f / 1023.0f;
+// -1: a higher voltage gives a lower pH (measured polarity). Use +1 to invert.
+const float PH_SIGN         = -1.0f;
+
+// Previous per-bottle three-point table (pH 4.01 / 6.86 / 9.18), kept for
+// reference only. Not used by the linear map above.
+//   PH_V_401 = {4.120, 4.160, 4.160, 4.160}
+//   PH_V_686 = {3.833, 3.833, 3.833, 3.833}
+//   PH_V_918 = {3.620, 3.630, 3.630, 3.630}
 
 // One ADC conversion is ~4.9 mV, which is ~0.05 pH here, and the probe buffer
 // is noisy. Average a burst and drop the highest and lowest sample so a single
@@ -85,22 +94,30 @@ const float PH_V_918[NUM_BOTTLES] = {3.620f, 3.630f, 3.630f, 3.630f};
 // after the multiplexer moves is discarded, exactly as in updateAllMethane().
 const int   PH_SAMPLES      = 20;
 const int   PH_SAMPLE_GAP_MS = 5;
-// Voltages outside the calibrated span plus this margin are reported as
-// invalid (-1) instead of being clamped to 0 or 14. 0.15 V is roughly 1.5 pH
-// of headroom past each calibration point.
-const float PH_V_MARGIN = 0.15f;
-
-float ph_v_min[NUM_BOTTLES];
-float ph_v_max[NUM_BOTTLES];
 
 // ==========================================
 // 6. SENSOR OBJECTS & CACHED TELEMETRY
 // ==========================================
-OneWire oneWire1(PIN_TEMP[0]); DallasTemperature temp1(&oneWire1);
-OneWire oneWire2(PIN_TEMP[1]); DallasTemperature temp2(&oneWire2);
-OneWire oneWire3(PIN_TEMP[2]); DallasTemperature temp3(&oneWire3);
-OneWire oneWire4(PIN_TEMP[3]); DallasTemperature temp4(&oneWire4);
-DallasTemperature* tempSensors[NUM_BOTTLES] = {&temp1, &temp2, &temp3, &temp4};
+// Bottle 2 and Bottle 3 share D7. Their ROM addresses keep their readings
+// associated with the correct bottle even though they use the same bus.
+OneWire oneWireBottle1(PIN_TEMP[0]);
+OneWire oneWireShared23(PIN_TEMP[1]);
+OneWire oneWireBottle4(PIN_TEMP[3]);
+DallasTemperature tempBusBottle1(&oneWireBottle1);
+DallasTemperature tempBusShared23(&oneWireShared23);
+DallasTemperature tempBusBottle4(&oneWireBottle4);
+DallasTemperature* tempBuses[] = {
+  &tempBusBottle1,
+  &tempBusShared23,
+  &tempBusBottle4,
+};
+const uint8_t TEMP_BUS_FOR_BOTTLE[NUM_BOTTLES] = {0, 1, 1, 2};
+const DeviceAddress TEMP_ADDRESS[NUM_BOTTLES] = {
+  {0x28, 0xFE, 0x34, 0xB4, 0x00, 0x00, 0x00, 0x7B}, // Bottle 1
+  {0x28, 0x47, 0x65, 0xB3, 0x00, 0x00, 0x00, 0x34}, // Bottle 2
+  {0x28, 0x3B, 0xA8, 0xB2, 0x00, 0x00, 0x00, 0x90}, // Bottle 3
+  {0x28, 0xB0, 0x7C, 0xB1, 0x00, 0x00, 0x00, 0x4B}, // Bottle 4
+};
 
 HX711 press1; HX711 press2; HX711 press3; HX711 press4;
 HX711* pressureSensors[NUM_BOTTLES] = {&press1, &press2, &press3, &press4};
@@ -277,23 +294,15 @@ void updatePressure(int idx) {
 // ==========================================
 // TEMPERATURE & PH FUNCTIONS
 // ==========================================
-// Piecewise linear pH conversion, mirroring the Pi's old convert_ph_voltage():
-// acidic segment (4.01..6.86) above v_686, alkaline segment (6.86..9.18) at or
-// below it. A voltage outside the calibrated span plus PH_V_MARGIN is reported
-// as invalid (-1) rather than clamped, so a loose probe or an EMI spike reads
-// as a fault instead of a full-scale 0.00 or 14.00. The test is written as
-// !(v > min) so a NaN input is rejected too. Valid results are rounded to two
-// decimals, which is what the Pi computed and what the CSV records.
-float convertPhVoltage(float v, int idx) {
-  if (!(v > ph_v_min[idx]) || v > ph_v_max[idx]) return -1.0f;
-  float ph;
-  if (v > PH_V_686[idx]) {
-    const float slope = (6.86f - 4.01f) / (PH_V_686[idx] - PH_V_401[idx]);
-    ph = 4.01f + slope * (v - PH_V_401[idx]);
-  } else {
-    const float slope = (9.18f - 6.86f) / (PH_V_918[idx] - PH_V_686[idx]);
-    ph = 6.86f + slope * (v - PH_V_686[idx]);
-  }
+// Linear count-to-pH conversion (see section 5). 0 counts (0 V, floating or
+// shorted input) and 1023 counts (5 V rail) are invalid and return -1, so a
+// loose probe reads as a fault instead of a full-scale value. The test is
+// written as !(count > 0) so a NaN input is rejected too. Valid results are
+// clamped to 0-14 and rounded to two decimals.
+float convertPhCount(float count) {
+  if (!(count > 0.0f) || count >= 1023.0f) return -1.0f;
+  float ph = PH_ANCHOR_VALUE + PH_SIGN * (count - PH_ANCHOR_COUNT) * PH_PER_COUNT;
+  if (!isfinite(ph)) return -1.0f;
   if (ph < 0.0f) ph = 0.0f;
   if (ph > 14.0f) ph = 14.0f;
   return roundf(ph * 100.0f) / 100.0f;
@@ -326,17 +335,21 @@ void updatePhAndTemp() {
   for (int i = 0; i < NUM_BOTTLES; i++) {
     const float raw = readPhRaw(i);
     cachedPhRaw[i] = raw;
-    cachedPh[i] = convertPhVoltage(raw * (5.0f / 1023.0f), i);
+    cachedPh[i] = convertPhCount(raw);
     serviceMasterPing();
   }
 
   unsigned long now = millis();
   if (now - lastTempReqMs >= 800) {
     for (int i = 0; i < NUM_BOTTLES; i++) {
-      float tempC = tempSensors[i]->getTempCByIndex(0);
+      DallasTemperature* bus = tempBuses[TEMP_BUS_FOR_BOTTLE[i]];
+      float tempC = bus->getTempC(TEMP_ADDRESS[i]);
       cachedTemp[i] = (tempC < -50.0f || tempC == 85.0f) ? -999.0f : tempC;
-      tempSensors[i]->requestTemperatures();
       serviceMasterPing();
+    }
+    // Request once per physical bus, including the shared Bottle 2/3 bus.
+    for (size_t i = 0; i < sizeof(tempBuses) / sizeof(tempBuses[0]); ++i) {
+      tempBuses[i]->requestTemperatures();
     }
     lastTempReqMs = now;
   }
@@ -420,9 +433,6 @@ void setup() {
     pinMode(PIN_PH[i], INPUT);
     pinMode(PIN_CO2_PWM[i], INPUT);
 
-    ph_v_min[i] = min(PH_V_918[i], PH_V_686[i]) - PH_V_MARGIN;
-    ph_v_max[i] = max(PH_V_401[i], PH_V_686[i]) + PH_V_MARGIN;
-
     ch4_cal_ok[i] = fitExponent(RS_AIR[i], PPM_AIR, RS_SPAN[i], PPM_SPAN[i], curve_exp[i]);
     if (ch4_cal_ok[i]) {
       rs_at_max[i] = RS_SPAN[i] * pow(PPM_SPAN[i] / PPM_MAX, 1.0f / curve_exp[i]);
@@ -430,11 +440,11 @@ void setup() {
     }
   }
 
-  // 2. Initialize Non-Blocking DS18B20 Temperature Sensors
-  for (int i = 0; i < NUM_BOTTLES; i++) {
-    tempSensors[i]->begin();
-    tempSensors[i]->setWaitForConversion(false);
-    tempSensors[i]->requestTemperatures();
+  // 2. Initialize non-blocking DS18B20 buses (Bottle 2/3 share D7).
+  for (size_t i = 0; i < sizeof(tempBuses) / sizeof(tempBuses[0]); ++i) {
+    tempBuses[i]->begin();
+    tempBuses[i]->setWaitForConversion(false);
+    tempBuses[i]->requestTemperatures();
   }
   lastTempReqMs = millis();
 

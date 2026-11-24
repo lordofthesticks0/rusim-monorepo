@@ -1,4 +1,5 @@
 #include "link_serial.h"
+#include "metrics.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -292,6 +293,7 @@ static void handle_db(const char *args) {
 // failure. The next accepted 5 s poll replaces the whole frame, so no
 // half-fed frame outlives its poll.
 static void handle_sens(char *args) {
+  met_sens_rx(args);
   LinkSensFrame f = {};
   for (int b = 0; b < LINK_SENS_BOTTLES; b++) {
     for (int s = 0; s < LINK_SENS_VALS; s++) f.value[b][s] = NAN;
@@ -331,6 +333,7 @@ static void handle_sens(char *args) {
   s_sensMs = millis();
   s_sens = f;
   s_sensSeen = true;
+  met_sens_commit(s_sensSeq);
   Serial.printf("[LINK] SENS frame seq=%lu\n", (unsigned long)s_sensSeq);
 }
 
@@ -350,6 +353,7 @@ static void handle_log(const char *payload) {
 }
 
 static void handle_line(char *line) {
+  met_link_line(line);  // before tokenising: the echo shows the line as received
   s_lastRxMs = millis();
   if (s_lastRxMs == 0) s_lastRxMs = 1;  // 0 is reserved for "never"
   // LOG is the only word whose payload may contain spaces; handle it first.
@@ -395,6 +399,7 @@ static void rx_byte(char c) {
     // Overlong line: drop the whole thing rather than parse a prefix.
     s_rxLen = 0;
     s_rxOverflow = true;
+    met_link_discard(true);
     return;
   }
   s_rx[s_rxLen++] = c;
@@ -435,6 +440,7 @@ void link_serial_poll() {
   }
   // A stalled partial line never wedges the parser.
   if (s_rxLen > 0 && (millis() - s_lastByteMs) > LINK_GAP_MS) {
+    met_link_discard(false);
     s_rxLen = 0;
     s_rxOverflow = false;
   }

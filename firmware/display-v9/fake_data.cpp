@@ -1,6 +1,7 @@
 #include "fake_data.h"
 
 #include "link_serial.h"
+#include "metrics.h"
 
 AppState g;
 
@@ -42,6 +43,7 @@ bool sens_apply_real() {
   if (!s_staleShown && s_realSeen && s_lastSeq == f.seq) return false;
   s_staleShown = false;
   s_lastSeq = f.seq;
+  met_sens_applied(f.seq);
 
   // Frames arrive every ~5 s but the trend advances every UI_TREND_STEP_MS.
   // Between steps the newest slot is overwritten, so the chart's right edge

@@ -80,9 +80,19 @@ mandatory; two USB grounds are not a substitute.
 every state, including while the portal gate is open. One round per 5 s
 (`kSensPollMs`). The first round is due immediately at boot, not 5 s later.
 - Every accepted round is forwarded to the display as a `SENS` line. Only one
-accepted round per 30 s (`kSensSlowMs`) is logged as `[SENS]`, counted as an
-idle round, or enqueued for the database, so the upload row rate does not
-depend on the poll period.
+accepted round per enqueue period is logged as `[SENS]`, counted as an idle
+round, or enqueued for the database, so the upload row rate does not depend
+on the poll period. The period (`sensSlowPeriodMs()`) is the active run's
+frozen `sample_interval_s`; while idle, or when the run's `experiments` row
+has no interval, it is 30 s (`kSensSlowMs`). An interval below the 5 s poll
+is raised to 5 s and logged at run start.
+- Due times sit on a fixed grid (`due += period`), and the poll nearest a due
+time takes it (half a poll period of tolerance either side). Measuring from
+the previous round instead would let reply-time jitter push a round to the
+next poll, giving 35 s instead of 30 s and an average that drifts late. After
+a gap longer than one period (slave silent) the grid restarts. A run start
+restarts it too, so the first accepted round of a run is enqueued at once.
+Single spacings are quantised to the poll; the average equals the interval.
 - Each round drains stale RX bytes, writes `#1:PING*` (8 bytes), and reads
 until `\n`, a full buffer, or 1500 ms (`kSensReplyMs`: 50 ms capture window
 plus about 310 ms of line time for a ~500-byte reply). A frame that does not
@@ -286,8 +296,11 @@ through a 320-byte rolling window because the WT32-ETH01 has no PSRAM.
   on, no insecure fallback. See `plans-and-audits/esp-db-sync.md` §5.
 - Sample push queue: fixed 1200-row ring, oldest-drop with a saturating drop
   counter, immutable sample-time stamps, clock-gated on NTP. Enqueued only
-  from an accepted sensor frame during an active run; flushed 2 rounds per
-  30 s cycle, and only while a run is active. Stopping pauses retries but
+  from an accepted sensor frame during an active run; flushed up to
+  `pushFlushBudget()` rounds per 30 s cycle (2 for enqueue periods of 30 s
+  and longer; below that, twice the rounds collected per cycle plus one, at
+  most 16, so a short `sample_interval_s` cannot fill the queue during a
+  healthy run), and only while a run is active. Stopping pauses retries but
   keeps the rows; a later run flushes them with their original experiment id
   and timestamp. See §6.1 and `plans-and-audits/esp-db-sync.md` §7-8.
 - Credential lifetime: RAM only. The working username/password buffers are
@@ -375,6 +388,20 @@ removes queued rows with an out-of-range bottle id
 purge runs only after the identity check, so a queue that belongs to another
 device is never filtered by this device's count.
 
+### 6.2 Metrics build (`network-master-metrics`)
+
+`-D RUSIM_METRICS=1` adds machine-readable `LOG MET <kind> key=value ...`
+lines (boot milestones, every poll, `SENS` emission, enqueue spacing, every
+HTTPS request with its TLS connect time, authentication, backoff, DB pass,
+and 60 s link/loop/heap/clock summaries), a `seq=` token at the start of
+every `SENS` line, and the `DBG` fault-injection words received from the
+display (`REBOOT`, `BOOTLOG`, `SESSION_CORRUPT`, `SESSION_EXPIRE`,
+`CLOCK_STEP`, `IDENTITY`, `BADPUSH`, `BADPATH`, `DBDOWN`). In that build a
+Supabase request connects explicitly before `HTTPClient` sends it, so the
+handshake can be timed; the connection count is unchanged. A production
+build compiles none of it. Line reference and procedures:
+`verification-toolkit.md`.
+
 ## 7. Expected output
 
 **Bench check (2026-11-10).** Read-only `HELLO` and `DUMP` commands through
@@ -409,7 +436,7 @@ LOG [PING] 1.1.1.1 OK, avg time = 15 ms
 LOG [SENS] 4 bottles ok=20 fail=0 b1 ph=2.51 ch4=812.4 t=38.5 co2=1204 p=1013 b2 ph=2.49 ch4=790.1 t=38.2 co2=1198 p=1013 b3 ph=2.53 ch4=824.9 t=38.7 co2=1210 p=1014 b4 ph=2.47 ch4=801.3 t=38.4 co2=1202 p=1013
 LOG [DB] authenticated device=1 bottles=4 expires_in=43200s owner='...'
 LOG [DB] config pull ok: bottles=4 experiments=2 latest=3
-LOG [DB] run exp=4 started: src=db dur=48h interval=30s setpoints={"t":39.5}
+LOG [DB] run exp=4 started at 1795500000: src=db dur=48h interval=30s db_interval=30 setpoints={"t":39.5}
 LOG [RUN] exp=4 duration=48h running=1 dbLatest=3 bottles=4 ntp=1 queued=0 drops=0
 ```
 
@@ -454,7 +481,8 @@ LOG [LOGIN] will wait for a corrected pair from the web form
   enqueue and in-slave pH conversion.
 - `legacy-slave.md` — the Mega program and its JSON reply.
 - `platformio-environments.md` — build environments.
+- `verification-toolkit.md` — metrics build, `MET` lines and the report data tools.
 - `hardware.md` — board pinouts (read-only reference).
 
 ---
-Updated at 2026-11-21-11:38.
+Updated at 2026-11-24-12:34.

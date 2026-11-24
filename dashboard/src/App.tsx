@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useState, type
 import { useAuth } from "./auth";
 import { useEntranceOnce, useIndicator } from "./motion";
 import { csvFileName, downloadCsv, toCsv } from "./csv";
+import { newestAgeSeconds, startFetchTimer } from "./metrics";
 import { displayChamberNumber, internalChamberIds, FIRST_INTERNAL_CHAMBER_ID } from "./chambers";
 import {
   fetchReadings,
@@ -245,7 +246,10 @@ function Dashboard({
     setLoading(true);
     setError("");
     try {
-      setReadings(await fetchReadings(sessionToken));
+      const timer = startFetchTimer("fetchReadings");
+      const rows = await fetchReadings(sessionToken);
+      setReadings(rows);
+      timer({ rows: rows.length, newest_age_s: newestAgeSeconds(rows) });
       setLoadedAt(Date.now());
       setPollSuspended(false);
     } catch (err) {
@@ -861,9 +865,12 @@ function ExperimentHistoryView({
     setReadings([]);
     setDetailLoading(true);
     setDetailError("");
+    const timer = startFetchTimer("fetchExperimentReadings");
     void fetchExperimentReadings(sessionToken, activeExperimentId)
       .then((result) => {
-        if (!cancelled) setReadings(result);
+        if (cancelled) return;
+        setReadings(result);
+        timer({ rows: result.length, experiment_id: activeExperimentId, newest_age_s: newestAgeSeconds(result) });
       })
       .catch((err: unknown) => {
         if (cancelled) return;

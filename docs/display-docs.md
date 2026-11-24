@@ -51,6 +51,7 @@ the layout, the colour rules and the refresh model; §15 describes the result.
 | `screen_data.h/.cpp` | `/data` "Nodes": six cards (`Node 1`..`Node 6`, bottles reporting, missing readings, status dot); `/data/X`: back button + four bottle tiles (40 px temperature, state line); `/data/X/bottle_Y`: back button, five sensor tiles (selected = 3 px accent outline) and a trend card with an auto-ranged Y axis, min/max labels and the latest value. Operator-facing numbers are 1-based |
 | `screen_control.h/.cpp` | `/control`: setpoint card (−/+ 0.1 °C, 35.0–40.0, display only), experiment card (number and duration steppers with auto-repeat, status line), and a run card with the run hold button plus two equipment hold buttons, **Stirrers** and **Water pump** (display only, logic in the backlog). A title-row button sends one immediate `EXPERIMENT` line (development tool) |
 | `screen_info.h/.cpp` | `/info` "System info": IP, network (same priority as the link chip), firmware, latest DB experiment, active run, upload queue, sensor-feed age, LVGL UI-thread load |
+| `metrics.h/.cpp` | Verification instrumentation, compiled only with `RUSIM_METRICS=1` (`display-v9-metrics`); empty inline hooks otherwise (§16) |
 | `screen_sleep.h/.cpp` | Idle timer on last-touch millis; backlight off after 60 s (`UI_SLEEP_MS`). The waking touch is swallowed (`sleep_filter_touch`); `sleep_wake()` turns it on for modals |
 
 ## 4. Screen tree / state machine (as built)
@@ -411,6 +412,33 @@ used. Changing numbers in status rows are right-aligned so only one edge moves.
   after the operator chose a number (stepper or USB `EXP`); the choice is
   cleared when a run starts.
 
+## 16. Verification metrics build (`display-v9-metrics`)
+
+`-D RUSIM_METRICS=1` compiles `metrics.cpp` and turns the hooks in
+`metrics.h` from empty inline functions into real ones. Production
+(`display-v9`) and the simulator compile the empty versions.
+
+| Hook | Called from | Measures |
+|---|---|---|
+| `met_init_early()` | `setup()`, before `Serial.begin()` | sets an 8 KB USB TX buffer so console output does not block the loop |
+| `met_boot(stage)` | `setup()`, the link, the render callback | boot milestones (`MET BOOT`) |
+| `met_attach(display, indev)` | `setup()` | registers `LV_EVENT_INVALIDATE_AREA`, `RENDER_START`, `RENDER_READY` on the display and wraps the indev read timer callback |
+| `met_touch(raw, swallowed, x, y)` | `my_touchpad_read()` | starts a touch-latency measurement on every press or release edge |
+| `met_flush(px)` | `my_disp_flush()` | pixels written (`MET FPS px=`) |
+| `met_link_line()`, `met_link_discard()` | `link_serial.cpp` | per-word line counts, discards, heartbeat gaps, the `[LINK<]` echo |
+| `met_sens_rx/commit/applied()` | `handle_sens()`, `sens_apply_real()` | `SENS` receive -> rendered frame (`MET SENSRX`) |
+| `met_hold()` | `ui_hold_button.cpp` | hold start, commit, cancel |
+| `met_tick()` | end of `loop()` | prints queued results; 5 s `FPS`, 60 s `MEM` and `LINK` lines |
+| `met_console()` | `serial_cmd.cpp` | `REBOOT`, `BOOTLOG`, `HEAPCHK` |
+
+A touch measurement ends at the first `RENDER_READY` after an invalidation
+made while the indev read timer was running, so only the touch's own redraw
+counts; an edge that redraws nothing within 500 ms is logged with `nf=1`.
+`ui_route_name()` (`ui_shell.cpp`) supplies the route for each result.
+`-D RUSIM_MET_GPIO=<pin>` drives a free pin HIGH at the edge and LOW at the
+answering frame, for logic-analyser validation. Definitions, line reference
+and procedures: `verification-toolkit.md`.
+
 
 ---
-Updated at 2026-11-21-14:22.
+Updated at 2026-11-24-12:34.

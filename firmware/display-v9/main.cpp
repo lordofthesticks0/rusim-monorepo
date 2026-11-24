@@ -13,6 +13,7 @@
 
 #include "fake_data.h"
 #include "link_serial.h"
+#include "metrics.h"
 
 #include "screen_control.h"
 #include "screen_home.h"
@@ -86,6 +87,7 @@ static void my_disp_flush(lv_display_t *display, const lv_area_t *area, uint8_t 
 #else
   lcd->draw16bitRGBBitmap(area->x1, area->y1, reinterpret_cast<uint16_t *>(px_map), w, h);
 #endif
+  met_flush(w * h);
   lv_display_flush_ready(display);
 }
 
@@ -103,12 +105,16 @@ static void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data) {
   }
   // The tap that wakes a dark screen only wakes it: sleep_filter_touch()
   // reports it as released so it cannot press the widget under the finger.
+  const bool rawPressed = pressed;
   if (sleep_filter_touch(pressed)) pressed = false;
+  met_touch(rawPressed, rawPressed && !pressed, touch_last_x, touch_last_y);
   data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
 void setup() {
+  met_init_early();
   Serial.begin(115200);
+  met_boot("setup");
   Serial.println("Display UI v9 (WT32 sensor feed). Send HELP for serial cmds.");
   link_serial_init();
 
@@ -155,6 +161,7 @@ void setup() {
 #else
   lcd->fillScreen(BLACK);
 #endif
+  met_boot("panel");
   delay(200);
   lv_init();
   lv_tick_set_cb(lvgl_tick_get);
@@ -188,10 +195,12 @@ void setup() {
     static lv_indev_t *indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, my_touchpad_read);
+    met_attach(display, indev);
 
     fake_init();
     link_serial_set_exp_state(g.experimentRunning, g.expNum, g.durationH);
     ui_init();
+    met_boot("ui_built");
 
     Serial.println("Setup done");
   }
@@ -230,6 +239,8 @@ void loop() {
   if (!passthrough) {
     sleep_tick();       /* 60 s idle -> backlight off */
     lv_timer_handler(); /* let the GUI do its work */
+    met_after_timer_handler();
   }
+  met_tick(); /* RUSIM_METRICS builds only; empty otherwise */
   delay(5);
 }

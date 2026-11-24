@@ -55,6 +55,7 @@ flashing script relies on (see `flash-factory-tool.md`).
 | `temp-probe` | `megaatmega2560` | atmelavr | 115200 | `temp-probe/` | `paulstoffregen/OneWire@^2.3.8`, `milesburton/DallasTemperature@^4.0.6` |
 | `ph-calibrate` | `megaatmega2560` | atmelavr | 115200 | `ph-calibrate/` | none |
 | `display-v9` | `esp32-s3-devkitc-1` | espressif32 | 115200 | `display-v9/` | LVGL 9.6.0, GFX 1.2.8, TAMC_GT911 1.0.2 |
+| `display-v9-metrics` | `esp32-s3-devkitc-1` | espressif32 | 115200 | `display-v9/` (`extends = env:display-v9`, adds `-D RUSIM_METRICS=1`) | as `display-v9` |
 | `display-sim` | native | (none) | (n/a) | `display-v9/` minus `main.cpp`, `link_serial.cpp` | LVGL 9.6.0, SDL2 |
 | `wt32-eth01_captive-recon` | `wt32-eth01` | espressif32 | 115200 | `wt32-eth01_captive-recon/` | (core only) |
 | `motor-driver` | `nanoatmega328new` | atmelavr | 115200 | `motor-driver/` | none |
@@ -63,6 +64,7 @@ flashing script relies on (see `flash-factory-tool.md`).
 | `water-level` | `uno` | atmelavr | 115200 | `tests/water-level/` | none |
 | `db-contract` | native | (none) | (n/a) | `tests/db-contract/` | none |
 | `network-master` | `wt32-eth01` | espressif32 | 115200 | `network-master/` | `dvarrel/ESPping@^1.0.5` |
+| `network-master-metrics` | `wt32-eth01` | espressif32 | 115200 | `network-master/` (`extends = env:network-master`, adds `-D RUSIM_METRICS=1`) | as `network-master` |
 | `legacy-slave` | `megaatmega2560` | atmelavr | 9600 | `../legacy/slave/` | `paulstoffregen/OneWire@^2.3.8`, `milesburton/DallasTemperature@^4.0.6`, `robtillaart/HX711@^0.6.5`, `bblanchon/ArduinoJson@^6.21.0` |
 | `legacy-master` | `megaatmega2560` | atmelavr | 115200 | `../legacy/master/` | `paulstoffregen/OneWire@^2.3.8`, `milesburton/DallasTemperature@^4.0.6`, `bblanchon/ArduinoJson@^6.21.0` |
 
@@ -74,6 +76,12 @@ one subdirectory per environment; four environments build them: `pwm-50-hold`,
 `platform = native`, no Arduino dependency, run with `pio run -e db-contract -t exec`).
 By the project rules a test sketch is not a subsystem and gets no document of its
 own; these rows exist only because the build configuration defines them.
+
+The two `-metrics` environments use `extends`, so they inherit every setting
+of their base (board, libraries, the WT32 passthrough upload hook) and only
+add the `RUSIM_METRICS` flag; `display-v9-metrics` repeats
+`${env:display-v9.build_flags}` because `build_flags` is replaced, not merged.
+They are the builds flashed for report data runs (`verification-toolkit.md`).
 
 `legacy-slave` is the one exception to the `firmware/` layout: its source sits in
 `legacy/slave/`, outside `src_dir`, and the filter reaches it with `+<../legacy/slave/>`.
@@ -176,4 +184,4 @@ portal reconnaissance.
 - `calibration.md` — human-recorded calibration results.
 
 ---
-Updated at 2026-11-19-11:52.
+Updated at 2026-11-24-12:34.
