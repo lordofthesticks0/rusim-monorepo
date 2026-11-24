@@ -89,8 +89,11 @@ viewport), `fetch` (duration, rows and age of the newest sample for
 `fetchReadings` and `fetchExperimentReadings`) and `render` (data handed to
 React -> two animation frames later, i.e. after the browser painted it).
 Chrome adds `heap_bytes`. `copy(window.__rusimMetricsCsv())` in the console
-copies all records as CSV. Used for the report's dashboard measurements
-(`verification-toolkit.md` §6.7).
+copies all records as CSV. Every record is also POSTed (`fetch`, `no-cors`,
+`text/plain`, errors ignored) to `http://127.0.0.1:8787/` or to the port in
+`?metrics=<port>`, where `verification/dashboard-log.ts` stores it. With no
+receiver running the request fails silently and the page is unaffected. Used
+for the report's dashboard measurements (`verification-toolkit.md` §6.7).
 
 ## 3. The database
 
@@ -801,4 +804,4 @@ The Compare tab overlays up to four (experiment, chamber) series on one chart wi
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Updated at 2026-11-24-12:34.
+Updated at 2026-11-24-15:50.

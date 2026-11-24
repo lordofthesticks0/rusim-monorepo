@@ -125,7 +125,7 @@ Display USB console (metrics build):
 | `REBOOT` | `ESP.restart()` (software reset) |
 | `BOOTLOG` | re-prints the `RESET` and `BOOT` lines of this boot with `replay=1` |
 | `HEAPCHK` | `heap_caps_check_integrity_all()`. Walks every heap block: on a corrupted heap it may hang or reset the board, which is the finding (`plans-and-audits/display-info-reboot.md`) |
-| `MEM` | existing O(1) heap/PSRAM counters (all builds) |
+| `MEM` | prints free, min and `maxblock` for heap and PSRAM (all builds). `maxblock` calls `getMaxAllocHeap()`/`getMaxAllocPsram()`, which walk the heap: in the 2026-11-24 smoke test 2 of 3 `MEM` commands sent by `--every "60:MEM"` were followed within 400 ms by an `int_wdt` reset. Do not send it during a run; the periodic `MET MEM` line has the safe counters |
 | `W32CMD <line>` | sends one line to the WT32 (`IS_DEBUG` builds) |
 
 WT32 `DBG` words, sent as `W32CMD DBG <word> [arg]` (metrics build only; every
@@ -157,7 +157,7 @@ Type-check them with `dashboard/node_modules/.bin/tsc -p verification/tsconfig.j
 
 | Tool | Purpose | Output |
 |---|---|---|
-| `capture.ts` | records the display USB console with host timestamps; markers from stdin; periodic commands (`--every "60:MEM"`) | `runs/<run>/raw.log`, `meta.json` (the test-run log: operator, git commit and dirty flag, firmware envs, latest local migration, interval, experiment, bottles, network) |
+| `capture.ts` | records the display USB console with host timestamps; markers from stdin; periodic commands (`--every <s>:<cmd>`; never `MEM`, see §4) | `runs/<run>/raw.log`, `meta.json` (the test-run log: operator, git commit and dirty flag, firmware envs, latest local migration, interval, experiment, bottles, network) |
 | `analyze.ts` | turns one or more runs into tables and CSVs | `runs/<run>/analysis/summary.md`, `summary.json`, `touch.csv`, `boot.csv`, `internal_latency.csv`, `poll.csv`, `enq.csv`, `http.csv`, `pass.csv`, `db_state.csv`, `net_state.csv`, `episodes.csv`, `link_*.csv`, `loop_wt32.csv`, `mem_*.csv`, `clock_wt32.csv`, `fps.csv`, `hold.csv`, `backoff.csv` |
 | `boot-loop.ts` | N boots by command or by manual power cycle | `boot-loop.csv`, `boot-loop.md` |
 | `fake-slave.ts` | answers `#1:PING*` in place of the Mega with scripted scenarios | `expected.csv` |
@@ -165,6 +165,7 @@ Type-check them with `dashboard/node_modules/.bin/tsc -p verification/tsconfig.j
 | `db-check.ts` | runs `sql/*.sql` inside a READ ONLY transaction | `db-<suite>.md`, `.json` |
 | `db-replay.ts` | live `push_readings` contract test (writes test rows) | `db-replay.md` |
 | `dashboard-load.ts` | concurrent viewers repeating the dashboard's reads | `dashboard-load.md`, `requests.csv` |
+| `dashboard-log.ts` | local receiver for the dashboard's `?metrics` records | `runs/<stamp>-dashboard/dashboard.jsonl`, `dashboard.csv` |
 
 Serial ports: the display's CH340 resets the board when opened by pyserial or a
 plain `pio device monitor`. The tools configure the port with `stty` and open
@@ -228,7 +229,7 @@ bun verification/analyze.ts verification/runs/<stamp>-<name>
   `getMaxAllocPsram()` walk every heap block under the spinlock and trip the
   interrupt watchdog when the heap is corrupt
   (`plans-and-audits/display-info-reboot.md`), so they are never sampled
-  periodically. Fragmentation is judged with `HEAPCHK` or the console `MEM`.
+  periodically. Fragmentation is judged with `HEAPCHK`; the console `MEM` also walks the heap (§4) and is not sampled during a run.
 
 ### 6.2 Internal data latency (Table 2.1 #2)
 
@@ -360,6 +361,14 @@ latency can only be estimated from the WT32 side (`ENQ` -> `ACK`).
   (data arrival -> next painted frame); `copy(window.__rusimMetricsCsv())`
   copies them as CSV. The deployed Netlify site is frozen on an older build,
   so measure on `bun run dev` or `bun run preview`.
+- Automatic logging: start `bun verification/dashboard-log.ts` (default port
+  8787, `--port`/`--out`/`--quiet`) before opening the page. The dashboard
+  POSTs every record to it, and it writes `dashboard.jsonl` (one record per
+  line, with the host receive time) and `dashboard.csv` (all fields) to
+  `runs/<stamp>-dashboard/`; stop it with Ctrl+C. Open `?metrics=<port>` for a
+  non-default port. Start the receiver first: records sent while it is not
+  running are lost (they stay in `window.__rusimMetrics`). The browser console
+  shows a failed-request error for each record in that case.
 - Data age and Live/Concluded flip: `newest_age_s` on each poll (every 5 min
   30 s). The 10 min Concluded threshold must stay well above the run's
   `sample_interval_s`.
@@ -427,4 +436,4 @@ and never used it: rows were always enqueued once per 30 s. Now
 - `dashboard.md` — the app, `dev-db`, row caps.
 
 ---
-Updated at 2026-11-24-15:10.
+Updated at 2026-11-24-15:50.

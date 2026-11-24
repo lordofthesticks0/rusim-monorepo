@@ -140,5 +140,14 @@ the same shells as the rest of `scripts-hardware/`.
 - [flash-factory-tool.md](flash-factory-tool.md) — the other hardware script
   in `scripts-hardware/`.
 
+
+## Keep-alive
+
+The slave streams on USB only while it keeps receiving bytes (see
+`legacy-slave.md` §5.4). The wrapper sends a newline every 5 s through a second
+write handle on the port, so the stream continues. The slave ignores the
+newline. If the Mega was just reset, the first output appears within about 5 s
+of the end of its setup.
+
 ---
-Updated at 2026-11-17-23:47.
+Updated at 2026-11-24-13:00.

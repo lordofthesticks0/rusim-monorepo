@@ -14,7 +14,7 @@ Source: `legacy/slave/new-slave.cpp`. Build environment: `[env:legacy-slave]` in
    starts three DS18B20 buses, and probes the four HX711 pressure ADCs.
 2. `loop()` samples every sensor into a set of cached arrays.
 3. On `#1:PING*`, it serialises the cache to the port the PING arrived on.
-4. Independently, it serialises the cache to USB every 1000 ms.
+4. Independently, it serialises the cache to USB every 5000 ms, only while a USB host is sending bytes (§5.4).
 
 Sampling is continuous and free-running. A PING never triggers a measurement; it
 only reports the most recent cached values. This keeps the reply fast and makes
@@ -276,6 +276,9 @@ One JSON object followed by `\n`:
 
 | Field | Type | Unit | Invalid marker |
 |---|---|---|---|
+| `rst` | integer | bit mask | top level, before `bottles`. Reset cause of the last boot: 1 power-on, 2 external, 4 brown-out, 8 watchdog. 0 if the bootloader cleared it first |
+| `up_ms` | integer | ms | top level. Time since boot. A small value that was larger earlier means the Mega reset |
+| `free_ram` | integer | bytes | top level. Gap between heap and stack. Shrinking over time means a leak; near 0 means stack overflow |
 | `id` | integer | — | never invalid |
 | `ph` | float | pH units (see §4.1) | `-1` |
 | `ph_raw` | float | ADC counts (averaged, 0-1023, before conversion) | `-1` |
@@ -284,9 +287,18 @@ One JSON object followed by `\n`:
 | `co2` | integer | ppm | `-1` |
 | `press` | float | Pa | `-1` |
 
+The three diagnostic fields are written before `"bottles"` on purpose: the WT32
+parser (`sens_report_round`) starts at the first `"id":` key and ignores them.
+They add about 45 bytes, so a reply stays near 430 bytes (WT32 cap is 512).
+If a reply is cut off, compare `up_ms` and `rst` of the last good frame with the
+next one to tell a Mega reset from a wiring fault.
+
 `StaticJsonDocument<1536>` holds the whole document on the stack. The four-bottle
 object measures well under that, and the build reports 1056 bytes of static RAM
 used out of 8192.
+
+The request parser (`handlePingStream`) uses a fixed 16-byte buffer, not
+`String`, so it never allocates heap on the 8 KB chip.
 
 ### 5.3 Which port gets the reply
 
@@ -297,13 +309,32 @@ gets its answer on RS485.
 
 ### 5.4 USB stream
 
-`serviceUsbTelemetry()` emits the same JSON to `Serial` every 1000 ms, whether or
+`serviceUsbTelemetry()` emits the same JSON to `Serial` every 5000 ms while a host is present
+(`USB_STREAM_INTERVAL_MS`; it was 1000 ms, which kept the loop transmitting
+about 45 % of the time at 9600 baud), whether or
 not a master is attached. It is called from several points in `loop()` so the
 cadence survives the multi-second CO2 and pressure passes rather than slipping to
 one message per full cycle.
 
 `setup()` prints `{"status":"ready"}` after sensor init. If that line never
 appears, the board did not finish `setup()` — check the HX711 path first (§4.4).
+
+**Stream on request.** The Mega cannot detect a USB host, because the
+USB-serial bridge gives the MCU no signal. Instead, any byte received on
+`Serial` marks the host as present for 30 s (`USB_HOST_TIMEOUT_MS`). With no
+USB bytes, `serviceUsbTelemetry()` prints nothing, so an unattended Mega spends
+no time on USB. After a reset the stream is silent until a byte arrives. In a
+serial monitor, press Enter (or send a PING) at least every 30 s.
+`scripts-hardware/read-legacy-slave.ts` sends a newline every 5 s for this.
+A PING typed on USB is answered at once regardless of the stream state.
+
+**Poll guard.** The slave measures the gap between PINGs on `Serial1`
+(`masterPeriodMs`, accepted from 0.5 s to 60 s). When the next PING is due
+within 600 ms (or was due up to 150 ms ago), `serviceUsbTelemetry()` returns
+without printing and leaves `lastUsbStreamMs` unchanged. The print therefore
+happens right after the window, not later by a full interval. The guard is off
+until two PINGs have been seen, and again after 3 missed periods, so the USB
+stream still runs with no master attached. PINGs typed on USB do not count.
 
 To read the stream as a per-bottle table, run
 `bun scripts-hardware/read-legacy-slave.ts`; see
@@ -359,4 +390,4 @@ valid cached reading.
 - `plans-and-audits/esp-db-sync.md` §3 — the planned Modbus replacement for this program.
 
 ---
-Updated at 2026-11-23-16:40.
+Updated at 2026-11-24-13:00.

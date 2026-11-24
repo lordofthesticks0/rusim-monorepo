@@ -22,7 +22,7 @@
  * are not hidden or translated.
  */
 
-import { createReadStream } from "node:fs";
+import { createReadStream, openSync, writeSync } from "node:fs";
 
 type Bottle = {
   id?: number;
@@ -274,6 +274,19 @@ async function readSerial(): Promise<number> {
   console.error(`Opened ${port} at ${baud} baud.`);
 
   const stream = createReadStream(port, { highWaterMark: 256 });
+
+  // The slave only streams while it keeps receiving bytes on USB (it cannot
+  // detect a host). Send a newline every 5 s; the slave ignores it as noise.
+  // The write fd is opened after the read stream, so it does not reset the board.
+  const keepAliveFd = openSync(port, "w");
+  const keepAlive = setInterval(() => {
+    try {
+      writeSync(keepAliveFd, "\n");
+    } catch {
+      /* port closed */
+    }
+  }, 5000);
+  stream.on("close", () => clearInterval(keepAlive));
   const decoder = new TextDecoder();
   const buffer = { text: "" };
 
@@ -309,6 +322,7 @@ async function readSerial(): Promise<number> {
   };
 
   const stop = () => {
+    clearInterval(keepAlive);
     if (warmupTimer) clearTimeout(warmupTimer);
     gate.clear();
     stream.destroy();

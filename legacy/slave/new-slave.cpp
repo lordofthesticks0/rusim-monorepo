@@ -1,7 +1,8 @@
 /*
  * PROJECT: Bio-Array Slave (ID 1) - Calibrated Multi-Sensor Firmware
  * PROTOCOL: Responds to "#1:PING*" on Serial1 with 4-Bottle JSON Telemetry.
- *           The same JSON is streamed to USB serial (Serial) once per second.
+ *           The same JSON is streamed to USB serial (Serial) every 5 s, but
+ *           only while the host has sent a byte within the last 30 s.
  */
 
 #include <Arduino.h>
@@ -9,6 +10,31 @@
 #include <DallasTemperature.h>
 #include <HX711.h>
 #include <ArduinoJson.h>
+#include <avr/io.h>
+
+// ==========================================
+// DIAGNOSTICS (reset cause, uptime, free RAM)
+// ==========================================
+// MCUSR is cleared by the bootloader on some boards, so it is copied in
+// .init3, before main() and before the bootloader's value is lost. Bits:
+// 1 power-on, 2 external reset, 4 brown-out, 8 watchdog. 0 means the
+// bootloader already cleared it; a small up_ms then still shows a reset.
+uint8_t resetCause __attribute__((section(".noinit")));
+void captureResetCause(void) __attribute__((naked, used, section(".init3")));
+void captureResetCause(void) {
+  resetCause = MCUSR;
+  MCUSR = 0;
+}
+
+// Bytes between the heap top and the stack pointer. A value that keeps
+// shrinking means a leak; a value near 0 means the stack is about to hit
+// the heap and corrupt data.
+extern int *__brkval;
+int freeRam() {
+  char top;
+  extern char *__malloc_heap_start;
+  return (int)(&top - (__brkval ? (char *)__brkval : __malloc_heap_start));
+}
 
 // ==========================================
 // 1. SLAVE & PIN CONFIGURATION
@@ -136,8 +162,23 @@ bool pingHandledDuringCo2   = false;
 
 // USB telemetry stream cadence. The same JSON sent on an RS485 PING is also
 // printed to the USB serial port at this interval, without a master present.
-const unsigned long USB_STREAM_INTERVAL_MS = 1000;
+// Each print blocks the loop for ~0.45 s at 9600 baud, so 1 s kept the CPU
+// busy transmitting almost half of the time. 5 s leaves it free.
+const unsigned long USB_STREAM_INTERVAL_MS = 5000;
 unsigned long lastUsbStreamMs = 0;
+
+// Master poll timing, learned from the RS485 (Serial1) PINGs. The USB print
+// is held back while the next poll is due, so it cannot delay the reply.
+const unsigned long POLL_GUARD_BEFORE_MS = 600;  // longer than one USB print (~0.45 s)
+const unsigned long POLL_GUARD_AFTER_MS  = 150;
+// USB stream on request: the Mega cannot detect a USB host (the bridge chip
+// gives it no signal), so any byte received on Serial counts as "someone is
+// listening" for USB_HOST_TIMEOUT_MS. Without bytes the stream stays silent.
+const unsigned long USB_HOST_TIMEOUT_MS = 30000;
+unsigned long lastUsbHostMs = 0;
+bool usbHostSeen = false;
+unsigned long lastMasterPingMs = 0;
+unsigned long masterPeriodMs   = 0;   // 0 until two PINGs have been seen
 
 // Forward declarations
 void serviceMasterPing();
@@ -361,32 +402,62 @@ void updatePhAndTemp() {
 void handlePingStream(Stream &port) {
   if (!port.available()) return;
 
-  String msg = "";
+  // Fixed buffer instead of String: no heap allocation on an 8 KB chip.
+  char msg[16];
+  uint8_t len = 0;
   unsigned long start = millis();
 
   // 50ms window to capture complete "#1:PING*" frame
   while (millis() - start < 50) {
     if (port.available()) {
       char c = port.read();
-      if (c == '*') break;
-      msg += c;
-    }
-  }
-
-  int hashPos = msg.indexOf('#');
-  if (hashPos >= 0) {
-    msg = msg.substring(hashPos);
-    int colonPos = msg.indexOf(':');
-    if (colonPos > 0) {
-      byte targetID = msg.substring(1, colonPos).toInt();
-      String command = msg.substring(colonPos + 1);
-      command.trim();
-
-      if (targetID == SLAVE_ID && command == "PING") {
-        sendTelemetryJson(port);
+      if (&port == &Serial) {
+        usbHostSeen = true;
+        lastUsbHostMs = millis();
       }
+      if (c == '*') break;
+      if (len < sizeof(msg) - 1) msg[len++] = c;
     }
   }
+  msg[len] = '\0';
+
+  // Expected form: "#<id>:<command>"; anything before '#' is ignored.
+  char *hash = strchr(msg, '#');
+  if (hash == nullptr) return;
+  char *colon = strchr(hash, ':');
+  if (colon == nullptr || colon == hash + 1) return;
+  *colon = '\0';
+  const byte targetID = (byte)atoi(hash + 1);
+  const char *command = colon + 1;
+  while (*command == ' ') command++;
+
+  if (targetID == SLAVE_ID && strncmp(command, "PING", 4) == 0 &&
+      (command[4] == '\0' || command[4] == ' ' || command[4] == '\r' ||
+       command[4] == '\n')) {
+    if (&port == &Serial1) {
+      const unsigned long now = millis();
+      if (lastMasterPingMs != 0) {
+        const unsigned long gap = now - lastMasterPingMs;
+        // Accept only plausible poll periods (0.5 s to 60 s).
+        if (gap >= 500UL && gap <= 60000UL) masterPeriodMs = gap;
+      }
+      lastMasterPingMs = now;
+    }
+    sendTelemetryJson(port);
+  }
+}
+
+// True when the master's next PING is expected within the guard window, so a
+// 0.45 s USB print started now could make the reply wait. False when no
+// master has been seen or it has gone quiet (3 missed periods).
+bool masterPollImminent() {
+  if (masterPeriodMs == 0) return false;
+  const unsigned long now = millis();
+  if (now - lastMasterPingMs > 3 * masterPeriodMs) return false;
+  const unsigned long sinceLast = now - lastMasterPingMs;
+  if (sinceLast + POLL_GUARD_BEFORE_MS >= masterPeriodMs &&
+      sinceLast <= masterPeriodMs + POLL_GUARD_AFTER_MS) return true;
+  return false;
 }
 
 void serviceMasterPing() {
@@ -397,12 +468,22 @@ void serviceMasterPing() {
 void serviceUsbTelemetry() {
   unsigned long now = millis();
   if (now - lastUsbStreamMs < USB_STREAM_INTERVAL_MS) return;
+  // No USB bytes for 30 s: nobody is listening, so skip the 0.45 s print.
+  if (!usbHostSeen || now - lastUsbHostMs > USB_HOST_TIMEOUT_MS) return;
+  // Defer (do not skip): lastUsbStreamMs is untouched, so the print happens
+  // as soon as the guard window has passed.
+  if (masterPollImminent()) return;
   lastUsbStreamMs = now;
   sendTelemetryJson(Serial);
 }
 
 void sendTelemetryJson(Stream &port) {
   StaticJsonDocument<1536> doc;
+  // Diagnostics come BEFORE "bottles": the WT32 parser starts at the first
+  // "id" key, so these fields are skipped by it.
+  doc["rst"]     = resetCause;
+  doc["up_ms"]   = millis();
+  doc["free_ram"] = freeRam();
   JsonArray bottles = doc.createNestedArray("bottles");
 
   for (int i = 0; i < NUM_BOTTLES; i++) {

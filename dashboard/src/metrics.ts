@@ -5,6 +5,9 @@
  * pay nothing. When on, each record is printed to the console as
  * `[metrics] {...}` and kept in `window.__rusimMetrics`; run
  * `copy(window.__rusimMetricsCsv())` in the browser console to copy them as CSV.
+ * Each record is also POSTed to the local receiver `verification/dashboard-log.ts`
+ * (127.0.0.1:8787, or the port in `?metrics=<port>`); when it is not running
+ * the request fails silently and nothing else changes.
  *
  * Recorded: page navigation timing, every readings fetch (duration, rows,
  * age of the newest sample), the time from data arrival to the next painted
@@ -23,6 +26,30 @@ declare global {
 export const metricsEnabled =
   typeof window !== "undefined" && new URLSearchParams(window.location.search).has("metrics");
 
+/** Port of the local receiver: `?metrics=<port>` or 8787. */
+function sinkUrl(): string {
+  const value = new URLSearchParams(window.location.search).get("metrics");
+  const port = value && /^\d{2,5}$/.test(value) ? value : "8787";
+  return `http://127.0.0.1:${port}/`;
+}
+
+/** Best-effort copy of a record to verification/dashboard-log.ts. Never throws. */
+function sendToSink(record: MetricRecord): void {
+  try {
+    // text/plain + no-cors is a "simple" request: no preflight, and a refused
+    // connection (receiver not running) only rejects the promise.
+    void fetch(sinkUrl(), {
+      method: "POST",
+      mode: "no-cors",
+      keepalive: true,
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify(record),
+    }).catch(() => {});
+  } catch {
+    // logging must never affect the page
+  }
+}
+
 function heapBytes(): number | null {
   const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
   return memory ? memory.usedJSHeapSize : null;
@@ -34,6 +61,7 @@ export function recordMetric(kind: string, fields: Record<string, string | numbe
   window.__rusimMetrics ??= [];
   window.__rusimMetrics.push(record);
   console.info("[metrics]", JSON.stringify(record));
+  sendToSink(record);
 }
 
 /** Seconds between now and the newest timestamp in `rows`, or null when empty. */
