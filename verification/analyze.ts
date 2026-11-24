@@ -365,7 +365,7 @@ md.push(`Records: ${raw.length} lines, ${met.length} MET lines, ${linkIn.length}
   for (const src of ["display", "wt32"] as const) {
     const mem = of(src, "MEM");
     if (mem.length === 0) continue;
-    const keys = src === "display" ? ["heap_free", "heap_min", "heap_maxblock", "psram_free", "psram_min", "psram_maxblock"] : ["free", "min", "maxblock"];
+    const keys = src === "display" ? ["heap_free", "heap_min", "psram_free", "psram_min"] : ["free", "min", "maxblock"];
     csv(`mem_${src}.csv`, ["host_s", "uptime_s", ...keys], mem.map((m) => [rel(m.hostMs), m.f.uptime_s, ...keys.map((k) => m.f[k])]));
     md.push(`## Memory, ${src} (bytes; slope = bytes per hour, negative = shrinking)`, "", "| Counter | first | last | min | slope /h |", "|---|---|---|---|---|");
     const hours = mem.map((m) => m.hostMs / 3600000);

@@ -29,6 +29,23 @@ import { parseArgs, summarize, summaryRow, SUMMARY_HEADER, toCsv } from "./lib/s
 const REPO = resolve(import.meta.dir, "..");
 const { flags } = parseArgs(process.argv.slice(2));
 const one = (k: string, d: string) => flags[k]?.at(-1) ?? d;
+
+if (flags.help) {
+  console.log(`Usage: bun verification/boot-loop.ts [options]
+  --board display|wt32  board under test (default: display)
+  --method command|manual
+                        command: software restart (console REBOOT / DBG REBOOT)
+                        manual: the operator power-cycles when prompted (default: command)
+  --reps <n>            repetitions (default: 20)
+  --until <stage>       milestone that ends a boot
+                        (default: touch_ready for display, ready for wt32)
+  --timeout-s <n>       per-boot timeout (default: 30 display, 240 wt32)
+  --gap-s <n>           pause between boots (default: 5)
+  --port <path>         display USB port (default: the single USB serial port)
+  --out <dir>           default verification/runs/<UTC stamp>-boot-<board>-<method>`);
+  process.exit(0);
+}
+
 const board = one("board", "display");
 const method = one("method", "command");
 const reps = Number(one("reps", "20"));

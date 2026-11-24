@@ -89,7 +89,7 @@ own `millis()`/`micros()`; `_us` = microseconds, `_ms` = milliseconds.
 | `HOLD` | `event` (`start`/`commit`/`cancel`), `held_ms`, `route` | hold-to-confirm buttons |
 | `SENSRX` | `wseq` (WT32 seq), `seq` (display seq), `apply_us`, `render_us`, `noframe`, `route` | every `SENS` frame the UI applied |
 | `FPS` | `window_ms`, `frames`, `avg_render_us`, `max_render_us`, `px`, `idle_pct` | every 5 s with at least one frame |
-| `MEM` | `uptime_s`, `heap_free/min/maxblock`, `psram_free/min/maxblock` | every 60 s |
+| `MEM` | `uptime_s`, `heap_free/min`, `psram_free/min` | every 60 s |
 | `LINK` | `window_ms`, `rx`, per-word counts (`hello`, `loginreq`, `result`, `net`, `db`, `sens`, `log`, `other`), `gap`, `ovf`, `net_gap_max_ms`, `db_gap_max_ms`, `touch_drop` | every 60 s, then reset |
 | `HEAPCHK` | `ok`, `ms` | console `HEAPCHK` |
 
@@ -149,7 +149,10 @@ resynchronises on every pass.
 
 ## 5. Host tools
 
-All tools run with Bun from the repository root and print `--help`.
+All tools run with Bun from the repository root and print their usage when
+passed `--help` or when a required argument is missing. `capture.ts`,
+`boot-loop.ts` and `fake-slave.ts` exit 0 on `--help`; the rest have no
+dedicated help branch and exit 1 after printing usage.
 Type-check them with `dashboard/node_modules/.bin/tsc -p verification/tsconfig.json`.
 
 | Tool | Purpose | Output |
@@ -174,7 +177,10 @@ that start with `fault` and `restore` as fault-injection episodes (§6.4).
 
 Credentials: `db-check.ts` reads `DATABASE_URL`, `db-replay.ts` and
 `dashboard-load.ts` read `RUSIM_DEVICE_TOKEN`, all from the environment. None
-of them opens a `.env` file or prints a token.
+of them opens a `.env` file or prints a token. Bun itself loads a `.env` file
+from the directory it is started in, so copy `.env.example` (repository root)
+to `.env`, fill in both values, and run the tools from the repository root
+instead of exporting shell variables. `.env` is git-ignored.
 
 ## 6. Procedures
 
@@ -218,7 +224,11 @@ bun verification/analyze.ts verification/runs/<stamp>-<name>
   milestones (`net_up`, `db_ready`, `login_ok`) are reported separately.
 - **Heap and resets over 24 h.** `MEM` lines every 60 s; the summary gives
   first, last, minimum and the slope per hour. `HEAPCHK` at the start and the
-  end of a soak.
+  end of a soak. `MEM` carries counter-API values only: `getMaxAllocHeap()` and
+  `getMaxAllocPsram()` walk every heap block under the spinlock and trip the
+  interrupt watchdog when the heap is corrupt
+  (`plans-and-audits/display-info-reboot.md`), so they are never sampled
+  periodically. Fragmentation is judged with `HEAPCHK` or the console `MEM`.
 
 ### 6.2 Internal data latency (Table 2.1 #2)
 
@@ -417,4 +427,4 @@ and never used it: rows were always enqueued once per 30 s. Now
 - `dashboard.md` — the app, `dev-db`, row caps.
 
 ---
-Updated at 2026-11-24-12:34.
+Updated at 2026-11-24-15:10.

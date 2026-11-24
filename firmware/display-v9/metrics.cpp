@@ -400,12 +400,13 @@ void met_tick() {
   s_periodMs = nowMs;
   // O(1) counters only: ESP.getHeapSize()-style heap walks hang the board when
   // the heap is corrupted (docs/plans-and-audits/display-info-reboot.md).
+  // getMaxAllocHeap()/getMaxAllocPsram() are heap walks too (heap_caps_get_info
+  // -> tlsf_walk_pool), so they are deliberately absent; a 60 s sampler must
+  // not be able to trip the interrupt watchdog mid-run.
   Serial.printf(
-      "MET MEM uptime_s=%u heap_free=%u heap_min=%u heap_maxblock=%u psram_free=%u "
-      "psram_min=%u psram_maxblock=%u\n",
+      "MET MEM uptime_s=%u heap_free=%u heap_min=%u psram_free=%u psram_min=%u\n",
       (unsigned)(nowMs / 1000u), (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
-      (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getFreePsram(),
-      (unsigned)ESP.getMinFreePsram(), (unsigned)ESP.getMaxAllocPsram());
+      (unsigned)ESP.getFreePsram(), (unsigned)ESP.getMinFreePsram());
   Serial.printf(
       "MET LINK window_ms=%u rx=%u hello=%u loginreq=%u result=%u net=%u db=%u sens=%u "
       "log=%u other=%u gap=%u ovf=%u net_gap_max_ms=%u db_gap_max_ms=%u touch_drop=%u\n",
