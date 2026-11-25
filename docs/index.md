@@ -17,6 +17,7 @@ user instead.
 | [`dashboard/`](../dashboard/) | React + TypeScript + Vite dashboard, its Supabase project, and the dev database script. |
 | [`scripts-hardware/`](../scripts-hardware/) | Bun hardware tools and the PlatformIO WT32 passthrough upload hook. |
 | [`verification/`](../verification/) | Report data collection: serial capture, analysis, boot loop, fake Mega slave, fidelity check, SQL check suites, live write-contract test, dashboard load test. Runs land in `verification/runs/` (git-ignored). [verification-toolkit.md](verification-toolkit.md) |
+| [`video-demo/`](../video-demo/) | Rust/fframes project that renders the slow walkthrough video of the display-v9 UI from simulator snapshots. [video-demo.md](video-demo.md) |
 | [`platformio.ini`](../platformio.ini) | Every firmware build environment. |
 | [`docs/`](.) | All documentation, human and agent-written. |
 | [`docs/raspi-docs/`](raspi-docs/) | Documentation of the live Raspberry Pi `invitrocontroller` system: board, OS, kiosk, backend, firmware, logging, network. |
@@ -171,11 +172,6 @@ These describe boards rather than this project's code.
 | [`docs/hardware.md`](hardware.md) | PCB documentation: module pinouts, the full Mega pin map, sensors, MAX485 |
 | [`docs/calibration.md`](calibration.md) | Recorded calibration values and dates, per sensor |
 
-## 5a. Agent lessons
-
-- [learned-mistakes.md](learned-mistakes.md): corrections and lessons this agent
-  has been given in this repository.
-
 ## 6. Where new work belongs
 
 - Firmware change: read [platformio-environments.md](platformio-environments.md)
@@ -194,4 +190,4 @@ These describe boards rather than this project's code.
   and is indexed in section 3c.
 
 ---
-Updated at 2026-11-24-12:34.
+Updated at 2026-11-25-15:17.

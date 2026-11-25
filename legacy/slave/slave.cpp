@@ -45,7 +45,7 @@ const int NUM_BOTTLES = 4;
 const int PIN_PH[NUM_BOTTLES]        = {A2, A5, A8, A11};
 const int PIN_METHANE[NUM_BOTTLES]   = {A1, A4, A7, A10};
 const int PIN_TEMP[NUM_BOTTLES]      = {4, 7, 7, 22};
-const int PIN_CO2_PWM[NUM_BOTTLES]   = {14, 15, 16, 17};
+const int PIN_CO2_PWM[NUM_BOTTLES]   = {14, 16, 17, 15}; //analog lineup, a mistake, from bottles 1-4 -- A0, A3, A6, A9
 const int PIN_PRESS_OUT[NUM_BOTTLES] = {2, 5, 8, 11};
 const int PIN_PRESS_SCK[NUM_BOTTLES] = {3, 6, 9, 12};
 

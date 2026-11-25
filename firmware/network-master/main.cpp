@@ -1549,6 +1549,33 @@ static void sens_take(BottleReading& r, const char* begin, const char* end,
   valid++;
 }
 
+#if RUSIM_METRICS
+// Shows what a failed reply actually contained: the first and last bytes, with
+// non-printable bytes as '.', plus how many there were. Noise on the line gives
+// many of them; a cut or merged JSON reply stays readable.
+static void sens_met_raw() {
+  static const size_t kShow = 48;
+  unsigned nonPrint = 0;
+  for (size_t i = 0; i < sensRxLen; i++) {
+    const unsigned char c = (unsigned char)sensRx[i];
+    if (c < 32 || c > 126) nonPrint++;
+  }
+  auto show = [](const char* tag, size_t from, size_t n) {
+    char out[kShow + 1];
+    for (size_t i = 0; i < n; i++) {
+      const unsigned char c = (unsigned char)sensRx[from + i];
+      out[i] = (c < 32 || c > 126) ? '.' : (char)c;
+    }
+    out[n] = '\0';
+    MET("RAW %s=%s", tag, out);
+  };
+  const size_t n = sensRxLen < kShow ? sensRxLen : kShow;
+  MET("RAW nonprint=%u len=%u", nonPrint, (unsigned)sensRxLen);
+  show("head", 0, n);
+  show("tail", sensRxLen - n, n);
+}
+#endif
+
 // Counts a failed round. Only the first and then every 20th are logged, so a
 // disconnected Mega cannot flood the display's log.
 static void sens_log_failure(const char* why) {
@@ -1561,6 +1588,7 @@ static void sens_log_failure(const char* why) {
                                              : "other";
   MET("POLL ok=0 why=%s reply_ms=%u bytes=%u", code, (unsigned)s_metReplyMs,
       (unsigned)sensRxLen);
+  sens_met_raw();
 #endif
   if (sensRoundsFail == 1 || (sensRoundsFail % 20) == 0) {
     logf("[SENS] poll failed: %s (fail=%u)", why, (unsigned)sensRoundsFail);

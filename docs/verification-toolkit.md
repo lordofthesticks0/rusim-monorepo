@@ -52,6 +52,9 @@ pio run -e display-v9-metrics -t upload
 pio run -e network-master-metrics -t upload   # through the display's PASSTH tunnel, see link-serial-protocol.md §7
 ```
 
+While `PASSTH` is open, the display metrics build holds back its periodic `MET`
+output (`met_tick`), because those lines would corrupt a WT32 upload.
+
 With `RUSIM_METRICS` unset (all other environments), every hook is an empty
 inline function (display) or compiles to nothing (WT32), so production
 firmware is unchanged. Flash use measured on 2026-11-24: `network-master-metrics`
@@ -103,6 +106,7 @@ own `millis()`/`micros()`; `_us` = microseconds, `_ms` = milliseconds.
 | `RESET` | `reason` | once per boot |
 | `BOOT` | `stage`, `ms` | once per stage: `setup`, `eth_start`, `eth_link`, `got_ip`, `ntp`, `portal_ok`, `auth`, `ready`, `sens_first`, `enq_first`, `ack_first` |
 | `POLL` | `ok`, `why` (`timeout`, `overflow`, `nojson`, `nobottle`), `reply_ms`, `bytes`, `present`, `valid` | every Mega poll (5 s) |
+| `RAW` | `nonprint`, `len`; then `head=` and `tail=` (first and last 48 bytes, non-printable bytes shown as `.`) | after each failed Mega poll |
 | `SENSTX` | `seq`, `src` (`poll`/`snapshot`), `proc_us`, `bytes` | every `SENS` line sent |
 | `ENQ` | `unix`, `exp`, `rows`, `queued`, `drops`, `dt_ms` (spacing since the previous enqueue of the run, `-1` first), `period_ms` (configured) | every enqueued round |
 | `HTTP` | `op` (`auth`, `devices`, `device_config`, `experiments`, `latest`, `push`), `code`, `ms`, `tls_ms`, `req`, `resp`, `trunc` | every Supabase request |
@@ -436,4 +440,4 @@ and never used it: rows were always enqueued once per 30 s. Now
 - `dashboard.md` — the app, `dev-db`, row caps.
 
 ---
-Updated at 2026-11-24-15:50.
+Updated at 2026-11-25-09:00.

@@ -7,6 +7,7 @@
 #include <esp_system.h>
 #include <string.h>
 
+#include "link_serial.h"
 #include "ui_shell.h"
 
 // Verification instrumentation. Definitions and the analysis that consumes
@@ -350,6 +351,10 @@ void met_hold(const char *event, uint32_t heldMs) {
 static uint32_t s_periodMs = 0;
 
 void met_tick() {
+  // USB is a raw data tunnel during PASSTH (WT32 flashing). Any MET line
+  // printed now lands inside esptool's packets and breaks the upload.
+  if (link_serial_passthrough_active()) return;
+
   const uint32_t nowUs = micros();
   if (s_touch.armed) {
     const uint32_t age = nowUs - s_touch.t0Us;
