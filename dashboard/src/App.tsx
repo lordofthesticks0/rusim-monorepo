@@ -1,6 +1,6 @@
 // IMPORTANT: For AI agents, ALWAYS update the documentation in docs/dashboard.md whenever any changes are made.
 
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useAuth } from "./auth";
 import { useEntranceOnce, useIndicator } from "./motion";
 import { csvFileName, downloadCsv, toCsv } from "./csv";
@@ -73,12 +73,29 @@ const PARAMETER_DISPLAY: Record<ParameterName, string> = {
 
 function App() {
   const { session, signingIn, error: authError, signIn, signOut } = useAuth();
+  // True after a sign-in in this page load, so the dashboard fades in over the
+  // login screen instead of cutting to it. A stored session opens without it.
+  const [handoff, setHandoff] = useState(false);
+  // It is set before the attempt, so the dashboard's very first frame already
+  // carries the class and never flashes at full opacity.
+  const signInWithHandoff = useCallback(async (token: string) => {
+    setHandoff(true);
+    const ok = await signIn(token);
+    if (!ok) setHandoff(false);
+    return ok;
+  }, [signIn]);
 
   if (!session) {
-    return <LoginScreen signingIn={signingIn} error={authError} onSignIn={signIn} />;
+    return <LoginScreen signingIn={signingIn} error={authError} onSignIn={signInWithHandoff} />;
   }
 
-  return <Dashboard session={session} onSignOut={signOut} />;
+  // The wrapper always renders, so dropping the class never remounts the dashboard.
+  return <div
+    className={handoff ? "login-handoff" : undefined}
+    onAnimationEnd={(event) => { if (event.target === event.currentTarget) setHandoff(false); }}
+  >
+    <Dashboard session={session} onSignOut={signOut} />
+  </div>;
 }
 
 function BrandMark() {
@@ -133,17 +150,69 @@ function TitleLines({ lines }: { lines: string[] }) {
   return <>{lines.map((line, index) => <span className="line" key={index}><span>{line}</span></span>)}</>;
 }
 
+/** Ambient bubbles behind the login identity panel: size (px), column (%), duration (s), delay (s). Decorative only. */
+const LOGIN_BUBBLES: Array<[size: number, left: number, duration: number, delay: number]> = [
+  [10, 8, 14, 0], [6, 18, 11, 3.5], [14, 31, 17, 1.2], [8, 44, 12, 6],
+  [5, 55, 10, 2.4], [12, 67, 16, 4.8], [7, 78, 13, 0.6], [16, 88, 19, 7.2],
+];
+
+/** One quiet fermentation curve (gas rising, then levelling) drawn once on entrance. */
+const LOGIN_TRACE = "M0 92 C 60 91, 110 88, 160 78 S 250 46, 320 34 S 430 20, 520 17 S 610 15, 640 15";
+
+function ArrowIcon() {
+  return <svg className="btn-icon login-arrow" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 8h10M9 4l4 4-4 4" />
+  </svg>;
+}
+
+/** The reveal button's icon shows its action: a plain eye to show the token, a slashed eye (the slash draws in) to hide it. */
+function EyeIcon({ slashed }: { slashed: boolean }) {
+  return <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z" />
+    <circle cx="8" cy="8" r="2" />
+    <path className={`eye-slash${slashed ? " is-on" : ""}`} pathLength={1} d="M2.5 2.5l11 11" />
+  </svg>;
+}
+
+function LockIcon() {
+  return <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="7" width="10" height="7" rx="1.5" />
+    <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
+  </svg>;
+}
+
+/** The RuSim logo: the BrandMark glyph with the product wordmark beside it. */
+function RusimLogo() {
+  return <div className="rusim-logo">
+    <BrandMark />
+    <span className="rusim-logo-name">RuSim<small>In Vitro Rumen Simulator</small></span>
+  </div>;
+}
+
 /**
- * Decorative traces for the login page's sensor list. They carry no values;
- * they only show that each sensor is drawn as a line over time.
+ * Plays a short horizontal shake on an element when a sign-in attempt fails.
+ * The Web Animations API is used instead of a CSS class so the shake replays
+ * on every failure without remounting the input, which would drop its focus.
  */
-const SENSOR_TRACES: Record<ParameterName, string> = {
-  pH: "M0 14 C 30 13, 50 9, 80 10 S 130 16, 160 13 S 220 8, 260 9 S 320 12, 360 11",
-  Temp: "M0 12 C 40 12, 60 11, 100 11 S 160 12, 200 11 S 280 10, 360 10",
-  CO2: "M0 20 C 40 19, 70 15, 110 12 S 170 8, 210 7 S 290 4, 360 3",
-  CH4: "M0 21 C 50 21, 80 18, 120 16 S 180 10, 230 8 S 300 5, 360 4",
-  Pressure: "M0 16 C 30 15, 60 12, 90 13 S 150 9, 190 10 S 260 6, 300 7 S 340 5, 360 5",
-};
+function shake(element: HTMLElement | null) {
+  if (!element || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  element.animate(
+    [
+      { transform: "none" },
+      { transform: "translateX(-6px)" },
+      { transform: "translateX(5px)" },
+      { transform: "translateX(-3px)" },
+      { transform: "translateX(2px)" },
+      { transform: "none" },
+    ],
+    { duration: 360, easing: "cubic-bezier(0.36, 0.07, 0.19, 0.97)" },
+  );
+}
+
+/** Props that put an element into the entrance sequence at position `i` (styles.css `[data-enter-step]`). */
+function enterStep(i: number) {
+  return { "data-enter-step": true, style: { "--i": i } as CSSProperties };
+}
 
 function LoginScreen({
   signingIn,
@@ -155,61 +224,110 @@ function LoginScreen({
   onSignIn: (token: string) => Promise<boolean>;
 }) {
   const [token, setToken] = useState("");
+  const [reveal, setReveal] = useState(false);
+  const [capsLock, setCapsLock] = useState(false);
+  const [field, setField] = useState<HTMLDivElement | null>(null);
   const entering = useEntranceOnce();
+  const errorId = useId();
+  const year = new Date().getFullYear();
+
+  // auth.ts clears the error to "" before every attempt, so each failure is a new value and shakes once.
+  useEffect(() => {
+    if (error) shake(field);
+  }, [error, field]);
+
+  const trackCaps = (event: KeyboardEvent<HTMLInputElement>) => setCapsLock(event.getModifierState("CapsLock"));
 
   return <main className={`login-shell${entering ? " is-entering" : ""}`}>
-    <header className="login-header">
-      <div className="brand">
-        <BrandMark />
-        <span className="brand-name">RuSim <small>Telemetry</small></span>
+    <aside className="login-aside" aria-labelledby="login-product">
+      <div className="login-bubbles" aria-hidden="true">
+        {LOGIN_BUBBLES.map(([size, left, duration, delay], index) => <span
+          key={index}
+          style={{ "--s": `${size}px`, "--l": `${left}%`, "--t": `${duration}s`, "--d": `${delay}s` } as CSSProperties}
+        />)}
       </div>
-    </header>
 
-    <div className="login-main">
-      <section className="login-intro" aria-labelledby="login-intro-title">
-        <h1 id="login-intro-title"><TitleLines lines={["Telemetry for every", "in-vitro rumen chamber"]} /></h1>
-        <p className="login-lead" data-enter-step style={{ "--i": 0 } as CSSProperties}>
-          Watch each chamber of your RuSim device as it samples, compare chambers across experiments, and export finished runs as CSV.
+      <div className="lab-id" {...enterStep(0)}>
+        {/* One-colour emblem for the dark panel; public/unpad-mono.svg, see docs/dashboard.md §5.11. */}
+        <img className="unpad-logo" src="/unpad-mono.svg" width="44" height="44" alt="Universitas Padjadjaran" />
+        <span className="lab-divider" aria-hidden="true" />
+        <span className="lab-name">IAIS Lab<small>Teknik Elektro · Universitas Padjadjaran</small></span>
+      </div>
+
+      <div className="login-aside-body">
+        <p className="login-eyebrow" {...enterStep(0)}><span className="live-dot" aria-hidden="true" />RuSim · In-vitro rumen simulator</p>
+        <h1 id="login-product"><TitleLines lines={["In Vitro Rumen", "Fermentation Dashboard"]} /></h1>
+        <p className="login-lead" {...enterStep(1)}>
+          Real-time monitoring of every fermentation chamber, with experiment history, chamber comparison, and CSV export.
         </p>
-        <ul className="sensor-list" aria-label="Sensors in every chamber" data-enter-step style={{ "--i": 1 } as CSSProperties}>
-          {PARAMETER_NAMES.map((name, index) => <li className="sensor-row" key={name}>
-            <span>{PARAMETER_DISPLAY[name]}</span>
-            <span className="unit">{PARAMETER_UNITS[name] || "\u2013"}</span>
-            <svg viewBox="0 0 360 24" preserveAspectRatio="none" aria-hidden="true">
-              <path className={entering ? "draw" : undefined} pathLength={1} d={SENSOR_TRACES[name]} style={{ "--d": `${500 + index * 80}ms` } as CSSProperties} />
-            </svg>
-          </li>)}
+        <ul className="param-chips" aria-label="Measured parameters" {...enterStep(2)}>
+          {PARAMETER_NAMES.map((name) => <li key={name}>{PARAMETER_DISPLAY[name]}</li>)}
         </ul>
-      </section>
+      </div>
 
-      <section className="login-card" aria-labelledby="login-title" data-enter-step style={{ "--i": 1 } as CSSProperties}>
-        <div className="login-heading">
+      <svg className="login-trace" viewBox="0 0 640 110" preserveAspectRatio="none" aria-hidden="true">
+        <path className="login-trace-grid" d="M0 30H640M0 60H640M0 90H640" />
+        <path className={`login-trace-line${entering ? " draw" : ""}`} pathLength={1} d={LOGIN_TRACE} />
+      </svg>
+
+      <p className="login-aside-foot" {...enterStep(3)}>© {year} IAIS Lab, Departemen Teknik Elektro, Universitas Padjadjaran</p>
+    </aside>
+
+    <section className="login-panel" aria-labelledby="login-title">
+      <div className="login-form-wrap">
+        <div className="login-heading" {...enterStep(1)}>
+          <RusimLogo />
           <h2 className="login-title" id="login-title">Sign in</h2>
-          <p className="login-subtitle">Enter your device token to open its telemetry.</p>
+          <p className="login-subtitle">Enter the device token issued for your RuSim unit.</p>
         </div>
 
-        <form className="login-form" onSubmit={(event) => { event.preventDefault(); void onSignIn(token); }}>
-          <label className="login-field">Device token
-            <input
-              type="password"
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-              placeholder="Paste your device token"
-              autoComplete="current-password"
-              autoFocus
-              required
-            />
-          </label>
-          {error && <div className="login-error" role="alert">{error}</div>}
-          <button className={`btn primary login-submit${signingIn ? " is-busy" : ""}`} type="submit" disabled={signingIn || token === ""}>
-            {signingIn && <RefreshIcon />}
-            {signingIn ? "Checking token..." : "Sign in"}
+        <form className="login-form" onSubmit={(event) => { event.preventDefault(); if (!signingIn) void onSignIn(token); }} {...enterStep(2)}>
+          <div className="login-field" ref={setField}>
+            <label htmlFor="device-token">Device token</label>
+            <div className={`login-input${error ? " is-invalid" : ""}`}>
+              <input
+                id="device-token"
+                type={reveal ? "text" : "password"}
+                value={token}
+                onChange={(event) => setToken(event.target.value)}
+                onKeyDown={trackCaps}
+                onKeyUp={trackCaps}
+                onBlur={() => setCapsLock(false)}
+                placeholder="Paste your device token"
+                autoComplete="current-password"
+                spellCheck={false}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? errorId : undefined}
+                autoFocus
+                required
+              />
+              <button
+                type="button"
+                className="login-reveal"
+                onClick={() => setReveal((value) => !value)}
+                aria-label={reveal ? "Hide token" : "Show token"}
+                aria-pressed={reveal}
+              >
+                <EyeIcon slashed={reveal} />
+              </button>
+            </div>
+            <p className={`login-caps${capsLock ? " is-on" : ""}`} aria-live="polite">{capsLock ? "Caps Lock is on" : ""}</p>
+          </div>
+
+          {error && <div className="login-error" role="alert" id={errorId}>{error}</div>}
+
+          <button className={`btn primary login-submit${signingIn ? " is-busy" : ""}`} type="submit" disabled={signingIn || token === ""} aria-busy={signingIn}>
+            <span className="login-submit-label" key={signingIn ? "busy" : "idle"}>{signingIn ? "Verifying token" : "Sign in"}</span>
+            {signingIn ? <RefreshIcon /> : <ArrowIcon />}
           </button>
         </form>
 
-        <p className="login-hint">Your device token is exchanged for a 12-hour session scoped to its own device. The device token itself is never stored; only the session token is kept until you sign out or it expires.</p>
-      </section>
-    </div>
+        <p className="login-hint" {...enterStep(3)}>
+          <LockIcon />
+          <span>The token opens a 12-hour session scoped to its own device. The token itself is never stored in the browser.</span>
+        </p>
+      </div>
+    </section>
   </main>;
 }
 

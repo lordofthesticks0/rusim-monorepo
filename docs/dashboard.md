@@ -19,10 +19,11 @@ There is no UI framework, no state library, and no chart library. The chart is h
 | File | Lines | Responsibility |
 |---|---|---|
 | `index.tsx` | 5 | Mounts `<App/>` into `#root`, imports the stylesheet |
-| `index.html` | 18 | Page shell, fonts, theme colour, and favicon links |
+| `index.html` | 18 | Page shell, tab title ("In Vitro Rumen Fermentation Dashboard · IAIS Lab"), fonts, theme colour, and favicon links |
 | `public/favicon.svg` | 7 | Browser-tab icon: the `BrandMark` glyph on an off-white tile, served at `/favicon.svg` |
 | `public/favicon-32.png` | — | 32×32 raster fallback of the same mark for browsers without SVG favicon support |
-| `src/App.tsx` | 1343 | Everything visible: login screen, all three views, all components, all chart math |
+| `public/unpad-mono.svg` | 3 | One-colour Universitas Padjadjaran emblem for the login screen, black ink (§5.11) |
+| `src/App.tsx` | 1468 | Everything visible: login screen (§5.11), all three views, all components, all chart math |
 | `src/data.ts` | 278 | Every Supabase read, the auth RPCs, and the non-numbering domain logic |
 | `src/chambers.ts` | 58 | Maps stored 0-based bottle ids to displayed chamber numbers and splits current presence |
 | `src/history.ts` | 132 | Pure history helpers: reading sort, experiment/chamber selection, per-point details, chamber grouping, selection toggle |
@@ -31,7 +32,7 @@ There is no UI framework, no state library, and no chart library. The chart is h
 | `src/auth.ts` | 110 | Session lifecycle: localStorage persistence, expiry timer, retry backoff |
 | `src/supabase.ts` | 72 | Client construction, schema pinning, session header injection |
 | `src/csv.ts` | 95 | RFC 4180 CSV serialisation and download |
-| `src/styles.css` | 423 | All styling: design tokens, shell, presence strip, KPI strip, charts, tables, states, and the motion layer (§5.10) |
+| `src/styles.css` | 523 | All styling: design tokens, login screen, shell, presence strip, KPI strip, charts, tables, states, and the motion layer (§5.10) |
 | `src/motion.ts` | 95 | Motion helpers: the sliding tab and nav indicator (`useIndicator`) and the once-per-visit entrance flag (`useEntranceOnce`) |
 | `scripts/dev-db.ts` | 697 | Dev-only database seeding and token provisioning |
 | `supabase/migrations/*.sql` | 17 files | Schema, authentication, lockdown |
@@ -422,7 +423,7 @@ The look was redesigned with the `design-taste-frontend` skill. Its scripts deal
 | Sheet and panels | `#ffffff`, 1px `#e3e3de` edge |
 | Ink / muted | `#000000` / `#666662` |
 | Accent | `#2563eb` blue: selection, focus ring, the main chart line |
-| Primary button | black with white text |
+| Primary button | black with white text (the login button uses the accent instead, §5.11) |
 | Chart series | `--chart-1` blue `#2563eb`, `--chart-2` green `#0f8a6a`, `--chart-3` amber `#b86200`, `--chart-4` violet `#7c3aed` |
 | Type | Chivo (text and headings), Chivo Mono (ids, units, chamber numbers), from Google Fonts in `index.html` |
 | Radii | 4px controls, 6px panels, 10px sheet |
@@ -434,7 +435,10 @@ Status colours stay semantic: green for live and connected, amber for disconnect
 | Motion | Trigger | Duration | Where |
 |---|---|---|---|
 | Title rises out of a line mask, then the summary and content fade up 12px | First screen of the visit (login or dashboard), once | ~1.1 s in total | `.is-entering`, `useEntranceOnce()` |
-| Login sensor traces draw left to right | Login entrance | 900 ms, 80 ms apart | `.sensor-row path.draw` |
+| Login fermentation curve draws left to right | Login entrance | 1.6 s after 520 ms | `.login-trace-line.draw` |
+| Login bubbles rise through the identity panel | Always, while the login screen is open | 10–19 s loops | `.login-bubbles span` |
+| Login field shakes | A sign-in attempt fails | 360 ms | `shake()` (Web Animations API) |
+| Dashboard fades in over the login screen | A successful sign-in | 420 ms | `.login-handoff` |
 | New view settles in (fade, 6px rise) | Switching view | 260 ms | `.view-swap.is-swapping` |
 | Nav pill slides to the active view | Switching view | 240 ms | `.nav-indicator`, `useIndicator(…, "box")` |
 | Bar slides under the selected KPI cell or tab | Selecting a parameter or a History/Compare tab | 240 ms | `.tab-bar`, `useIndicator(…, "bar")` |
@@ -452,6 +456,44 @@ Status colours stay semantic: green for live and connected, amber for disconnect
 Hover motion applies only to a fine pointer (`@media (hover: hover) and (pointer: fine)`), so a phone never keeps a stuck hover state. Under `prefers-reduced-motion: reduce` every animation is off and only colour transitions remain, so all content is visible at once.
 
 **How the sliding indicator works.** `useIndicator()` receives the container through a callback ref, finds the child marked `aria-selected="true"` or `aria-current="page"`, and writes its offset and size to CSS variables on the one indicator element. Only `transform` animates. A bar uses a 100px element scaled with `scaleX(width / 100)`; the nav pill takes its size directly and only moves. The first placement, and any placement after a resize, jumps without a transition (`.is-jump`), so the indicator travels only when the selection changes. A callback ref is used because the KPI strip unmounts and mounts again when the view or the loading state changes.
+
+### 5.11 The login screen
+
+`LoginScreen()` in `App.tsx` renders two panes inside the same 8px frame the dashboard uses (`.login-shell`).
+
+| Pane | Content |
+|---|---|
+| Identity (`.login-aside`, left) | One-colour Universitas Padjadjaran emblem, a thin divider, then "IAIS Lab" and "Teknik Elektro · Universitas Padjadjaran"; the product name "In Vitro Rumen Fermentation Dashboard"; a one-line description; the five measured parameters as chips; a decorative fermentation curve; a copyright line |
+| Sign-in (`.login-panel`, right) | The RuSim logo (`RusimLogo`: the `BrandMark` glyph with the "RuSim / In Vitro Rumen Simulator" wordmark), the "Sign in" heading, the device-token field, the submit button, and a note on how the session works |
+
+The whole screen uses one flat background (`--ground`). The two areas are separated only by a 1px `--border` line: vertical on wide screens, horizontal under the identity area on narrow ones. There are no filled blocks or panels. The identity area defines `--aside-ink`, `--aside-muted`, `--aside-faint`, `--aside-line` and `--aside-accent` on `.login-aside`, mapped to the global tokens, so it can be re-tinted in one place. The only strong colour is the accent blue: the live dot, the fermentation curve, the field focus ring, and the sign-in button.
+
+**The Unpad emblem (`public/unpad-mono.svg`).** The original emblem has four colours: an orange field, black outlines and wings, white details, and a red flame and wheel. The one-colour file was derived from the colour SVG on Indonesian Wikipedia (`File:Lambang_Universitas_Padjadjaran.svg`, listed there as fair use) by a one-off conversion:
+
+1. Editor metadata (Inkscape attributes, ids, an unused full-page clip path) was removed.
+2. All shapes were moved into an SVG `<mask>`. In a mask, white shows and black hides. The orange shapes were filled black (hidden) and every other shape white (shown).
+3. A single rectangle filled `#000000` (the page text colour, `--text`) is drawn through that mask.
+
+So the orange field becomes transparent, the page background shows through, and the emblem is one ink colour that matches the text. The original drawing leaves gaps between the wings, the torch, and the wheel, so these stay distinct without a second colour. A plain `fill` swap would not work, because the orange layers are painted over full black pentagons: making orange transparent would reveal solid black underneath. The file is served from `public/` as an `<img>`, which the Content-Security-Policy allows (`img-src 'self'`). Because an `<img>` cannot read CSS variables, the ink colour is fixed in the file. A version for a dark background needs a second file with a light ink (run the same conversion with, for example, `#f4f4f2`). The comment at the top of the file must not contain `--`, which is illegal inside an XML comment and makes the browser reject the whole image. If the university provides an official one-colour emblem, it can replace this file under the same name.
+
+The `RusimLogo` glyph is the same `BrandMark` used in the sidebar and the favicon. The project has no separate RuSim logo file.
+
+**Field behaviour.**
+
+- The eye button toggles the input between `password` and `text`. Its icon shows the action: a plain eye means "show", a slashed eye means "hide". The slash draws in through `stroke-dashoffset`.
+- A typed token is shown in Chivo Mono with wider letter spacing, so characters are easy to check when revealed.
+- "Caps Lock is on" appears under the field while Caps Lock is active (`KeyboardEvent.getModifierState("CapsLock")`). It is announced through `aria-live`.
+- On a failed attempt the field border turns red, the error is linked to the input with `aria-describedby`, and the field shakes once. `auth.ts` clears the error to `""` before every attempt, so each failure is a new value and triggers a new shake. The shake uses `element.animate()` instead of a CSS class, so it replays without remounting the input and losing focus. It is skipped under `prefers-reduced-motion`.
+- The enabled sign-in button is accent blue (`--accent`), not the black primary used in the dashboard, so blue is the only strong colour on the screen. Disabled (empty field) it is grey. While verifying, it stays blue, shows "Verifying token" with a spinning icon, and a thin bar runs along its base.
+
+**Hand-off to the dashboard.** `App()` sets `handoff` to `true` just before calling `signIn()`, and back to `false` if the attempt fails. When the session arrives, the dashboard renders inside a wrapper with `.login-handoff`, which fades it in over 420 ms. Setting the flag before the attempt means the dashboard's first frame already has the class, so it never flashes at full opacity. The wrapper `div` is always rendered and only its class changes. Removing the wrapper would remount `Dashboard` and reset its state. A stored session (page reload) opens without the fade.
+
+**Layout by width.**
+
+| Width | Layout |
+|---|---|
+| > 860px | Two columns (identity 1.1fr, form 1fr); the form is centred, max 380px |
+| ≤ 860px | One column: the identity pane becomes a compact header without chips and curve; the form sits below it, the input uses 16px text so iOS does not zoom in, and the eye button grows to 44px |
 
 ## 6. From a row to a chart point
 
@@ -804,4 +846,4 @@ The Compare tab overlays up to four (experiment, chamber) series on one chart wi
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Updated at 2026-11-24-15:50.
+Updated at 2026-11-26-14:30.

@@ -285,32 +285,138 @@ select.input { height: var(--control-height); padding-right: 28px; }
 .loading-line::after { content: ""; position: absolute; inset: 0; width: 40%; background: var(--accent); animation: slide 1.1s var(--ease-io) infinite; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 
-/* ---------- login ---------- */
-.login-shell { min-height: 100svh; display: flex; flex-direction: column; padding: 24px 32px 32px; background: var(--ground); }
-.login-header { width: 100%; max-width: 1120px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.login-main { flex: 1; width: 100%; max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 440px); align-items: center; gap: 64px; padding: 40px 0; }
-.login-intro h1 { font-size: clamp(36px, 4.6vw, 60px); line-height: 1.02; font-weight: 400; letter-spacing: -0.04em; }
-.login-intro h1 em { font-style: normal; color: var(--accent); }
-.login-lead { margin-top: 20px; max-width: 46ch; color: var(--muted); font-size: 16px; line-height: 1.55; }
-.sensor-list { margin-top: 36px; max-width: 520px; border-top: 1px solid var(--border); }
-.sensor-row { display: grid; grid-template-columns: 120px 56px minmax(0, 1fr); align-items: center; gap: 16px; height: 48px; border-bottom: 1px solid var(--border); font-size: 13px; }
-.sensor-row .unit { font-family: var(--mono); color: var(--faint); font-size: var(--fs-small); }
-.sensor-row svg { width: 100%; height: 24px; overflow: visible; }
-.sensor-row path { fill: none; stroke: var(--text); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.sensor-row:first-child path { stroke: var(--accent); }
-.login-card { width: 100%; padding: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sheet); }
-.login-heading { margin-bottom: 24px; }
-.login-title { margin: 0 0 6px; font-size: 22px; line-height: 1.2; font-weight: 500; letter-spacing: -0.02em; }
-.login-subtitle { margin: 0; color: var(--muted); line-height: 1.55; }
+/* ---------- login ----------
+   One flat background for the whole screen (--ground), split into two areas
+   by a single 1px line: identity on the left (Universitas Padjadjaran emblem,
+   IAIS Lab, product name, an ambient fermentation motif) and sign-in on the
+   right. The only strong colour is the accent blue. The --aside-* tokens
+   below map to the global tokens, so the identity area can be re-tinted in
+   one place. Everything that loops here is decorative and rests under
+   prefers-reduced-motion (the global rule at the end of this file). */
+.login-shell { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); min-height: 100svh; background: var(--ground); }
+
+.login-aside {
+  --aside-ink: var(--text);
+  --aside-muted: var(--muted);
+  --aside-faint: var(--faint);
+  --aside-line: var(--border);
+  --aside-accent: var(--accent);
+  position: relative; isolation: isolate; overflow: hidden;
+  display: flex; flex-direction: column;
+  padding: 40px 56px 32px;
+  border-right: 1px solid var(--border);
+  color: var(--aside-ink);
+}
+
+.lab-id { display: flex; align-items: center; gap: 14px; }
+.unpad-logo { flex: none; width: 44px; height: 44px; object-fit: contain; }
+.lab-divider { flex: none; width: 1px; height: 32px; background: var(--aside-line); }
+.lab-name { font-weight: 600; font-size: 15px; line-height: 1.2; letter-spacing: -0.01em; }
+.lab-name small { display: block; margin-top: 3px; font-weight: 400; font-size: var(--fs-small); letter-spacing: 0; color: var(--aside-muted); }
+
+.login-aside-body { margin-top: auto; padding-top: 56px; max-width: 34rem; }
+.login-eyebrow { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 20px; font-family: var(--mono); font-size: var(--fs-small); color: var(--aside-muted); }
+.live-dot { position: relative; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--aside-accent); }
+.live-dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1.5px solid var(--aside-accent); opacity: 0; animation: ring 2.4s var(--ease) 1.2s infinite; }
+.login-aside h1 { font-size: clamp(34px, 3.7vw, 54px); line-height: 1.04; font-weight: 400; letter-spacing: -0.035em; }
+.login-lead { margin-top: 18px; max-width: 44ch; color: var(--aside-muted); font-size: 15px; line-height: 1.6; }
+.param-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 24px; }
+.param-chips li { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border: 1px solid var(--aside-line); border-radius: 999px; font-size: var(--fs-small); color: var(--aside-muted); transition: color var(--m-out) var(--ease), border-color var(--m-out) var(--ease), background-color var(--m-out) var(--ease); }
+
+.login-trace { width: 100%; height: 96px; margin-top: 40px; overflow: visible; }
+.login-trace-grid { fill: none; stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 6; vector-effect: non-scaling-stroke; }
+.login-trace-line { fill: none; stroke: var(--aside-accent); stroke-width: 1.75; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.login-trace-line.draw { animation: draw 1600ms var(--ease-enter) 520ms backwards; }
+
+.login-aside-foot { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--aside-line); font-size: var(--fs-small); line-height: 1.5; color: var(--aside-faint); }
+
+/* bubbles rise slowly through the panel. Negative delays start each one mid-flight. */
+.login-bubbles { position: absolute; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; animation: fade 1.2s var(--ease) 300ms backwards; }
+.login-bubbles span { position: absolute; bottom: -24px; left: var(--l); width: var(--s); height: var(--s); border-radius: 50%; border: 1px solid var(--border-strong); opacity: 0; animation: bubble var(--t) linear calc(var(--d) * -1) infinite; will-change: transform; }
+@keyframes bubble {
+  0% { transform: translate3d(0, 0, 0); opacity: 0; }
+  12% { opacity: 1; }
+  50% { transform: translate3d(8px, -50vh, 0); }
+  80% { opacity: 0.6; }
+  100% { transform: translate3d(-4px, -105vh, 0); opacity: 0; }
+}
+
+.login-panel { display: flex; align-items: center; justify-content: center; padding: 48px 32px; }
+.login-form-wrap { width: 100%; max-width: 380px; }
+.login-heading { margin-bottom: 28px; }
+.rusim-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 36px; }
+.rusim-logo .brand-mark { width: 36px; height: 36px; }
+.rusim-logo-name { font-weight: 600; font-size: 17px; line-height: 1.15; letter-spacing: -0.02em; }
+.rusim-logo-name small { display: block; margin-top: 2px; font-weight: 400; font-size: var(--fs-small); letter-spacing: 0; color: var(--muted); }
+.login-title { margin-bottom: 8px; font-size: 26px; line-height: 1.2; font-weight: 500; letter-spacing: -0.025em; }
+.login-subtitle { color: var(--muted); line-height: 1.55; }
+
 .login-form { display: grid; gap: 16px; }
-.login-field { display: grid; gap: 8px; width: 100%; color: var(--text); font-weight: 500; }
-.login-field input { width: 100%; height: 44px; padding: 0 12px; font: 400 var(--fs-body)/20px var(--font); color: var(--text); background: var(--surface); border: 1px solid var(--control); border-radius: var(--radius-control); transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease); }
-.login-field input::placeholder { color: var(--faint); }
-.login-field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 16%, transparent); }
-.login-error { display: flex; gap: 8px; padding: 10px 12px; border: 1px solid #f1d5d0; border-radius: var(--radius-control); background: #fdf3f2; color: #983a2c; font-size: var(--fs-small); line-height: 1.5; overflow-wrap: anywhere; }
+.login-field label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 500; transition: color var(--m-out) var(--ease); }
+.login-field:focus-within label { color: var(--accent); }
+.login-input { display: flex; align-items: center; height: 46px; background: var(--surface); border: 1px solid var(--control); border-radius: var(--radius-control); transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease); }
+.login-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 16%, transparent); }
+.login-input.is-invalid { border-color: color-mix(in oklab, var(--negative) 55%, var(--surface)); }
+.login-input.is-invalid:focus-within { border-color: var(--negative); box-shadow: 0 0 0 3px color-mix(in oklab, var(--negative) 14%, transparent); }
+.login-input input { flex: 1; min-width: 0; height: 100%; padding: 0 12px; border: 0; outline: none; background: transparent; font: 400 var(--fs-body)/20px var(--font); color: var(--text); }
+.login-input input::placeholder { color: var(--faint); }
+/* a typed token reads as evenly spaced mono characters, masked or not */
+.login-input input:not(:placeholder-shown) { font-family: var(--mono); letter-spacing: 0.06em; }
+.login-reveal { flex: none; display: grid; place-items: center; width: 38px; height: 38px; margin-right: 3px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--faint); cursor: pointer; transition: color var(--m-out) var(--ease), background-color var(--m-out) var(--ease), transform var(--m-press) var(--ease); }
+.login-reveal svg { width: 16px; height: 16px; }
+.login-reveal:active { transform: scale(0.92); }
+/* the slash draws across the eye while the token is shown */
+.eye-slash { stroke-dasharray: 1 1; stroke-dashoffset: 1; transition: stroke-dashoffset 220ms var(--ease); }
+.eye-slash.is-on { stroke-dashoffset: 0; }
+.login-caps { height: 0; overflow: hidden; font-size: var(--fs-small); line-height: 16px; color: var(--warning); opacity: 0; transform: translateY(-4px); transition: height var(--m-in) var(--ease), margin var(--m-in) var(--ease), opacity var(--m-in) var(--ease), transform var(--m-in) var(--ease); }
+.login-caps.is-on { height: 16px; margin-top: 8px; opacity: 1; transform: none; }
+
+.login-error { display: flex; gap: 8px; padding: 10px 12px; border: 1px solid #f1d5d0; border-radius: var(--radius-control); background: #fdf3f2; color: #983a2c; font-size: var(--fs-small); line-height: 1.5; overflow-wrap: anywhere; animation: pop 220ms var(--ease-enter) both; }
 .login-error::before { content: ""; flex: none; width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--negative); }
-.login-submit { width: 100%; height: 44px; }
-.login-hint { margin: 24px 0 0; padding-top: 18px; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--fs-small); line-height: 1.55; }
+
+.login-submit { position: relative; overflow: hidden; width: 100%; height: 46px; margin-top: 4px; gap: 10px; }
+.login-submit-label { animation: fade 180ms var(--ease) both; }
+.login-arrow { transition: transform var(--m-in) var(--ease); }
+/* the sign-in button uses the accent instead of the black primary, so blue is the screen's only strong colour. While verifying it keeps that colour and a thin bar runs along its base. */
+.btn.primary.login-submit:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+.btn.primary.login-submit.is-busy:disabled { background: var(--accent); color: var(--accent-ink); cursor: progress; }
+.login-submit.is-busy::after { content: ""; position: absolute; left: 0; bottom: 0; width: 40%; height: 2px; background: rgb(255 255 255 / 0.7); animation: slide 1.1s var(--ease-io) infinite; }
+
+.login-hint { display: flex; gap: 10px; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--fs-small); line-height: 1.55; }
+.login-hint svg { flex: none; width: 14px; height: 14px; margin-top: 2px; color: var(--faint); }
+
+/* after a sign-in the dashboard fades in over where the login screen was (opacity only, so the fixed drawer is unaffected) */
+.login-handoff { animation: fade 420ms var(--ease-enter) both; }
+
+@media (hover: hover) and (pointer: fine) {
+  .login-input:hover:not(:focus-within) { border-color: var(--border-strong); }
+  .login-input.is-invalid:hover:not(:focus-within) { border-color: color-mix(in oklab, var(--negative) 70%, var(--surface)); }
+  .login-reveal:hover { color: var(--text); background: var(--raised); }
+  .login-submit:hover:not(:disabled) .login-arrow { transform: translateX(3px); }
+  .btn.primary.login-submit:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 88%, #000); }
+  .param-chips li:hover { color: var(--aside-ink); border-color: var(--border-strong); background: var(--surface); }
+}
+
+@media (max-width: 1100px) {
+  .login-aside { padding: 32px 40px 26px; }
+}
+/* phone and narrow tablet: the identity panel becomes a compact header above the form */
+@media (max-width: 860px) {
+  .login-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .login-aside { padding: 24px 16px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .login-aside-body { margin-top: 0; padding-top: 32px; }
+  .login-aside h1 { font-size: 30px; }
+  .login-lead { font-size: 14px; }
+  .param-chips, .login-trace { display: none; }
+  .login-aside-foot { margin-top: 20px; padding-top: 14px; }
+  .login-panel { align-items: flex-start; padding: 32px 16px 24px; }
+  .login-form-wrap { max-width: 440px; margin: 0 auto; }
+  .rusim-logo { margin-bottom: 24px; }
+  .unpad-logo { width: 38px; height: 38px; }
+  .lab-divider { height: 28px; }
+  .login-input input { font-size: 16px; } /* 16px stops iOS from zooming into the field */
+  .login-reveal { width: 44px; height: 44px; margin-right: 0; }
+}
 
 /* =====================================================================
    Motion layer. Hover moves only for a fine pointer; keyboard focus shows
@@ -336,7 +442,7 @@ select.input { height: var(--control-height); padding-right: 28px; }
   .compare-remove:hover { background: var(--raised); color: var(--text); }
   .compare-remove:active { transform: scale(0.9); }
   .chart-point:hover { r: 5px; }
-  .input:hover:not(:focus), .login-field input:hover:not(:focus) { border-color: var(--border-strong); }
+  .input:hover:not(:focus) { border-color: var(--border-strong); }
 }
 
 /* entrance on load, once: the h1 rises out of its line mask, then what follows fades up 12px */
@@ -360,7 +466,7 @@ select.input { height: var(--control-height); padding-right: 28px; }
 @keyframes draw { from { stroke-dasharray: 1 1; stroke-dashoffset: 1; } to { stroke-dasharray: 1 1; stroke-dashoffset: 0; } }
 .chart-area.draw { animation: fade 600ms var(--ease) 300ms backwards; }
 .chart-points.draw { animation: fade 300ms var(--ease) 600ms backwards; }
-.kpi-spark path.draw, .sensor-row path.draw { animation: draw 900ms var(--ease-enter) backwards; animation-delay: var(--d, 0ms); }
+.kpi-spark path.draw { animation: draw 900ms var(--ease-enter) backwards; animation-delay: var(--d, 0ms); }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 .chart-tooltip-inner { animation: pop 140ms var(--ease) both; }
 @keyframes pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -372,7 +478,6 @@ select.input { height: var(--control-height); padding-right: 28px; }
   .kpi:not(:nth-of-type(3n + 1)) { border-left: 1px solid var(--border); }
   .kpi:nth-of-type(n + 4) { border-top: 1px solid var(--border); }
   .presence-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }
-  .login-main { grid-template-columns: minmax(0, 1fr) minmax(0, 400px); gap: 40px; }
 }
 @media (max-width: 860px) {
   :root { --pad: 16px; --fs-title: 26px; }
@@ -402,11 +507,6 @@ select.input { height: var(--control-height); padding-right: 28px; }
   .tabs button { min-height: 44px; }
   .nav-item { height: 44px; }
   .row-button .row-meta .row-date { display: none; }
-  .login-shell { padding: 20px 16px 28px; }
-  .login-main { grid-template-columns: minmax(0, 1fr); gap: 28px; padding: 32px 0 8px; align-items: start; }
-  .sensor-list { display: none; }
-  .login-card { padding: 24px 20px; }
-  .login-field input { font-size: 16px; }
 }
 @media (max-width: 480px) {
   .presence-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); }
