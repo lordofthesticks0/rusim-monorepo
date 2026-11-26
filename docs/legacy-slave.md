@@ -383,6 +383,7 @@ valid cached reading.
 
 ## 8. Related documents
 
+- `legacy-slave-flowchart.md` — flowcharts of every function group in this program.
 - `platformio-environments.md` — the `legacy-slave` environment.
 - `hardware.md` §4, §5 — Mega Mini pin map, sensor and MAX485 wiring.
 - `calibration.md` — historical human-recorded calibration notes.
@@ -390,4 +391,4 @@ valid cached reading.
 - `plans-and-audits/esp-db-sync.md` §3 — the planned Modbus replacement for this program.
 
 ---
-Updated at 2026-11-24-13:00.
+Updated at 2026-11-24-22:03.

@@ -67,6 +67,7 @@ documented. Test sketches in `firmware/tests/` are not subsystems.
 | [flash-factory-tool.md](flash-factory-tool.md) | `scripts-hardware/flash-factory.ts` and the factory image |
 | [captive-portal-login-script.md](captive-portal-login-script.md) | `legacy/pi/captive-portal-login.sh`: the firmware login sequence as a one-shot bash script |
 | [legacy-slave.md](legacy-slave.md) | `legacy/slave/new-slave.cpp`: 4-bottle sensor slave, JSON protocol, USB stream, HX711 init trap, known gaps |
+| [legacy-slave-flowchart.md](legacy-slave-flowchart.md) | `legacy/slave/new-slave.cpp`: 11 flowcharts (Mermaid source, Indonesian labels) for the report, rendered to `docs/img/legacy-slave-flowchart/` as SVG and PNG |
 | [legacy-master.md](legacy-master.md) | `legacy/master/master.cpp`: water-bath master firmware, MOSFET PWM pump and stirrer ramping, hysteresis, Pi USB serial commands |
 
 ## 3. Dashboard
@@ -190,4 +191,4 @@ These describe boards rather than this project's code.
   and is indexed in section 3c.
 
 ---
-Updated at 2026-11-25-15:17.
+Updated at 2026-11-26-07:57.
