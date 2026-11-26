@@ -1,0 +1,537 @@
+<template>
+  <style>
+    @font-face {
+      font-family: "Chivo";
+      src: url("assets/fonts/Chivo-Variable.woff2") format("woff2");
+      font-weight: 400 700;
+    }
+    @font-face {
+      font-family: "Chivo Mono";
+      src: url("assets/fonts/ChivoMono-Variable.woff2") format("woff2");
+      font-weight: 400 500;
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #f7f7f5;
+      font-family: "Chivo", sans-serif;
+      color: #000;
+    }
+    /* Camera rig. Page point (--cx, --cy) sits at the stage centre (960, 460) at scale --k.
+       GSAP tweens only these variables; the transforms below are plain CSS. */
+    #walk-rig {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 1080px;
+      --cx: 720;
+      --cy: 405;
+      --k: 1.12;
+      --px: 1700;
+      --py: 640;
+      --press: 1;
+    }
+    #walk-cam {
+      position: absolute;
+      left: 0;
+      top: 0;
+      transform-origin: 0 0;
+      transform: translate(960px, 460px) scale(var(--k));
+    }
+    #walk-world {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1440px;
+      height: 2689px;
+      transform: translate(calc(var(--cx) * -1px), calc(var(--cy) * -1px));
+    }
+    #walk-screens {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1440px;
+      height: 2689px;
+    }
+    .shot {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1440px;
+      height: 810px;
+      display: block;
+    }
+    .layer {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1440px;
+      height: 810px;
+    }
+    #walk-cover-bar {
+      position: absolute;
+      left: 921px;
+      top: 411px;
+      width: 150.5px;
+      height: 24px;
+      background: #ffffff;
+      transform-origin: 100% 50%;
+    }
+    #walk-mark-wrap {
+      position: absolute;
+      left: 20px;
+      top: 20px;
+      width: 28px;
+      height: 28px;
+    }
+    #walk-mark {
+      display: block;
+      width: 28px;
+      height: 28px;
+      color: #000;
+      opacity: 0;
+    }
+    #walk-cursor-at {
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: 50;
+      transform: translate(calc(var(--px) * 1px), calc(var(--py) * 1px));
+    }
+    #walk-cursor {
+      transform-origin: 0 0;
+      transform: scale(calc(var(--press) / var(--k)));
+      opacity: 0;
+    }
+    #walk-cursor svg {
+      display: block;
+      width: 35px;
+      height: 54px;
+      filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.22));
+    }
+    /* The CSV sheet: the Download CSV button grows into it. */
+    #walk-wash {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 920px;
+      background: #f7f7f5;
+      opacity: 0;
+      z-index: 60;
+    }
+    #walk-csv {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 920px;
+      z-index: 61;
+    }
+    #walk-sheet {
+      position: absolute;
+      left: 260px;
+      top: 96px;
+      width: 1400px;
+      height: 720px;
+      background: #ffffff;
+      border: 1px solid #e3e3de;
+      border-radius: 10px;
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      opacity: 0;
+    }
+    #walk-sheet-head {
+      position: absolute;
+      left: 48px;
+      right: 48px;
+      top: 34px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #e3e3de;
+      padding-bottom: 18px;
+    }
+    #walk-sheet-name {
+      font-family: "Chivo Mono", monospace;
+      font-weight: 500;
+      font-size: 28px;
+    }
+    #walk-sheet-meta {
+      font-size: 28px;
+      color: #666662;
+    }
+    #walk-sheet-lines {
+      position: absolute;
+      left: 36px;
+      right: 36px;
+      top: 116px;
+      font-family: "Chivo Mono", monospace;
+      font-size: 28px;
+      line-height: 46px;
+      color: #666662;
+    }
+    .csv {
+      padding: 0 12px;
+      border-radius: 4px;
+      white-space: pre;
+      opacity: 0;
+    }
+    .csv.head {
+      color: #000;
+      font-weight: 500;
+    }
+    .csv.ch3 {
+      color: #000;
+      background: #eef3fd;
+    }
+    /* Caption band. */
+    #walk-band {
+      position: absolute;
+      left: 0;
+      top: 920px;
+      width: 1920px;
+      height: 160px;
+      background: #f7f7f5;
+      border-top: 1px solid #e3e3de;
+      z-index: 70;
+    }
+    .cap {
+      position: absolute;
+      left: 160px;
+      top: 0;
+      width: 1600px;
+      height: 152px;
+      display: flex;
+      align-items: center;
+      font-size: 40px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+    }
+    .cap .line {
+      display: inline-block;
+    }
+    .cap .w {
+      display: inline-block;
+    }
+    .cap .amber {
+      color: #b86200;
+    }
+    #walk-cap-14 {
+      font-size: 48px;
+    }
+  </style>
+
+  <div id="root" data-composition-id="walk" data-width="1920" data-height="1080">
+    <div id="walk-rig" data-layout-allow-overflow>
+      <div id="walk-cam">
+        <div id="walk-world">
+          <div id="walk-screens">
+            <!-- Login: the app's own entrance, curve and bubbles, recorded frame by frame. -->
+            <video id="walk-v-login" class="clip shot" src="assets/clips/login.mp4" muted playsinline
+              data-start="0" data-duration="14.6" data-media-start="0.6" data-track-index="0" style="z-index: 1"></video>
+            <!-- Token typed: the real field and the enabled button; a cover reveals the dots one at a time. -->
+            <div id="walk-ov-typed" class="clip layer" data-start="8.3" data-duration="4.7" data-track-index="1" style="z-index: 2">
+              <img class="shot" src="assets/screens/login-typed.png" alt="" style="clip-path: inset(401px 153px 298px 907px)" />
+            </div>
+            <div id="walk-ov-cover" class="clip layer" data-start="8.3" data-duration="4.7" data-track-index="2" style="z-index: 3">
+              <div id="walk-cover-bar"></div>
+            </div>
+            <div id="walk-ov-verify" class="clip layer" data-start="13" data-duration="1.6" data-track-index="1" style="z-index: 4">
+              <img class="shot" src="assets/screens/login-verifying.png" alt="" style="clip-path: inset(395px 145px 290px 900px)" />
+            </div>
+            <!-- Sign-in hand-off: the dashboard fades in, as the app does it. -->
+            <video id="walk-v-handoff" class="clip shot" src="assets/clips/handoff.mp4" muted playsinline
+              data-start="14.6" data-duration="1.8" data-track-index="0" style="z-index: 1"></video>
+            <!-- Monitoring. -->
+            <img id="walk-s-mon1" class="clip shot" src="assets/screens/mon-ch1.png" alt=""
+              data-start="16.4" data-duration="11.3" data-track-index="0" style="height: 1120px; z-index: 1" />
+            <video id="walk-v-mon3" class="clip shot" src="assets/clips/mon-ch3.mp4" muted playsinline
+              data-start="27.7" data-duration="1.4" data-track-index="0" style="z-index: 1"></video>
+            <img id="walk-s-mon3" class="clip shot" src="assets/screens/mon-ch3.png" alt=""
+              data-start="29.1" data-duration="7.8" data-track-index="0" style="height: 1120px; z-index: 1" />
+            <!-- Experiment history. -->
+            <video id="walk-v-navh" class="clip shot" src="assets/clips/nav-history.mp4" muted playsinline
+              data-start="36.9" data-duration="0.6" data-track-index="0" style="z-index: 1"></video>
+            <img id="walk-s-hlist" class="clip shot" src="assets/screens/hist-list.png" alt=""
+              data-start="37.5" data-duration="5.52" data-track-index="0" style="z-index: 1" />
+            <img id="walk-s-hexp4" class="clip shot" src="assets/screens/hist-exp4.png" alt=""
+              data-start="42.9" data-duration="5.3" data-track-index="1" style="height: 2689px; z-index: 2" />
+            <video id="walk-v-hch3" class="clip shot" src="assets/clips/hist-ch3.mp4" muted playsinline
+              data-start="47.1" data-duration="1.1" data-track-index="2"
+              style="left: 249px; top: 750px; width: 1191px; height: 750px; z-index: 3"></video>
+            <img id="walk-s-hch3" class="clip shot" src="assets/screens/hist-exp4-ch3.png" alt=""
+              data-start="48.2" data-duration="23.9" data-track-index="0" style="height: 2689px; z-index: 1" />
+            <img id="walk-s-tip" class="clip shot" src="assets/screens/hist-ch4-tip.png" alt=""
+              data-start="60" data-duration="6.95" data-track-index="1"
+              style="height: 2689px; z-index: 2; clip-path: inset(1964px 37px 391px 269px)" />
+            <img id="walk-s-hres" class="clip shot" src="assets/screens/hist-results.png" alt=""
+              data-start="72.1" data-duration="24.4" data-track-index="1" style="height: 1283px; z-index: 2" />
+            <video id="walk-v-hres" class="clip shot" src="assets/clips/hist-results.mp4" muted playsinline
+              data-start="72.1" data-duration="0.5" data-track-index="2"
+              style="left: 249px; top: 533px; width: 1191px; height: 750px; z-index: 3"></video>
+            <!-- Compare. -->
+            <video id="walk-v-navc" class="clip shot" src="assets/clips/nav-compare.mp4" muted playsinline
+              data-start="96.5" data-duration="0.6" data-track-index="0" style="z-index: 3"></video>
+            <img id="walk-s-cmp0" class="clip shot" src="assets/screens/cmp-empty.png" alt=""
+              data-start="97.1" data-duration="5.3" data-track-index="0" style="z-index: 1" />
+            <img id="walk-s-cmp1p" class="clip shot" src="assets/screens/cmp-add1-picked.png" alt=""
+              data-start="102.3" data-duration="2" data-track-index="1" style="z-index: 2" />
+            <video id="walk-v-cmp1" class="clip shot" src="assets/clips/cmp-add1.mp4" muted playsinline
+              data-start="104.3" data-duration="1.3" data-track-index="0" style="z-index: 1"></video>
+            <img id="walk-s-cmp1" class="clip shot" src="assets/screens/cmp-add1.png" alt=""
+              data-start="105.6" data-duration="3.6" data-track-index="0" style="height: 851px; z-index: 1" />
+            <img id="walk-s-cmp2p" class="clip shot" src="assets/screens/cmp-add2-picked.png" alt=""
+              data-start="109.1" data-duration="2" data-track-index="1" style="z-index: 2" />
+            <video id="walk-v-cmp2" class="clip shot" src="assets/clips/cmp-add2.mp4" muted playsinline
+              data-start="111.1" data-duration="1.3" data-track-index="0" style="z-index: 1"></video>
+            <img id="walk-s-cmp2" class="clip shot" src="assets/screens/cmp-add2.png" alt=""
+              data-start="112.4" data-duration="18.2" data-track-index="0" style="height: 851px; z-index: 1" />
+          </div>
+
+          <!-- The app's BrandMark, drawn over the sidebar's own mark for the zoom through it. -->
+          <div id="walk-mark-wrap" class="clip" data-start="129.7" data-duration="0.9" data-track-index="4">
+            <svg id="walk-mark" viewBox="0 0 28 28" aria-hidden="true">
+              <rect x="2" y="2" width="24" height="24" rx="5" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+              <path d="M9 8v12M14 8v12M19 8v12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+              <path d="M6 20h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+              <circle cx="19" cy="8" r="2.25" fill="#2563eb"></circle>
+            </svg>
+          </div>
+
+          <div id="walk-cursor-at">
+            <div id="walk-cursor">
+              <svg viewBox="0 0 12.4 19" aria-hidden="true">
+                <path d="M0.8 0.8 L0.8 16.3 L4.5 12.8 L7.1 18.4 L9.4 17.3 L6.9 11.9 L11.8 11.9 Z"
+                  fill="#000" stroke="#fff" stroke-width="0.9" stroke-linejoin="round"></path>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="walk-wash" class="clip" data-start="83.1" data-duration="10.7" data-track-index="5" data-layout-ignore></div>
+    <div id="walk-csv" class="clip" data-start="83.1" data-duration="10.7" data-track-index="6" data-hold>
+      <div id="walk-sheet">
+        <div id="walk-sheet-head">
+          <span id="walk-sheet-name">experiment-4-readings-2026-11-26T07-14-01.csv</span>
+          <span id="walk-sheet-meta">128 readings · Experiment 4</span>
+        </div>
+        <div id="walk-sheet-lines">
+          <div class="csv head">bottle_id,timestamp,pH,Temp (°C),CO2 (ppm),CH4 (ppm),Pressure (Pa)</div>
+          <div class="csv">1,2026-11-25T06:12:27+00:00,3.97,28.75,,42.3625,0.887783</div>
+          <div class="csv">2,2026-11-25T06:12:27+00:00,4.2,28.5625,400,52.9677,1595.81</div>
+          <div class="csv ch3">3,2026-11-25T06:12:27+00:00,7.98,28.5625,,8.40476,-3.92613</div>
+          <div class="csv">4,2026-11-25T06:12:27+00:00,4.16,,605,8.6529,-30.7018</div>
+          <div class="csv">1,2026-11-25T06:13:00+00:00,3.95,28.75,,36.6279,1.12873</div>
+          <div class="csv">2,2026-11-25T06:13:00+00:00,4.18,28.5625,400,45.4528,2238.79</div>
+          <div class="csv ch3">3,2026-11-25T06:13:00+00:00,7.98,28.625,,8.27121,-2.28415</div>
+          <div class="csv">4,2026-11-25T06:13:00+00:00,4.14,,558,8.28464,-35.3299</div>
+          <div class="csv">1,2026-11-25T06:13:25+00:00,4,28.75,,32.4933,1.26969</div>
+          <div class="csv">2,2026-11-25T06:13:25+00:00,4.19,28.5625,400,39.0214,2560.6</div>
+          <div class="csv ch3">3,2026-11-25T06:13:25+00:00,7.99,28.625,,8.05592,-1.77674</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="walk-band" data-layout-allow-caption-zone>
+      <div id="walk-cap-1" class="clip cap" data-start="0.5" data-duration="8.3" data-track-index="7"><span class="line"><span class="w">Every</span> <span class="w">chamber,</span> <span class="w">from</span> <span class="w">any</span> <span class="w">browser</span></span></div>
+      <div id="walk-cap-2" class="clip cap" data-start="9.1" data-duration="5.3" data-track-index="7"><span class="line"><span class="w">Sign</span> <span class="w">in</span> <span class="w">with</span> <span class="w">the</span> <span class="w">device</span> <span class="w">token</span></span></div>
+      <div id="walk-cap-3" class="clip cap" data-start="16" data-duration="5" data-track-index="7"><span class="line">The live experiment, at a glance</span></div>
+      <div id="walk-cap-4" class="clip cap" data-start="22" data-duration="5.5" data-track-index="7"><span class="line"><span class="w">All</span> <span class="w">24</span> <span class="w">chambers.</span> <span class="w">Silent</span> <span class="w">ones</span> <span class="w">turn</span> <span class="w amber">amber</span></span></div>
+      <div id="walk-cap-5" class="clip cap" data-start="28.2" data-duration="8.2" data-track-index="7"><span class="line"><span class="w">Pick</span> <span class="w">one</span> <span class="w">to</span> <span class="w">read</span> <span class="w">its</span> <span class="w">five</span> <span class="w">sensors</span></span></div>
+      <div id="walk-cap-6" class="clip cap" data-start="37.4" data-duration="5.4" data-track-index="7"><span class="line">Look back at past experiments</span></div>
+      <div id="walk-cap-7" class="clip cap" data-start="43.8" data-duration="6.6" data-track-index="7"><span class="line"><span class="w">Open</span> <span class="w">a</span> <span class="w">run,</span> <span class="w">then</span> <span class="w">pick</span> <span class="w">the</span> <span class="w">chamber</span></span></div>
+      <div id="walk-cap-8" class="clip cap" data-start="51.2" data-duration="8.6" data-track-index="7"><span class="line"><span class="w">Every</span> <span class="w">sensor,</span> <span class="w">every</span> <span class="w">reading</span> <span class="w">of</span> <span class="w">the</span> <span class="w">run</span></span></div>
+      <div id="walk-cap-9" class="clip cap" data-start="60.4" data-duration="6.2" data-track-index="7"><span class="line">Hover any point for its value and time</span></div>
+      <div id="walk-cap-10" class="clip cap" data-start="72.8" data-duration="7.2" data-track-index="7"><span class="line"><span class="w">Mean,</span> <span class="w">min</span> <span class="w">and</span> <span class="w">max</span> <span class="w">for</span> <span class="w">every</span> <span class="w">chamber</span></span></div>
+      <div id="walk-cap-11" class="clip cap" data-start="83.8" data-duration="9.4" data-track-index="7"><span class="line"><span class="w">Export</span> <span class="w">exactly</span> <span class="w">the</span> <span class="w">rows</span> <span class="w">you</span> <span class="w">see</span> <span class="w">as</span> <span class="w">CSV</span></span></div>
+      <div id="walk-cap-12" class="clip cap" data-start="97.2" data-duration="16.4" data-track-index="7"><span class="line">Overlay chambers from any experiment</span></div>
+      <div id="walk-cap-13" class="clip cap" data-start="114.8" data-duration="6.2" data-track-index="7"><span class="line"><span class="w">Chamber</span> <span class="w">3</span> <span class="w">in</span> <span class="w">two</span> <span class="w">runs,</span> <span class="w">on</span> <span class="w">one</span> <span class="w">chart</span></span></div>
+      <div id="walk-cap-14" class="clip cap" data-start="122" data-duration="6.8" data-track-index="7"><span class="line"><span class="w">Watch</span> <span class="w">it</span> <span class="w">live.</span> <span class="w">Look</span> <span class="w">back.</span> <span class="w">Compare.</span></span></div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const tl = gsap.timeline({ paused: true });
+      const RIG = "#walk-rig";
+      const NI = { immediateRender: false };
+
+      // ---- Camera: page point (cx, cy) at stage centre, scale k. ----
+      let cam = { cx: 720, cy: 405, k: 1.12 };
+      let cur = { px: 1700, py: 640 };
+      tl.set(RIG, { "--cx": 720, "--cy": 405, "--k": 1.12, "--px": 1700, "--py": 640, "--press": 1 }, 0);
+      // Baselines for elements tweened more than once (they are hidden until their clip starts).
+      tl.set("#walk-sheet", { x: 748.7, y: -44, scale: 0.1395 }, 0);
+      tl.set("#walk-wash", { opacity: 0 }, 0);
+      const camTo = (t, d, cx, cy, k, ease = "power2.inOut") => {
+        tl.fromTo(RIG, { "--cx": cam.cx, "--cy": cam.cy, "--k": cam.k }, { "--cx": cx, "--cy": cy, "--k": k, duration: d, ease, ...NI }, t);
+        cam = { cx, cy, k };
+      };
+      // A hold longer than 3 s creeps in by 2.5 % about the stage centre, so the picture never
+      // freezes (as in the display video). The next camera move starts from where it ends.
+      const creep = (t, d, f = 1.025) => camTo(t, d, cam.cx, cam.cy, +(cam.k * f).toFixed(4), "sine.inOut");
+      // ---- Cursor, in page coordinates; x and y on different eases for a slight arc. ----
+      const curTo = (t, d, px, py) => {
+        tl.fromTo(RIG, { "--px": cur.px }, { "--px": px, duration: d, ease: "power2.inOut", ...NI }, t);
+        tl.fromTo(RIG, { "--py": cur.py }, { "--py": py, duration: d, ease: "power3.inOut", ...NI }, t);
+        cur = { px, py };
+      };
+      const curSet = (t, px, py) => {
+        tl.set(RIG, { "--px": px, "--py": py }, t);
+        cur = { px, py };
+      };
+      const press = (t) => {
+        tl.fromTo(RIG, { "--press": 1 }, { "--press": 0.86, duration: 0.07, ease: "power2.out", ...NI }, t);
+        tl.fromTo(RIG, { "--press": 0.86 }, { "--press": 1, duration: 0.14, ease: "power2.out", ...NI }, t + 0.07);
+      };
+      const curShow = (t, on, d = 0.4) =>
+        tl.fromTo("#walk-cursor", { opacity: on ? 0 : 1 }, { opacity: on ? 1 : 0, duration: d, ease: "power1.out", ...NI }, t);
+      // Stands in for the app's own quick response (a page or tooltip appearing): real speed.
+      const fadeIn = (sel, t, d = 0.12) => tl.fromTo(sel, { opacity: 0 }, { opacity: 1, duration: d, ease: "power1.out", ...NI }, t);
+
+      // ---- Captions: three entrances in rotation, one exit. ----
+      const capWords = (id, t, end) => {
+        tl.fromTo(`#${id} .w`, { opacity: 0, filter: "blur(6px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.26, stagger: 0.134, ease: "power2.out", ...NI }, t);
+        capOut(id, end);
+      };
+      const capInk = (id, t, end) => {
+        tl.fromTo(`#${id} .w`, { color: "#c9c9c4" }, { color: "#000000", duration: 0.24, stagger: 0.16, ease: "power1.out", ...NI }, t);
+        capOut(id, end);
+      };
+      const capLine = (id, t, end) => {
+        tl.fromTo(`#${id} .line`, { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.36, ease: "power2.out", ...NI }, t);
+        capOut(id, end);
+      };
+      const capOut = (id, end) => {
+        tl.fromTo(`#${id} .line`, { opacity: 1, filter: "blur(0px)" }, { opacity: 0, filter: "blur(6px)", duration: 0.3, ease: "power2.in", ...NI }, end - 0.3);
+      };
+
+      // Pace: every time below is twice the first cut's (2026-11-26), up to the zoom at 128.8.
+      // Kept at real speed: the app's recorded animations, its quick responses (fadeIn) and the
+      // click press. The zoom through the mark and the end card keep their original speed.
+
+      // ===== Login (0 – 16.4) =====
+      capWords("walk-cap-1", 0.5, 8.8);
+      camTo(4.4, 2.4, 1097, 440, 1.85);
+      curShow(5.8, true);
+      curTo(5.8, 2.0, 1076, 423);
+      press(7.9);
+      // 17 characters, one every 164 ms: the cover over the dots shrinks one dot at a time.
+      // steps(16) holds 17 values, each for duration / 17, so the duration is 17 x 0.164 s.
+      tl.fromTo("#walk-cover-bar", { scaleX: 16 / 17 }, { scaleX: 0, duration: 17 * 0.164, ease: "steps(16)", ...NI }, 8.3);
+      capInk("walk-cap-2", 9.1, 14.4);
+      curTo(11.4, 1.4, 1097, 489);
+      press(13.0);
+      curShow(14.6, false, 0.5);
+      camTo(14.6, 2.6, 720, 405, 1.12);
+      capLine("walk-cap-3", 16.0, 21.0);
+      creep(17.2, 4.0);
+
+      // ===== Monitoring (16.4 – 36.9) =====
+      camTo(21.2, 2.6, 836, 470, 1.45);
+      capWords("walk-cap-4", 22.0, 27.5);
+      curSet(22.5, 760, 610);
+      curShow(22.6, true);
+      curTo(23.0, 1.6, 588, 366);
+      curTo(25.8, 1.6, 404, 366);
+      press(27.7);
+      capInk("walk-cap-5", 28.2, 36.4);
+      creep(29.2, 4.8);
+      camTo(34.0, 2.4, 380, 300, 1.6);
+      curTo(34.6, 2.0, 100, 293);
+      press(36.9);
+      capLine("walk-cap-6", 37.4, 42.8);
+
+      // ===== Experiment history (36.9 – 96.5) =====
+      camTo(38.1, 2.5, 836, 380, 1.55);
+      curTo(40.8, 1.8, 700, 265);
+      press(42.9);
+      fadeIn("#walk-s-hexp4", 42.9);
+      camTo(43.2, 3.2, 836, 905, 1.35);
+      capWords("walk-cap-7", 43.8, 50.4);
+      curTo(44.8, 2.0, 420, 850);
+      press(47.1);
+      curShow(50.4, false);
+      camTo(50.6, 6.4, 836, 2131, 1.55);
+      capInk("walk-cap-8", 51.2, 59.8);
+      curSet(57.7, 760, 2080);
+      curShow(57.8, true);
+      curTo(58.0, 1.8, 546, 2228);
+      fadeIn("#walk-s-tip", 60.0, 0.14);
+      camTo(60.4, 2.8, 620, 2185, 2.0);
+      capLine("walk-cap-9", 60.4, 66.6);
+      creep(63.2, 3.6);
+      curShow(66.6, false, 0.3);
+      tl.fromTo("#walk-s-tip", { opacity: 1 }, { opacity: 0, duration: 0.12, ...NI }, 66.8);
+      camTo(66.8, 3.2, 836, 760, 1.55);
+      curSet(69.8, 700, 900);
+      curShow(70.0, true);
+      curTo(70.2, 1.6, 440, 787);
+      press(72.1);
+      capWords("walk-cap-10", 72.8, 80.0);
+      camTo(73.2, 2.6, 836, 1037, 1.55);
+      curTo(76.6, 1.6, 1150, 1100);
+      camTo(80.0, 2.6, 836, 676, 1.55);
+      curTo(81.0, 1.8, 1320, 648);
+      press(83.1);
+      curShow(83.4, false, 0.3);
+
+      // The button becomes the CSV sheet: uniform scale from the button's place on screen.
+      tl.fromTo("#walk-wash", { opacity: 0 }, { opacity: 0.86, duration: 0.6, ease: "power1.out", ...NI }, 83.2);
+      tl.fromTo("#walk-sheet", { x: 748.7, y: -44, scale: 0.1395, opacity: 0 }, { x: 0, y: 0, scale: 1, opacity: 1, duration: 1.2, ease: "power3.out", ...NI }, 83.1);
+      tl.fromTo("#walk-sheet .csv.head", { opacity: 0 }, { opacity: 1, duration: 0.2, ...NI }, 84.1);
+      tl.fromTo("#walk-sheet .csv:not(.head)", { opacity: 0 }, { opacity: 1, duration: 0.2, stagger: 0.14, ...NI }, 84.3);
+      capInk("walk-cap-11", 83.8, 93.2);
+      tl.fromTo("#walk-sheet", { x: 0, y: 0, scale: 1 }, { x: 748.7, y: -44, scale: 0.1395, duration: 0.9, ease: "power3.in", ...NI }, 92.8);
+      tl.fromTo("#walk-sheet", { opacity: 1 }, { opacity: 0, duration: 0.3, ...NI }, 93.4);
+      tl.fromTo("#walk-wash", { opacity: 0.86 }, { opacity: 0, duration: 0.8, ease: "power1.in", ...NI }, 92.9);
+
+      // ===== Compare (96.5 – 128.8) =====
+      camTo(93.8, 2.4, 380, 300, 1.6);
+      curSet(94.0, 520, 430);
+      curShow(94.2, true);
+      curTo(94.4, 1.8, 100, 331);
+      press(96.5);
+      capLine("walk-cap-12", 97.2, 113.6);
+      camTo(97.8, 2.4, 836, 440, 1.45);
+      curTo(100.4, 1.6, 735, 248);
+      press(102.3);
+      fadeIn("#walk-s-cmp1p", 102.3, 0.1);
+      curTo(102.8, 1.2, 875, 248);
+      press(104.3);
+      curTo(107.2, 1.6, 480, 248);
+      press(109.1);
+      fadeIn("#walk-s-cmp2p", 109.1, 0.1);
+      curTo(109.6, 1.2, 875, 248);
+      press(111.1);
+      curShow(114.0, false, 0.5);
+      camTo(113.8, 2.6, 836, 610, 1.5);
+      capWords("walk-cap-13", 114.8, 121.0);
+      creep(116.4, 4.8);
+      camTo(121.2, 2.8, 720, 425, 1.12);
+      capInk("walk-cap-14", 122.0, 128.8);
+      // The last hold creeps in about the RuSim mark (page 34, 34; on screen 191.7, 22.1), so the
+      // mark stays put and fully in frame for the zoom through it.
+      camTo(124.0, 4.8, 703.27, 415.46, 1.148, "sine.inOut");
+
+      // ===== Zoom through the RuSim mark (128.8 – 130.6), original speed =====
+      // Two parts, so the mark travels straight to the centre: first centre it with a slight
+      // zoom, then zoom about that fixed point. It lands at 130.5 and holds, so the last frame
+      // equals the end card's first (the mark alone, 168 px, at 960, 460).
+      tl.fromTo("#walk-band", { opacity: 1 }, { opacity: 0, duration: 0.4, ...NI }, 128.8);
+      camTo(128.8, 0.9, 34, 34, 1.5);
+      camTo(129.7, 0.8, 34, 34, 6.0, "power3.in");
+      tl.fromTo("#walk-mark", { opacity: 0 }, { opacity: 1, duration: 0.2, ...NI }, 129.8);
+      tl.fromTo("#walk-screens", { opacity: 1 }, { opacity: 0, duration: 0.4, ease: "power1.in", ...NI }, 130.1);
+
+      window.__timelines["walk"] = tl;
+    })();
+  </script>
+</template>

@@ -841,9 +841,9 @@ The app pulls up to 5,000 rows newest-first, derives an experiment list by group
 
 The History tab reuses the same in-memory array to list experiments, then issues a second paged read for the selected one and shows a chamber selector, per-parameter charts, a per-chamber results table (mean with min – max), and a CSV export of exactly the rows on screen.
 
-The Compare tab overlays up to four (experiment, chamber) series on one chart with a shared y-axis, aligned by sample order. Chambers may come from different experiments; each distinct experiment is fetched once and cached. Series colours are teal, saturated blue, saturated orange, and saturated pink by selection order.
+The Compare tab overlays up to four (experiment, chamber) series on one chart with a shared y-axis, aligned by sample order. Chambers may come from different experiments; each distinct experiment is fetched once and cached. Series colours are blue, green, amber and violet (`--chart-1` to `--chart-4`) by selection order.
 
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Updated at 2026-11-26-14:30.
+Updated at 2026-11-26-16:47.

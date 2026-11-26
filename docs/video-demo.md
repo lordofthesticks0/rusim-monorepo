@@ -20,6 +20,8 @@ the ones the ESP32-S3 draws on the panel.
 | `video-demo/media/Montserrat-*.otf` | Caption font. LVGL's built-in fonts are Montserrat, so captions match the panel. SIL Open Font License, copied from Fedora's `julietaula-montserrat-fonts` |
 | `video-demo/Cargo.toml` | Dependencies, pinned to fframes 1.4.0. `fframes_skia_renderer` has the `cli` feature for `--renderer skia-cpu` |
 | `video-demo/.cargo/config.toml` | Sets `FFMPEG_FORCE_BUILD=1` (see Build) |
+| `video-demo/hyperframes/` | A separate HyperFrames project (the dashboard demo video), not part of the Cargo build. See [dashboard-demo-video.md](dashboard-demo-video.md) |
+| `video-demo/hyperframes-mobile/` | The same HyperFrames video on the dashboard's phone layout. See [dashboard-demo-video.md](dashboard-demo-video.md) |
 
 Everything inside the `media/` folder is compiled into the binary.
 
@@ -188,4 +190,4 @@ The `vulkan` backend needs a working Vulkan driver (Intel Mesa was used).
   the repository.
 
 ---
-Updated at 2026-11-26-13:45.
+Updated at 2026-11-26-17:30.

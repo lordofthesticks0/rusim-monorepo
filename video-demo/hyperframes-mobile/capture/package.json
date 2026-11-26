@@ -1,0 +1,11 @@
+{
+  "name": "rusim-demo-capture-mobile",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "capture": "bun run capture.ts"
+  },
+  "dependencies": {
+    "playwright-core": "1.65.1"
+  }
+}

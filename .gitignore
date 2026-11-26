@@ -23,6 +23,8 @@ graphify-out/cache/
 .taste-skill/
 personal/
 video-demo/media/
+video-demo/hyperframes/assets/
+video-demo/hyperframes-mobile/assets/
 
 # Local Netlify folder
 .netlify

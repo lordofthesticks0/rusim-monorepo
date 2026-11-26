@@ -18,6 +18,8 @@ user instead.
 | [`scripts-hardware/`](../scripts-hardware/) | Bun hardware tools and the PlatformIO WT32 passthrough upload hook. |
 | [`verification/`](../verification/) | Report data collection: serial capture, analysis, boot loop, fake Mega slave, fidelity check, SQL check suites, live write-contract test, dashboard load test. Runs land in `verification/runs/` (git-ignored). [verification-toolkit.md](verification-toolkit.md) |
 | [`video-demo/`](../video-demo/) | Rust/fframes project that renders the slow walkthrough video of the display-v9 UI from simulator snapshots. [video-demo.md](video-demo.md) |
+| [`video-demo/hyperframes/`](../video-demo/hyperframes/) | Separate HyperFrames (HTML-to-video) project: the 142 s dashboard walkthrough ending on a QR code, built from frame-exact captures of the real app (`capture/capture.ts`). [dashboard-demo-video.md](dashboard-demo-video.md) |
+| [`video-demo/hyperframes-mobile/`](../video-demo/hyperframes-mobile/) | The same walkthrough on the dashboard's phone layout: a 390 px touch screen shown as a phone in a landscape film. [dashboard-demo-video.md](dashboard-demo-video.md) |
 | [`platformio.ini`](../platformio.ini) | Every firmware build environment. |
 | [`docs/`](.) | All documentation, human and agent-written. |
 | [`docs/raspi-docs/`](raspi-docs/) | Documentation of the live Raspberry Pi `invitrocontroller` system: board, OS, kiosk, backend, firmware, logging, network. |
@@ -95,6 +97,7 @@ documented. Test sketches in `firmware/tests/` are not subsystems.
 | Document | Covers |
 |---|---|
 | [dashboard.md](dashboard.md) | Full walkthrough: running it, auth end to end, from a row to a chart point, statistics, CSV export, `dev-db`, deployment |
+| [dashboard-demo-video.md](dashboard-demo-video.md) | The dashboard demo videos (`video-demo/hyperframes/` and its phone-layout version `video-demo/hyperframes-mobile/`): how the app is recorded frame by frame, how the films are built, how to re-capture and render |
 | [database.md](database.md) | Schema catalog for `device_data` and the unused `public` schema, relation inventories, exposure |
 
 ## 3a. Legacy / Raspberry Pi
@@ -192,4 +195,4 @@ These describe boards rather than this project's code.
   and is indexed in section 3c.
 
 ---
-Updated at 2026-11-26-13:45.
+Updated at 2026-11-26-17:30.

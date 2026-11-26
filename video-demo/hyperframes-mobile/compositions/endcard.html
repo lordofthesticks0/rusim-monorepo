@@ -1,0 +1,195 @@
+<template>
+  <style>
+    @font-face {
+      font-family: "Chivo";
+      src: url("assets/fonts/Chivo-Variable.woff2") format("woff2");
+      font-weight: 400 700;
+    }
+    @font-face {
+      font-family: "Chivo Mono";
+      src: url("assets/fonts/ChivoMono-Variable.woff2") format("woff2");
+      font-weight: 400 500;
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #f7f7f5;
+      font-family: "Chivo", sans-serif;
+      color: #000;
+    }
+    /* Everything of the first end card, so it can step aside for the QR code as one block. */
+    #end-stack {
+      position: absolute;
+      inset: 0;
+    }
+    #end-mark {
+      position: absolute;
+      left: 876px;
+      top: 246px;
+      width: 168px;
+      height: 168px;
+      color: #000;
+    }
+    .end-row {
+      position: absolute;
+      left: 0;
+      width: 1920px;
+      text-align: center;
+    }
+    #end-word {
+      top: 438px;
+      font-size: 120px;
+      line-height: 124px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    #end-sub {
+      top: 572px;
+      font-size: 32px;
+      line-height: 40px;
+      color: #666662;
+    }
+    #end-prod {
+      top: 676px;
+      font-size: 34px;
+      line-height: 44px;
+      font-weight: 500;
+    }
+    #end-inst {
+      top: 734px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 14px;
+      font-size: 28px;
+      line-height: 40px;
+      color: #666662;
+    }
+    #end-inst img {
+      width: 40px;
+      height: 40px;
+      display: block;
+    }
+    #end-url-row {
+      top: 812px;
+    }
+    #end-url {
+      display: inline-block;
+      font-family: "Chivo Mono", monospace;
+      font-weight: 500;
+      font-size: 32px;
+      line-height: 44px;
+      color: #2563eb;
+    }
+    /* The QR code: 29 modules at 10 px on a white card with the 4-module quiet zone (40 px). */
+    #end-qr {
+      position: absolute;
+      left: 1206px;
+      top: 334px;
+      width: 372px;
+    }
+    #end-qr-card {
+      position: relative;
+      width: 372px;
+      height: 372px;
+      padding: 40px;
+      background: #ffffff;
+      border: 1px solid #e3e3de;
+      border-radius: 16px;
+    }
+    #end-qr-img {
+      display: block;
+      width: 290px;
+      height: 290px;
+    }
+    #end-qr-scan {
+      position: absolute;
+      left: 26px;
+      top: 38px;
+      width: 318px;
+      height: 4px;
+    }
+    #end-qr-scan-line {
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: #2563eb;
+    }
+    /* Wider than the card and centred under it, so the caption stays on one line. */
+    #end-qr-label {
+      width: 560px;
+      margin: 26px 0 0 -94px;
+      white-space: nowrap;
+      text-align: center;
+      font-size: 28px;
+      line-height: 36px;
+      color: #666662;
+    }
+  </style>
+
+  <div id="root" data-composition-id="endcard" data-width="1920" data-height="1080"
+    data-composition-variables='[{"id":"product","type":"string","label":"Product line","default":"In Vitro Rumen Fermentation Dashboard"},{"id":"institution","type":"string","label":"Institution line","default":"IAIS Lab · Teknik Elektro · Universitas Padjadjaran"},{"id":"url","type":"string","label":"Website","default":"unpadrumensim.netlify.app"},{"id":"qrLabel","type":"string","label":"QR code caption","default":"Scan to open the dashboard"}]'>
+    <div id="end-stack">
+      <svg id="end-mark" viewBox="0 0 28 28" aria-hidden="true">
+        <rect x="2" y="2" width="24" height="24" rx="5" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
+        <path d="M9 8v12M14 8v12M19 8v12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+        <path d="M6 20h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+        <circle cx="19" cy="8" r="2.25" fill="#2563eb"></circle>
+      </svg>
+      <div id="end-word" class="end-row">RuSim</div>
+      <div id="end-sub" class="end-row">In Vitro Rumen Simulator</div>
+      <div id="end-prod" class="end-row" data-var-text="product">In Vitro Rumen Fermentation Dashboard</div>
+      <div id="end-inst" class="end-row">
+        <img src="assets/data/unpad-mono.svg" alt="Universitas Padjadjaran" />
+        <span id="end-inst-text" data-var-text="institution">IAIS Lab · Teknik Elektro · Universitas Padjadjaran</span>
+      </div>
+      <div id="end-url-row" class="end-row"><span id="end-url" data-var-text="url">unpadrumensim.netlify.app</span></div>
+    </div>
+
+    <!-- QR code for https://unpadrumensim.netlify.app, made by capture/build-qr.py. -->
+    <div id="end-qr">
+      <div id="end-qr-card">
+        <img id="end-qr-img" src="assets/qr.svg" alt="QR code for unpadrumensim.netlify.app" />
+        <div id="end-qr-scan">
+          <div id="end-qr-scan-in">
+            <div id="end-qr-scan-line"></div>
+          </div>
+        </div>
+      </div>
+      <div id="end-qr-label" data-var-text="qrLabel">Scan to open the dashboard</div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const tl = gsap.timeline({ paused: true });
+      // Each element has exactly one tween, so its fromTo renders the start state immediately
+      // (frame 0 must match the last frame of the walk scene: the mark alone at 960, 460).
+      // The mark arrives from where the zoom left it, then the wordmark opens from its centre.
+      tl.fromTo("#end-mark", { y: 130 }, { y: 0, duration: 0.7, ease: "expo.out" }, 0);
+      tl.fromTo("#end-word", { clipPath: "inset(0% 50% 0% 50%)" }, { clipPath: "inset(0% 0% 0% 0%)", duration: 0.6, ease: "power3.out" }, 0.3);
+      tl.fromTo("#end-sub", { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.18, ease: "power2.out" }, 0.6);
+      tl.fromTo("#end-prod", { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.18, ease: "power2.out" }, 1.2);
+      tl.fromTo("#end-inst", { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power1.out" }, 1.45);
+      tl.fromTo("#end-inst-text", { color: "#c9c9c4" }, { color: "#666662", duration: 0.3, ease: "power1.out" }, 1.45);
+      // The address types in, one character per step (25 characters, 55 ms each).
+      tl.fromTo("#end-url", { clipPath: "inset(0% 100% 0% 0%)" }, { clipPath: "inset(0% 0% 0% 0%)", duration: 25 * 0.055, ease: "steps(25)" }, 2.1);
+
+      // The QR code. The block steps left so block and card sit centred together (1920 px);
+      // the card opens from its middle line like the wordmark, then a scan line uncovers the
+      // code from top to bottom.
+      tl.fromTo("#end-stack", { x: 0 }, { x: -260, duration: 1.2, ease: "power3.inOut" }, 4.0);
+      tl.fromTo("#end-qr-card", { clipPath: "inset(186px 0px 186px 0px)" }, { clipPath: "inset(0px 0px 0px 0px)", duration: 0.7, ease: "power3.out" }, 4.5);
+      tl.fromTo("#end-qr-img", { clipPath: "inset(0% 0% 100% 0%)" }, { clipPath: "inset(0% 0% 0% 0%)", duration: 1.2, ease: "power1.inOut" }, 4.9);
+      tl.fromTo("#end-qr-scan", { y: 0 }, { y: 290, duration: 1.2, ease: "power1.inOut" }, 4.9);
+      tl.fromTo("#end-qr-scan-in", { opacity: 0 }, { opacity: 1, duration: 0.15, ease: "power1.out" }, 4.9);
+      tl.fromTo("#end-qr-scan-line", { opacity: 1 }, { opacity: 0, duration: 0.3, ease: "power1.in" }, 5.95);
+      tl.fromTo("#end-qr-label", { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.36, ease: "power2.out" }, 6.1);
+      // Hold the finished card long enough to scan it.
+      tl.set({}, {}, 11.0);
+
+      window.__timelines["endcard"] = tl;
+    })();
+  </script>
+</template>
