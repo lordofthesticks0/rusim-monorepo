@@ -153,6 +153,7 @@ describes the code as it is.
 | [display-info-reboot.md](plans-and-audits/display-info-reboot.md) | `/info` reboot triage: heap-walk hang, backtrace decode, CPU gauge + `MEM` command, open corruption hunt |
 | [security-report.md](plans-and-audits/security-report.md) | Dashboard public-deployment audit: findings ordered by severity, with verification queries |
 | [documentation-review-legacy.md](plans-and-audits/documentation-review-legacy.md) | Audit of every document in `docs/` cross-checked against the repository (first pass covered `legacy/`); fixes applied and open items |
+| [WT32-audit.md](plans-and-audits/WT32-audit.md) | WT32 (`network-master`) database authentication and startup latency audit: why `ready=1` can take up to ~5 min and block experiment starts, root causes, verification steps, and recommended fixes |
 
 ## 4. Hardware references
 
@@ -190,4 +191,4 @@ These describe boards rather than this project's code.
   and is indexed in section 3c.
 
 ---
-Updated at 2026-11-25-15:17.
+Updated at 2026-11-25-19:50.

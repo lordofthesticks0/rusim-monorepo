@@ -104,7 +104,7 @@ own `millis()`/`micros()`; `_us` = microseconds, `_ms` = milliseconds.
 | Kind | Fields | Emitted |
 |---|---|---|
 | `RESET` | `reason` | once per boot |
-| `BOOT` | `stage`, `ms` | once per stage: `setup`, `eth_start`, `eth_link`, `got_ip`, `ntp`, `portal_ok`, `auth`, `ready`, `sens_first`, `enq_first`, `ack_first` |
+| `BOOT` | `stage`, `ms` | once per stage (`got_ip` = first lease on either Ethernet or the Wi-Fi fallback): `setup`, `eth_start`, `eth_link`, `got_ip`, `ntp`, `portal_ok`, `auth`, `ready`, `sens_first`, `enq_first`, `ack_first` |
 | `POLL` | `ok`, `why` (`timeout`, `overflow`, `nojson`, `nobottle`), `reply_ms`, `bytes`, `present`, `valid` | every Mega poll (5 s) |
 | `RAW` | `nonprint`, `len`; then `head=` and `tail=` (first and last 48 bytes, non-printable bytes shown as `.`) | after each failed Mega poll |
 | `SENSTX` | `seq`, `src` (`poll`/`snapshot`), `proc_us`, `bytes` | every `SENS` line sent |
@@ -440,4 +440,4 @@ and never used it: rows were always enqueued once per 30 s. Now
 - `dashboard.md` — the app, `dev-db`, row caps.
 
 ---
-Updated at 2026-11-25-09:00.
+Updated at 2026-11-26-12:24.

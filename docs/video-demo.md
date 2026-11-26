@@ -16,6 +16,7 @@ the ones the ESP32-S3 draws on the panel.
 | `video-demo/src/lib.rs` | The video: storyboard table `BEATS`, camera, spotlight, touch marker, captions |
 | `video-demo/src/main.rs` | Command line (`fframes::cli`): render, preview, frame, strip, inspect |
 | `video-demo/media/ui-*.png` | Simulator snapshots (800 x 480), converted from BMP |
+| `video-demo/media/sfx-*.wav` | Sound effects, synthesised with FFmpeg (see Sound) |
 | `video-demo/media/Montserrat-*.otf` | Caption font. LVGL's built-in fonts are Montserrat, so captions match the panel. SIL Open Font License, copied from Fedora's `julietaula-montserrat-fonts` |
 | `video-demo/Cargo.toml` | Dependencies, pinned to fframes 1.4.0. `fframes_skia_renderer` has the `cli` feature for `--renderer skia-cpu` |
 | `video-demo/.cargo/config.toml` | Sets `FFMPEG_FORCE_BUILD=1` (see Build) |
@@ -57,6 +58,12 @@ Everything inside the `media/` folder is compiled into the binary.
   The real panel switches screens instantly (no LVGL animations, see
   [display-docs.md](display-docs.md) §15.1); the cross-fade is a video choice.
 
+- **Flat backdrop.** The background is one solid colour (`STAGE`, `#0e1319`)
+  and the device has no blurred drop shadow. A soft gradient or blur on a dark
+  background spans only a few brightness levels, so H.264 turns it into visible
+  bands and blocks. The bezel's 1 px outline separates the device from the
+  backdrop instead.
+
 All coordinates in `BEATS` are display pixels (the 800 x 480 panel), read off
 the snapshots.
 
@@ -77,6 +84,43 @@ the snapshots.
 `06-bottle-missing` is not used: the simulator's preview data draws a trend
 chart for the absent bottle 4, which the real sensor feed never does.
 
+## Sound
+
+The video has sound effects only (no music or voice-over). `cues()` in
+`lib.rs` builds the list from `BEATS` with the same timing functions the
+animation uses (`touch_times`, `GLIDE`, the backlight seconds), so changing a
+beat's length moves its sounds with it. `Video::audio` turns each cue into an
+`AudioTrack`.
+
+| File | Plays | Gain |
+|---|---|---|
+| `sfx-swell.wav` | Soft chord as the device fades in (0.3 s) and out (3.6 s before the end) | -7 / -10 dB |
+| `sfx-whoosh.wav` | Under every camera glide; its loudest point lands on the glide's fastest point | -16 dB |
+| `sfx-tap.wav` | 0.1 s after the fingertip presses (taps and the hold) | -3 dB |
+| `sfx-hold.wav` | Rising tone during the 2 s hold, while the ring fills | -10 dB |
+| `sfx-error.wav` | Two falling notes when the hold ends on the "start blocked" modal | -5 dB |
+| `sfx-sleep.wav` | Falling tone while the backlight turns off | -8 dB |
+| `sfx-wake.wav` | Rising tone when the backlight comes back | -8 dB |
+
+Taps are panned left or right by the touch's x position on the panel
+(`pan_for`), at most 40 %. Embedded audio is mono, so pan is the only stereo
+effect.
+
+The files were generated with FFmpeg's `aevalsrc` (sine tones with
+exponential decay) and `anoisesrc` (pink noise for the whoosh), 48 kHz mono
+16-bit WAV. Example, the tap:
+
+```bash
+ffmpeg -f lavfi -i "aevalsrc='0.55*sin(2*PI*1500*t)*exp(-t*110)+0.35*sin(2*PI*520*t)*exp(-t*45)':d=0.15:s=48000" \
+  -ar 48000 -ac 1 -c:a pcm_s16le sfx-tap.wav
+```
+
+They are placeholders: replace a file with a recorded or licensed sound of the
+same name to change it. Check levels with `cargo run --release -- audio analyze`
+(true peak must stay below -1 dBTP; it is -5.3 dBTP now) and `audio at <time>`
+to see what plays at a moment. Integrated loudness is low (about -27 LUFS)
+because the track is mostly silence between effects.
+
 ## Commands
 
 Run inside `video-demo/`. Keep `--release`; debug builds render many times
@@ -92,8 +136,7 @@ cargo run --release -- render --renderer skia-cpu -o out.mp4   # final video
 ```
 
 The final video is `video-demo/out.mp4` (git-ignored): 1920 x 1080, 30 fps,
-H.264, 176.5 s, 5295 frames, about 39 MB. It carries a silent AAC track that
-fframes adds when the video has no audio.
+H.264, 176.5 s, 5295 frames, with an AAC track holding the sound effects.
 
 `--renderer skia-cpu` draws with Skia on the CPU: the same pictures as the GPU,
 about 16 frames per second here (about 5 minutes for the whole video). The
@@ -140,8 +183,9 @@ The `vulkan` backend needs a working Vulkan driver (Intel Mesa was used).
   not ready, 5 missing readings, and the `DEBUG: bypass login` button on the
   login screen (`IS_DEBUG` build). The captions describe what is on screen.
 - The bezel is drawn, not a photo of the Sunton board.
-- The video has no sound. Put an audio file in `media/` and add an `AudioTrack`
-  in `Video::audio` to score it.
+- The sound effects are synthesised placeholders, and there is no music.
+- `media/` is git-ignored, so the snapshots, fonts and sound files are not in
+  the repository.
 
 ---
-Updated at 2026-11-25-15:50.
+Updated at 2026-11-26-13:45.

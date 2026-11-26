@@ -60,7 +60,7 @@ direct GND. The display's `PASSTH ON` tunnel (§7) is the other quick check.
 | `HELLO` | - | once at WT32 boot | log link-up and clear local login-result bookkeeping |
 | `LOGINREQ` | - | every heartbeat while the WT32 needs credentials | raise `/setup` (idempotent) |
 | `RESULT` | `OK` or `FAIL` | after every login attempt; once more on the HELLO snapshot if running | `OK`: clear the gate and route home; `FAIL`: show retry text on `/setup` |
-| `NET` | `ip=<str> up=<0\|1> [ping=<n\|->]` | every heartbeat + on every ETH event | `/info` status store. `up=0` carries empty `ip=` and no `ping=` |
+| `NET` | `ip=<str> up=<0\|1> [ping=<n\|->]` | every heartbeat + on every ETH or Wi-Fi event | `/info` status store. `ip=` is the active uplink's address (Ethernet, or the Wi-Fi fallback, `network-master.md` §4.1). `up=0` carries empty `ip=` and no `ping=` |
 | `DB` | `latest=<n\|-> time=<0\|1> bottles=<n\|-> drops=<n> ready=<0\|1> aexp=<n\|-> adur=<n\|-> asrc=<db\|local\|-> pexp=<n\|-> pdur=<n\|-> cfgmax=<n\|-> queued=<n> reads=<ms\|-> ack=<ms\|-> state=<word>` | every heartbeat + after each DB pass | `/info` DB/config/queue stores and the `/control` start gate. `-` = unknown; `latest=0` means "no rows yet", which the display maps to -1 |
 | `LOG` | `<text>` | continuously | print `"[W32] " + text` on the display's USB console, verbatim, never through a printf format string |
 
@@ -373,4 +373,4 @@ with this port.
    `display-sim`, `network-master`.
 
 ---
-Updated at 2026-11-24-12:34.
+Updated at 2026-11-26-12:24.

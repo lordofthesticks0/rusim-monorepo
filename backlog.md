@@ -10,3 +10,4 @@
 - [FIRMWARE] Display trend: 12 min window (24 points × 30 s) and wiped after a 90 s outage. Longer window needs memory (move `trend` to PSRAM?) and a test-contract change. docs/plans-and-audits/lvgl-ui-ux-audit.md §7.
 - [FIRMWARE] Host test "trend / one point per new frame" fails (already on ec70151): expects a trend point the 30 s trend step does not write.
 - [FIRMWARE] Display: show real elapsed time for a run adopted after a display reboot (WT32 would need to send the run start time).
+- [FIRMWARE] WT32 DB authentication / initial config pull can take up to ~5 min and block experiment starts (`ready=0`): start NTP on `GOT_IP` without resetting SNTP on retry, use a short retry interval while `!dbConfigReady` instead of 30 s `kIntervalMs`, remove duplicate `probeOnline()` / `stageAtMs = 0` wait / pre-first-pass ping, and reuse TLS across a DB pass. See `docs/plans-and-audits/WT32-audit.md`.

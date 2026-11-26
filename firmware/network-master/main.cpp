@@ -3,6 +3,7 @@
 #include <ESPping.h>
 #include <HTTPClient.h>
 #include <WebServer.h>
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <time.h>
 
@@ -16,6 +17,10 @@
 //
 // - Brings up the LAN8720 over RMII (variant defaults: ADDR 1, PWR 16,
 //   MDC 23, MDIO 18).
+// - Falls back to Wi-Fi (station mode, SSID RUSIM_WIFI_SSID) when Ethernet has
+//   no DHCP lease for kEthFallbackMs, and turns Wi-Fi off again as soon as
+//   Ethernet gets a lease. Everything above the IP layer (portal login, ping,
+//   204 probe, Supabase, the port-80 login page) is interface-agnostic.
 // - Is a peer on the rusim-line v1 link to the display over UART0:
 //   Debug-header TXD (IO1) -> display IO18 (RX),
 //   Debug-header RXD (IO3) <- display IO17 (TX), 115200 8N1, common GND.
@@ -72,6 +77,24 @@ static const uint32_t kIntervalMs = 30000;
 // walled networks answer 200 (interception page) or a 3xx redirect to login.
 // Plain HTTP, so the check costs one request instead of a TLS handshake.
 static const char* kCaptiveProbeUrl = "http://connectivitycheck.gstatic.com/generate_204";
+
+// --- Wi-Fi fallback uplink ---
+// Ethernet is the primary uplink. When it has had no DHCP lease for
+// kEthFallbackMs (cable unplugged, dead switch port, no DHCP answer, or
+// ETH.begin() failure), the board joins RUSIM_WIFI_SSID as a station. An empty
+// RUSIM_WIFI_PASS means an open network. Both can be overridden from
+// platformio.ini, e.g. build_flags = -D RUSIM_WIFI_PASS=\"secret\".
+#ifndef RUSIM_WIFI_SSID
+#define RUSIM_WIFI_SSID "UnpadWiFiGuest"
+#endif
+#ifndef RUSIM_WIFI_PASS
+#define RUSIM_WIFI_PASS ""
+#endif
+static const uint32_t kEthFallbackMs = 15000;
+// Safety retry while Wi-Fi is on but not connected. The core already retries
+// transient failures (AP not found, beacon timeout); this covers the reasons
+// it gives up on, such as a refused association.
+static const uint32_t kWifiRetryMs = 60000;
 
 // --- Supabase real-data fetch (backlog #1) + NTP (backlog #12) ---
 // Hardcoded development configuration; no credential build flags required.
@@ -238,6 +261,41 @@ static volatile int ethEventCode = 0;  // set by the event task, logged in loop(
 static volatile bool netDirty = false;
 static int lastPingMs = -1;  // -1 = no measurement yet / failed
 
+// Wi-Fi fallback state. wifi_connected and wifiEventCode are written by the
+// event task like their Ethernet twins; the rest belongs to loop().
+static volatile bool wifi_connected = false;  // Wi-Fi STA holds a DHCP lease
+static volatile int wifiEventCode = 0;
+static bool wifiActive = false;     // the fallback has started the Wi-Fi STA
+static uint32_t ethLastUpMs = 0;    // last millis() Ethernet had a lease (or boot)
+static uint32_t wifiRetryAtMs = 0;  // last connect attempt or last time connected
+
+// The interface the network currently goes through. Ethernet wins whenever it
+// holds a lease; Wi-Fi only counts while Ethernet does not.
+enum Uplink : uint8_t { UPLINK_NONE, UPLINK_ETH, UPLINK_WIFI };
+// The uplink the stage machine left WAIT_IP on. A different uplink later
+// means a different portal client, so the gate starts over (see loop()).
+static Uplink stageUplink = UPLINK_NONE;
+
+static Uplink net_uplink() {
+  if (eth_connected) return UPLINK_ETH;
+  // wifiActive guards against a late GOT_IP event that the event task
+  // delivers after loop() has already switched Wi-Fi off.
+  if (wifiActive && wifi_connected) return UPLINK_WIFI;
+  return UPLINK_NONE;
+}
+
+static const char* uplink_tag(Uplink u) {
+  return u == UPLINK_ETH ? "ETH" : (u == UPLINK_WIFI ? "WIFI" : "NET");
+}
+
+static IPAddress net_local_ip() {
+  switch (net_uplink()) {
+    case UPLINK_ETH: return ETH.localIP();
+    case UPLINK_WIFI: return WiFi.localIP();
+    default: return IPAddress(0, 0, 0, 0);
+  }
+}
+
 static uint32_t ledOffMs = 0;
 // Push-queue counters live here because the DB line and the DUMP snapshot
 // report them; the queue itself is defined further down.
@@ -382,7 +440,8 @@ static const char* const kMetBootName[MB_COUNT] = {
     "auth", "ready", "sens_first", "enq_first", "ack_first"};
 static uint32_t s_metBootMs[MB_COUNT] = {0};
 static bool s_metBootSeen[MB_COUNT] = {false};
-// Ethernet events arrive on the event task; it only stamps, loop() logs.
+// Ethernet and Wi-Fi events arrive on the event task; it only stamps, loop()
+// logs. got_ip is stamped by whichever uplink gets a lease first.
 static volatile uint32_t s_metEthStampMs[MB_COUNT] = {0};
 
 static void met_boot(MetBoot b) {
@@ -460,13 +519,15 @@ static void link_emit_result(bool ok) {
 }
 
 static void link_emit_net() {
-  bool up = eth_connected;
+  // The wire format does not name the interface; the IP is the active
+  // uplink's (Ethernet or the Wi-Fi fallback).
+  bool up = net_uplink() != UPLINK_NONE;
   if (!up) {
     // up=0 carries an empty ip= and no ping= field.
     Serial.println("NET ip= up=0");
     return;
   }
-  IPAddress a = ETH.localIP();
+  IPAddress a = net_local_ip();
   char ip[24];
   snprintf(ip, sizeof(ip), "%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
   if (lastPingMs >= 0) {
@@ -810,13 +871,13 @@ static void handleLogin() {
 }
 
 static void link_log_dump() {
-  IPAddress a = ETH.localIP();
+  IPAddress a = net_local_ip();
   char ip[24];
   snprintf(ip, sizeof(ip), "%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
   logf("[DUMP] stage=%d eth=%d ip=%s exp=%d run=%d dur=%d dbLatest=%d ntp=%d "
        "bottles=%d queued=%u drops=%u verdict=%d sensOk=%u sensFail=%u sensAge=%d "
        "ready=%d runActive=%d aexp=%ld adur=%ld asrc=%s ack=%ld reads=%ld "
-       "idle=%u clock=%u dup=%u bad=%u skip=%u acks=%u state=%s",
+       "idle=%u clock=%u dup=%u bad=%u skip=%u acks=%u state=%s uplink=%s wifi=%d",
        (int)stage, eth_connected ? 1 : 0, ip, expNum, expRunning ? 1 : 0, durationH,
        dbLatest, ntpSynced ? 1 : 0, dbBottleCount, (unsigned)s_pushCount,
        (unsigned)s_pushDrops, haveVerdict ? (lastVerdict ? 1 : 2) : 0,
@@ -828,7 +889,8 @@ static void link_log_dump() {
        dbConfigReadOkMs != 0 ? (long)(millis() - dbConfigReadOkMs) : -1L,
        (unsigned)s_pushIdleRounds, (unsigned)s_pushClockRejects,
        (unsigned)s_pushDupRejects, (unsigned)s_pushBadValues,
-       (unsigned)s_pushBottleSkips, (unsigned)s_pushAckRounds, dbFaultName(dbFault));
+       (unsigned)s_pushBottleSkips, (unsigned)s_pushAckRounds, dbFaultName(dbFault),
+       uplink_tag(net_uplink()), wifiActive ? (wifi_connected ? 2 : 1) : 0);
 }
 
 #if RUSIM_METRICS
@@ -985,9 +1047,12 @@ static void link_heartbeat_tick() {
   link_emit_truth();
 }
 
-// --- Ethernet connectivity and portal login ---
+// --- Ethernet / Wi-Fi connectivity and portal login ---
 
-void onEthEvent(WiFiEvent_t event) {
+// Runs on the ESP32 event task, not in loop(): it only sets flags and codes.
+// Ethernet and the Wi-Fi station share one handler because the core
+// dispatches both through WiFi.onEvent().
+void onNetEvent(WiFiEvent_t event) {
   switch (event) {
     case ARDUINO_EVENT_ETH_START:
       ETH.setHostname("rusim-master");
@@ -1017,6 +1082,27 @@ void onEthEvent(WiFiEvent_t event) {
       lastPingMs = -1;
       ethEventCode = 4;
       netDirty = true;
+      break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+#if RUSIM_METRICS
+      if (s_metEthStampMs[MB_GOT_IP] == 0) s_metEthStampMs[MB_GOT_IP] = millis();
+#endif
+      wifi_connected = true;
+      lastPingMs = -1;
+      wifiEventCode = 1;
+      netDirty = true;
+      break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+    case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+    case ARDUINO_EVENT_WIFI_STA_STOP:
+      // DISCONNECTED repeats on every failed retry while the AP is missing;
+      // only the transition from connected is reported.
+      if (wifi_connected) {
+        wifi_connected = false;
+        lastPingMs = -1;
+        wifiEventCode = 2;
+        netDirty = true;
+      }
       break;
     default:
       break;
@@ -1049,6 +1135,81 @@ static void log_eth_event() {
       break;
     default:
       break;
+  }
+}
+
+static void log_wifi_event() {
+  int code = wifiEventCode;
+  wifiEventCode = 0;
+  if (code == 1) {
+    IPAddress ip = WiFi.localIP();
+    IPAddress gw = WiFi.gatewayIP();
+    logf("[WIFI] Got IP %u.%u.%u.%u gw %u.%u.%u.%u on '%s' rssi %d dBm mac %s",
+         ip[0], ip[1], ip[2], ip[3], gw[0], gw[1], gw[2], gw[3], RUSIM_WIFI_SSID,
+         (int)WiFi.RSSI(), WiFi.macAddress().c_str());
+  } else if (code == 2) {
+    logf("[WIFI] Disconnected from '%s'", RUSIM_WIFI_SSID);
+  }
+}
+
+// Ethernet-first uplink selection, called once per loop() iteration.
+// - Ethernet holds a lease: Wi-Fi must be off. lwIP sends traffic through the
+//   highest-priority interface that is up, and the Wi-Fi station (route
+//   priority 100) outranks Ethernet (50), so leaving Wi-Fi on would silently
+//   move every request to Wi-Fi.
+// - No Ethernet lease for kEthFallbackMs: start the Wi-Fi station.
+// - Wi-Fi on but not connected for kWifiRetryMs: retry the join.
+static void wifi_fallback_tick() {
+  const uint32_t now = millis();
+  if (eth_connected) {
+    ethLastUpMs = now;
+    if (wifiActive) {
+      logf("[WIFI] Ethernet is back; turning Wi-Fi off");
+      // Two calls on purpose: disconnect(true) skips the radio-off step when
+      // the disconnect itself fails (never associated).
+      WiFi.disconnect();
+      WiFi.mode(WIFI_OFF);
+      wifiActive = false;
+      wifi_connected = false;
+      netDirty = true;
+    }
+    return;
+  }
+  if (!wifiActive) {
+    if (now - ethLastUpMs < kEthFallbackMs) return;
+    logf("[WIFI] no Ethernet lease for %u s; joining '%s'",
+         (unsigned)(kEthFallbackMs / 1000), RUSIM_WIFI_SSID);
+    wifi_connected = false;  // drop any stale flag from a previous session
+    WiFi.persistent(false);  // keep the SSID out of NVS flash
+    WiFi.setHostname("rusim-master");
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(RUSIM_WIFI_SSID, RUSIM_WIFI_PASS);
+    wifiActive = true;
+    wifiRetryAtMs = now;
+    return;
+  }
+  if (wifi_connected) {
+    wifiRetryAtMs = now;
+    return;
+  }
+  if (now - wifiRetryAtMs >= kWifiRetryMs) {
+    wifiRetryAtMs = now;
+    logf("[WIFI] not connected to '%s' yet; retrying", RUSIM_WIFI_SSID);
+    WiFi.disconnect();
+    WiFi.begin(RUSIM_WIFI_SSID, RUSIM_WIFI_PASS);
+  }
+}
+
+// Logs why the stage machine returns to WAIT_IP: the uplink it started on is
+// gone, or another uplink took over (Wi-Fi fallback or Ethernet return).
+static void log_uplink_change(const char* where) {
+  Uplink now = net_uplink();
+  if (now == UPLINK_NONE) {
+    logf("[%s] link lost %s, back to WAIT_IP", uplink_tag(stageUplink), where);
+  } else {
+    logf("[NET] uplink %s -> %s %s, back to WAIT_IP", uplink_tag(stageUplink),
+         uplink_tag(now), where);
   }
 }
 
@@ -2830,16 +2991,21 @@ void setup() {
   // Make the first poll due now instead of kSensPollMs after boot.
   lastSensPollMs = millis() - kSensPollMs;
 
-  WiFi.onEvent(onEthEvent);
+  WiFi.onEvent(onNetEvent);
 
   // Explicit WT32-ETH01 RMII pins (same as variant defaults in pins_arduino.h):
   // PHY addr 1, power pin 16, MDC 23, MDIO 18, LAN8720, 50 MHz clock in on GPIO0.
+  // The fallback timer starts here; a failed ETH.begin() makes it due now.
   if (!ETH.begin(ETH_PHY_ADDR, ETH_PHY_POWER, ETH_PHY_MDC, ETH_PHY_MDIO,
                  ETH_PHY_TYPE, ETH_CLK_MODE)) {
     logf("[ETH] ERROR: ETH.begin() failed");
+    ethLastUpMs = millis() - kEthFallbackMs;
   } else {
     logf("[ETH] Waiting for link + DHCP...");
+    ethLastUpMs = millis();
   }
+  logf("[WIFI] fallback: '%s' after %u s without an Ethernet lease", RUSIM_WIFI_SSID,
+       (unsigned)(kEthFallbackMs / 1000));
 
   webServer.on("/", HTTP_GET, handleRoot);
   webServer.on("/login", HTTP_POST, handleLogin);
@@ -2867,6 +3033,10 @@ void loop() {
     link_emit_net();
   }
   if (ethEventCode != 0) log_eth_event();
+  if (wifiEventCode != 0) log_wifi_event();
+  // Before the stage machine, so a returning Ethernet turns Wi-Fi off before
+  // any request of this iteration can be routed through Wi-Fi.
+  wifi_fallback_tick();
   link_heartbeat_tick();
   // Served after the link so a slow web request cannot delay the UART.
   webServer.handleClient();
@@ -2884,21 +3054,26 @@ void loop() {
 
   switch (stage) {
     case STAGE_WAIT_IP:
-      if (eth_connected) {
-        logf("[LINK] link up, waiting for login at http://%s/", ETH.localIP().toString().c_str());
+      if (net_uplink() != UPLINK_NONE) {
+        stageUplink = net_uplink();
+        logf("[LINK] link up via %s, waiting for login at http://%s/",
+             uplink_tag(stageUplink), net_local_ip().toString().c_str());
+        // A new or regained uplink is a new portal client: probe its session
+        // now instead of waiting out the 30 s since the previous probe.
+        lastAuthProbeMs = millis() - kAuthProbeMs;
         stage = STAGE_NEED_CREDS;
         stageAtMs = 0;  // run the first cred tick immediately
       } else if (millis() - stageAtMs >= 2000) {
         stageAtMs = millis();
-        logf("[ETH] Waiting for IP address (DHCP)...");
+        logf("[%s] Waiting for IP address (DHCP)...", wifiActive ? "WIFI" : "ETH");
       }
       break;
 
     case STAGE_NEED_CREDS: {
       // Nothing but link work and the auth probe runs until a login is
       // submitted on the web page. LOGINREQ is re-sent every kCredPollMs.
-      if (!eth_connected) {
-        logf("[ETH] link lost while waiting for login");
+      if (net_uplink() != stageUplink) {
+        log_uplink_change("while waiting for login");
         link_emit_net();
         stage = STAGE_WAIT_IP;
         stageAtMs = millis();
@@ -2952,8 +3127,8 @@ void loop() {
     }
 
     case STAGE_RUN: {
-      if (!eth_connected) {
-        logf("[ETH] link lost in RUN, back to WAIT_IP");
+      if (net_uplink() != stageUplink) {
+        log_uplink_change("in RUN");
         link_emit_net();
         stage = STAGE_WAIT_IP;
         stageAtMs = millis();
@@ -2964,7 +3139,7 @@ void loop() {
       if (!netCycleNow && millis() - netCycleEndMs < kIntervalMs) break;
       netCycleNow = false;
 
-      logf("[ETH] Assigned IP: %s", ETH.localIP().toString().c_str());
+      logf("[%s] Assigned IP: %s", uplink_tag(stageUplink), net_local_ip().toString().c_str());
 
       bool ok = Ping.ping(kPingTarget, kPingCount);
       if (ok) {

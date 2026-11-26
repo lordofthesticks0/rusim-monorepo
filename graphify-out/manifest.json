@@ -300,9 +300,9 @@
     "semantic_hash": ""
   },
   "firmware/network-master/main.cpp": {
-    "mtime": 1795497495.5781546,
-    "seen": 1795498676.5023298,
-    "ast_hash": "18e74395a33acd383cf9fba8337d5a61",
+    "mtime": 1795670626.321065,
+    "seen": 1795670729.6440215,
+    "ast_hash": "7f74a44ecb20e6b04e288efa5d1bfcd1",
     "semantic_hash": ""
   },
   "firmware/network-master/supabase_ca.h": {
@@ -359,12 +359,6 @@
     "ast_hash": "d968743c312bf554eca04f7a4e610e7e",
     "semantic_hash": ""
   },
-  "legacy/slave/new-slave.cpp": {
-    "mtime": 1795426686.3263993,
-    "seen": 1795498676.5023687,
-    "ast_hash": "bdcf0a59c830748ae96e43599d5f790f",
-    "semantic_hash": ""
-  },
   "scripts-hardware/flash-factory.ts": {
     "mtime": 1790844076.9911537,
     "seen": 1795498676.5023704,
@@ -384,9 +378,9 @@
     "semantic_hash": ""
   },
   "scripts-hardware/read-legacy-slave.ts": {
-    "mtime": 1792832773.619977,
-    "seen": 1795498676.5023773,
-    "ast_hash": "e363048d64b0c0105fd9329499e067d6",
+    "mtime": 1795512370.6820824,
+    "seen": 1795670729.6449373,
+    "ast_hash": "12663f1b300973fb074cdfdbc2c51a28",
     "semantic_hash": ""
   },
   "skills-lock.json": {
@@ -408,9 +402,9 @@
     "semantic_hash": ""
   },
   "backlog.md": {
-    "mtime": 1795245817.0793164,
-    "seen": 1795498676.5024023,
-    "ast_hash": "b7524433a5ff7d259200f29ef8494f73",
+    "mtime": 1795611052.519368,
+    "seen": 1795670729.6452634,
+    "ast_hash": "16aa67cc3626ae8ab816a939e9bdf973",
     "semantic_hash": ""
   },
   "dashboard/index.html": {
@@ -432,9 +426,9 @@
     "semantic_hash": ""
   },
   "docs/index.md": {
-    "mtime": 1795498626.302618,
-    "seen": 1795498676.502433,
-    "ast_hash": "98246765c27ad4e51073850183d1887d",
+    "mtime": 1795611055.3663723,
+    "seen": 1795670729.6456385,
+    "ast_hash": "5428f538efc881b36d6a5b7b46f172b7",
     "semantic_hash": ""
   },
   "legacy/pi/water-control-system/templates/index.html": {
@@ -678,14 +672,14 @@
     "semantic_hash": ""
   },
   "docs/dashboard.md": {
-    "mtime": 1795498626.3020453,
-    "seen": 1795498676.5024154,
-    "ast_hash": "9e1e9bae9614b37401d61131d3dbb670",
+    "mtime": 1795510483.3695807,
+    "seen": 1795670729.6455145,
+    "ast_hash": "53e8161fa40a2d7d6331fb649d845697",
     "semantic_hash": ""
   },
   "docs/database.md": {
-    "mtime": 1795498609.0625746,
-    "seen": 1795498676.502417,
+    "mtime": 1795510483.3702,
+    "seen": 1795670729.6455169,
     "ast_hash": "3d7f873a5018ff10043360abb6baa5e9",
     "semantic_hash": ""
   },
@@ -702,8 +696,8 @@
     "semantic_hash": ""
   },
   "docs/display-docs.md": {
-    "mtime": 1795498609.0618134,
-    "seen": 1795498676.5024219,
+    "mtime": 1795510483.3692791,
+    "seen": 1795670729.6455553,
     "ast_hash": "b52a30bfd1042edc5df5cbe7c78230a9",
     "semantic_hash": ""
   },
@@ -762,21 +756,21 @@
     "semantic_hash": ""
   },
   "docs/legacy-slave-json-wrapper.md": {
-    "mtime": 1794934225.8644803,
-    "seen": 1795498676.5024416,
-    "ast_hash": "aa77770b891dee6b4e67f5adaba8d9dc",
+    "mtime": 1795512375.000494,
+    "seen": 1795670729.6456947,
+    "ast_hash": "7aea3735c239f49fe706062412bcb6a1",
     "semantic_hash": ""
   },
   "docs/legacy-slave.md": {
-    "mtime": 1795426692.840217,
-    "seen": 1795498676.5024433,
-    "ast_hash": "02342dda864b577df036462bcd5c1c38",
+    "mtime": 1795512371.6950524,
+    "seen": 1795670729.6456957,
+    "ast_hash": "910d9157bc4f3e847011620c211d035a",
     "semantic_hash": ""
   },
   "docs/link-serial-protocol.md": {
-    "mtime": 1795498583.5518517,
-    "seen": 1795498676.5024452,
-    "ast_hash": "dfbefe31388526c862a579e49a68447a",
+    "mtime": 1795670720.8780591,
+    "seen": 1795670729.6456969,
+    "ast_hash": "2a6cab5ded1c80b3022569028f175b24",
     "semantic_hash": ""
   },
   "docs/memory-safety-hardening.md": {
@@ -786,9 +780,9 @@
     "semantic_hash": ""
   },
   "docs/network-master.md": {
-    "mtime": 1795498583.55024,
-    "seen": 1795498676.50245,
-    "ast_hash": "af259b324265ad77be7ab491bf6a115a",
+    "mtime": 1795670710.018872,
+    "seen": 1795670729.645725,
+    "ast_hash": "827f4da7746dde0b3e46c53dc03f12c2",
     "semantic_hash": ""
   },
   "docs/pi-kiosk-font-scale.md": {
@@ -876,8 +870,8 @@
     "semantic_hash": ""
   },
   "docs/platformio-environments.md": {
-    "mtime": 1795498626.301532,
-    "seen": 1795498676.5024755,
+    "mtime": 1795510483.3690815,
+    "seen": 1795670729.6461298,
     "ast_hash": "5655d9e72d02f144f5c1d4fc6eb4f089",
     "semantic_hash": ""
   },
@@ -1050,20 +1044,20 @@
     "semantic_hash": ""
   },
   "dashboard/src/metrics.ts": {
-    "mtime": 1795498336.768796,
-    "seen": 1795498676.5022569,
-    "ast_hash": "9be3d2ef8d4725205901c273fe50cec1",
+    "mtime": 1795510483.3578837,
+    "seen": 1795670729.6425955,
+    "ast_hash": "685a6f635573eb688446d65a45707eeb",
     "semantic_hash": ""
   },
   "firmware/display-v9/metrics.cpp": {
-    "mtime": 1795497769.0393069,
-    "seen": 1795498676.502283,
-    "ast_hash": "4d5a8db906a2ed300019e8f8dd7da7a5",
+    "mtime": 1795577642.1779928,
+    "seen": 1795670729.6430988,
+    "ast_hash": "0ac1c3fe3e6e8e1a9c5407cf37a0593e",
     "semantic_hash": ""
   },
   "firmware/display-v9/metrics.h": {
-    "mtime": 1795497605.3906164,
-    "seen": 1795498676.5022848,
+    "mtime": 1795510483.3537126,
+    "seen": 1795670729.6431017,
     "ast_hash": "e49d4bb9d01f329c4c5297d55d22cf05",
     "semantic_hash": ""
   },
@@ -1074,20 +1068,20 @@
     "semantic_hash": ""
   },
   "verification/analyze.ts": {
-    "mtime": 1795498387.3474612,
-    "seen": 1795498676.5023804,
-    "ast_hash": "2ba9f2232268a9ce57e95be000b01ae7",
+    "mtime": 1795510483.3614664,
+    "seen": 1795670729.6449687,
+    "ast_hash": "f42c8e8710e2b5cc6b8c8a94f0eef13f",
     "semantic_hash": ""
   },
   "verification/boot-loop.ts": {
-    "mtime": 1795498358.3336294,
-    "seen": 1795498676.502382,
-    "ast_hash": "dce5634dbd07b9cdabec8ba4a666fc29",
+    "mtime": 1795503718.3828132,
+    "seen": 1795670729.644971,
+    "ast_hash": "5731407f7e2786c5c035dd6da9d3bf47",
     "semantic_hash": ""
   },
   "verification/capture.ts": {
-    "mtime": 1795498358.3350968,
-    "seen": 1795498676.5023837,
+    "mtime": 1795510483.362997,
+    "seen": 1795670729.644973,
     "ast_hash": "933da2086f9cab4f10c4e5833eb1ea26",
     "semantic_hash": ""
   },
@@ -1110,8 +1104,8 @@
     "semantic_hash": ""
   },
   "verification/fake-slave.ts": {
-    "mtime": 1795498104.4272814,
-    "seen": 1795498676.5023897,
+    "mtime": 1795510483.3596506,
+    "seen": 1795670729.645067,
     "ast_hash": "2bbdb86b2553dd8692b2b9863e6593bd",
     "semantic_hash": ""
   },
@@ -1122,8 +1116,8 @@
     "semantic_hash": ""
   },
   "verification/lib/log.ts": {
-    "mtime": 1795497879.983929,
-    "seen": 1795498676.5023925,
+    "mtime": 1795510483.3666286,
+    "seen": 1795670729.6450999,
     "ast_hash": "34047628e8ba7e3a1f42aaf55f4faef4",
     "semantic_hash": ""
   },
@@ -1146,9 +1140,51 @@
     "semantic_hash": ""
   },
   "docs/verification-toolkit.md": {
-    "mtime": 1795498548.8341901,
-    "seen": 1795498676.5025036,
-    "ast_hash": "ef8f597eb2c9e25fef2ee993197faec5",
+    "mtime": 1795670720.8785176,
+    "seen": 1795670729.6463764,
+    "ast_hash": "6307083ff300b49d370bf106ca300a3a",
+    "semantic_hash": ""
+  },
+  "legacy/slave/slave.cpp": {
+    "mtime": 1795582061.7832298,
+    "seen": 1795670729.6448064,
+    "ast_hash": "38b45fb61ff704ecef1ffdb819f5b47b",
+    "semantic_hash": ""
+  },
+  "scripts-hardware/pretty_monitor.py": {
+    "mtime": 1795502144.121126,
+    "seen": 1795670729.6449342,
+    "ast_hash": "44feebcda8b0f8e9e966c55837583e4d",
+    "semantic_hash": ""
+  },
+  "video-demo/Cargo.toml": {
+    "mtime": 1795596109.3815715,
+    "seen": 1795670729.6451986,
+    "ast_hash": "36617db0b3b00588b1782d642ac0315e",
+    "semantic_hash": ""
+  },
+  "video-demo/src/lib.rs": {
+    "mtime": 1795595933.5961318,
+    "seen": 1795670729.6452014,
+    "ast_hash": "9ebd0ec9eb9c847ef357c5058d52973e",
+    "semantic_hash": ""
+  },
+  "video-demo/src/main.rs": {
+    "mtime": 1795596085.4474025,
+    "seen": 1795670729.6452038,
+    "ast_hash": "2e12df81661d9f9608964b3dbd3e79c4",
+    "semantic_hash": ""
+  },
+  "docs/plans-and-audits/WT32-audit.md": {
+    "mtime": 1795611051.1573658,
+    "seen": 1795670729.6457818,
+    "ast_hash": "d8d14b506317af385775a4bcc9b312c1",
+    "semantic_hash": ""
+  },
+  "docs/video-demo.md": {
+    "mtime": 1795596464.2021449,
+    "seen": 1795670729.6463778,
+    "ast_hash": "45af8540e6bae82f01809f1740174bfe",
     "semantic_hash": ""
   }
 }

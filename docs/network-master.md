@@ -1,6 +1,7 @@
 # network-master (`firmware/network-master`) — production WT32 firmware
 
-Scope: production firmware for the WT32-ETH01. It brings up wired Ethernet,
+Scope: production firmware for the WT32-ETH01. It brings up wired Ethernet
+(falling back to the `UnpadWiFiGuest` Wi-Fi network when Ethernet is absent, §4.1),
 serves the captive-portal login page to a phone on port 80, submits the entered
 credentials to the upstream portal, then maintains connectivity with ping and
 a plain-HTTP 204 captive-portal probe. The display reports the WT32 IP and
@@ -21,6 +22,7 @@ documents the portal relay plan.
 | `monitor_speed` | 115200 |
 | Libraries | `dvarrel/ESPping@^1.0.5` |
 | Source | `firmware/network-master/main.cpp` |
+| Wi-Fi fallback | `RUSIM_WIFI_SSID` (default `"UnpadWiFiGuest"`), `RUSIM_WIFI_PASS` (default `""` = open network); optional `-D` overrides, see §4.1 |
 
 Build and flash:
 
@@ -205,14 +207,17 @@ credentials are not stored in NVS or flash and are not sent over `rusim-line`.
 WAIT_IP -> NEED_CREDS -> LOGIN -> RUN
    ^           ^                    |
    |___________|____________________|
-   link lost    login fail / walled mid-run
+   link lost /  login fail / walled mid-run
+   uplink changed
 ```
 
 - `WAIT_IP`: heartbeat `NET up=0`. Logs `[ETH] Waiting for IP address (DHCP)...`
-  every 2 s. `ETH_GOT_IP` moves to `NEED_CREDS`.
+  every 2 s (`[WIFI] ...` once the Wi-Fi fallback is joining). Either uplink
+  getting a lease (§4.1) moves to `NEED_CREDS` and records that uplink.
 - `NEED_CREDS`: every 5 s emits `NET up=1`, `DB` and `LOGINREQ`, and runs the
-  30 s already-authenticated probe (portal trigger + 204 probe). The web form
-  remains available at the WT32 IP.
+  30 s already-authenticated probe (portal trigger + 204 probe). The first
+  probe runs immediately after entering from `WAIT_IP`. The web form remains
+  available at the WT32 IP.
 - `LOGIN`: `doLogin()` (§5) uses the RAM-only pair collected by the web form,
   then emits `RESULT OK`/`FAIL`. Success moves to `RUN`; failure returns to
   `NEED_CREDS` and the page offers a retry.
@@ -240,6 +245,63 @@ needed.
 
 There is no `DONE` halt state: every failure path returns to the display.
 Reset is never required to retry.
+
+`NEED_CREDS` and `RUN` return to `WAIT_IP` when the active uplink differs from
+the one recorded on leaving `WAIT_IP`: the link is gone, or the other interface
+took over. A new uplink is a new client to the captive portal (different MAC
+and IP), so the login gate starts over on it.
+
+### 4.1 Wi-Fi fallback
+
+Ethernet is the primary uplink. Wi-Fi (station mode) is used only while
+Ethernet has no DHCP lease. `wifi_fallback_tick()` runs once per `loop()`
+iteration, before the stage machine and the DB pass.
+
+| Condition | Action |
+|---|---|
+| Ethernet has had no lease for 15 s (`kEthFallbackMs`) since boot or since it was last up | Start Wi-Fi and join `RUSIM_WIFI_SSID` |
+| `ETH.begin()` failed at boot | Same, without the 15 s wait |
+| Wi-Fi on, not connected for 60 s (`kWifiRetryMs`) | Disconnect and join again |
+| Ethernet gets a lease while Wi-Fi is on | Disconnect and switch Wi-Fi off |
+
+"No lease" covers an unplugged cable, a dead switch port, a link without a DHCP
+answer, and a PHY that failed to start. A link that comes back within 15 s
+never starts Wi-Fi.
+
+Why Wi-Fi is switched off when Ethernet returns: lwIP sends traffic through
+the highest-priority interface that is up. In ESP-IDF 4.4 (Arduino core
+2.0.17) the Wi-Fi station has route priority 100 and Ethernet has 50, so with
+both up every request would go over Wi-Fi.
+
+Above the IP layer nothing is interface-specific. `HTTPClient`, `ESPping`,
+`WiFiClientSecure` and the port-80 `WebServer` all use whichever interface is
+up, so the portal login, ping, 204 probe, Supabase pass and login page work
+unchanged over Wi-Fi. `NET ip=` carries the active uplink's address. The wire
+format does not name the interface; the `LOG` lines and `DUMP` do.
+
+Configuration:
+
+- The SSID and password are compile-time constants. The default is the open
+  network `UnpadWiFiGuest` with an empty password. To change either without
+  editing the source, add to the environment in `platformio.ini`:
+  `build_flags = -D RUSIM_WIFI_SSID=\"Name\" -D RUSIM_WIFI_PASS=\"secret\"`.
+- `WiFi.persistent(false)` keeps the SSID out of NVS flash. Nothing is stored.
+- The station uses hostname `rusim-master`, as Ethernet does.
+
+`DUMP` adds `uplink=ETH|WIFI|NET` (`NET` = none) and `wifi=0|1|2` (off,
+joining, connected).
+
+Limitations:
+
+- If `UnpadWiFiGuest` uses a captive portal, `doLogin()` must handle it. The
+  portal parser (§5) was built against the wired portal and has not been
+  tested against the guest Wi-Fi portal.
+- Guest networks often enable client isolation. The phone can then not reach
+  `http://<WT32-IP>/` even on the same SSID. Only the automatic
+  already-authenticated probe works in that case.
+- Wi-Fi transmit bursts reach ~240 mA (ESP32 datasheet, 802.11b TX). A weak
+  3.3 V supply can brown out the module.
+- Not yet verified on hardware.
 
 ## 5. Portal login (`doLogin()`)
 
@@ -469,6 +531,27 @@ LOG [LOGIN] FAILED: still walled (wrong credentials or portal changed).
 LOG [LOGIN] will wait for a corrected pair from the web form
 ```
 
+Boot without an Ethernet cable, then the cable plugged in later (§4.1). These
+lines come from the source, not from a hardware capture:
+
+```
+LOG [ETH] Waiting for link + DHCP...
+LOG [WIFI] fallback: 'UnpadWiFiGuest' after 15 s without an Ethernet lease
+LOG [ETH] Started
+LOG [ETH] Waiting for IP address (DHCP)...
+LOG [WIFI] no Ethernet lease for 15 s; joining 'UnpadWiFiGuest'
+LOG [WIFI] Waiting for IP address (DHCP)...
+LOG [WIFI] Got IP 10.x.x.x gw 10.x.x.1 on 'UnpadWiFiGuest' rssi -61 dBm mac ...
+LOG [LINK] link up via WIFI, waiting for login at http://10.x.x.x/
+LOG [LOGIN] no login submitted; probing for existing session...
+...
+LOG [ETH] Link up
+LOG [ETH] Got IP 10.92.128.22 gw ... mask ... mac ...
+LOG [WIFI] Ethernet is back; turning Wi-Fi off
+LOG [NET] uplink WIFI -> ETH in RUN, back to WAIT_IP
+LOG [LINK] link up via ETH, waiting for login at http://10.92.128.22/
+```
+
 ## 8. Related documents
 
 - `link-serial-protocol.md` — the wire spec, log forwarding, `PASSTH`, and
@@ -485,4 +568,4 @@ LOG [LOGIN] will wait for a corrected pair from the web form
 - `hardware.md` — board pinouts (read-only reference).
 
 ---
-Updated at 2026-11-24-12:34.
+Updated at 2026-11-26-12:24.

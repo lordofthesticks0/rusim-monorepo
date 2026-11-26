@@ -7,7 +7,7 @@
 //! camera, the spotlight, the touch marker and the captions are all built from that
 //! table in `VideoDemoVideo::new`, so changing a beat's length moves everything after it.
 use fframes::{
-    AnimateRuntimeInput, AudioMap, Color, Duration, FFramesContext, Frame, Scene, Scenes, Svgr,
+    AnimateRuntimeInput, AudioMap, AudioTimestamp::*, AudioTrack, Color, Duration, FFramesContext, Frame, Scene, Scenes, Svgr,
     Video,
     animation::{AnimationRuntime, Easing, KeyFrame, KeyFramesAnimation},
     include_media_dir,
@@ -22,8 +22,10 @@ pub const HEIGHT: usize = 1080;
 
 // Colours. The light values are the display's own tokens from
 // `firmware/display-v9/ui_config.h`, so the frame matches the screenshots.
-const STAGE: &str = "#0e1319"; // backdrop, a darker UI_COL_SCRIM (#2A313C)
-const GLOW: &str = "#1b3247"; // UI_COL_ACCENT mixed into the backdrop
+/// Backdrop, a darker UI_COL_SCRIM (#2A313C). One flat colour on purpose: a soft
+/// gradient or blur behind the device turns into visible bands and blocks after video
+/// compression.
+const STAGE: &str = "#0e1319";
 const ACCENT_SOFT: &str = "#8cbde0"; // UI_COL_ACCENT lightened for the dark backdrop
 const TEXT: &str = "#eef2f7"; // UI_COL_BG
 const MUTED: &str = "#a3afbd";
@@ -70,6 +72,18 @@ const DRIFT: f32 = 1.025;
 const DIM: f32 = 0.55;
 /// `UI_HOLD_TO_CONFIRM_MS` (2000 ms): the real hold-to-confirm time.
 const HOLD_SECONDS: f32 = 2.0;
+
+// Sound effects in `media/`, synthesised with ffmpeg (see `docs/video-demo.md`).
+const SFX_TAP: &str = "sfx-tap.wav";
+const SFX_HOLD: &str = "sfx-hold.wav";
+const SFX_ERROR: &str = "sfx-error.wav";
+const SFX_WHOOSH: &str = "sfx-whoosh.wav";
+const SFX_SLEEP: &str = "sfx-sleep.wav";
+const SFX_WAKE: &str = "sfx-wake.wav";
+const SFX_SWELL: &str = "sfx-swell.wav";
+/// The whoosh file is loudest at its middle (0.6 s). Starting it 0.3 s into a glide puts
+/// that peak at the glide's fastest point (half of `GLIDE`).
+const WHOOSH_LEAD: f32 = GLIDE / 2.0 - 0.6;
 
 static EASE_IN: Easing = Easing::EaseIn;
 static EASE_OUT: Easing = Easing::EaseOut;
@@ -462,6 +476,61 @@ fn touch_times(hold: bool, at: f32) -> (f32, f32, f32) {
     (arrive - 1.6, arrive, press)
 }
 
+/// One sound effect at a global second. `pan` is -1 (left) to 1 (right).
+#[derive(Debug)]
+struct Cue {
+    file: &'static str,
+    at: f32,
+    gain_db: f32,
+    pan: f32,
+}
+
+/// Stereo position of a touch at display x, so a tap on the left is heard on the left.
+fn pan_for(x: f32) -> f32 {
+    (x / UI_W * 2.0 - 1.0) * 0.4
+}
+
+/// Every sound of the video, derived from `BEATS` and the same timing functions the
+/// animation uses, so changing a beat's length moves its sounds with it.
+fn cues(starts: &[f32], total: f32) -> Vec<Cue> {
+    let cue = |file, at, gain_db, pan| Cue { file, at, gain_db, pan };
+    let mut cues = vec![
+        // The device fades in (`presence`) and out at the end.
+        cue(SFX_SWELL, 0.3, -7.0, 0.0),
+        cue(SFX_SWELL, total - 3.6, -10.0, 0.0),
+    ];
+    for (i, (beat, &start)) in BEATS.iter().zip(starts).enumerate() {
+        let commit = start + beat.seconds;
+        // A quiet whoosh under each camera glide.
+        if start > 0.0 {
+            cues.push(cue(SFX_WHOOSH, start + WHOOSH_LEAD, -16.0, 0.0));
+        }
+        match beat.gesture {
+            Gesture::None => {}
+            Gesture::Tap(x, _) => {
+                let (_, _, press) = touch_times(false, commit);
+                cues.push(cue(SFX_TAP, press + 0.1, -3.0, pan_for(x)));
+            }
+            Gesture::Hold(x, _) => {
+                let (_, _, press) = touch_times(true, commit);
+                cues.push(cue(SFX_TAP, press + 0.1, -3.0, pan_for(x)));
+                // The rising tone runs while the ring fills.
+                cues.push(cue(SFX_HOLD, press, -10.0, pan_for(x)));
+                // The only hold leads to the "start blocked" message.
+                let blocked = BEATS.get(i + 1).is_some_and(|next| next.screen == MODAL);
+                cues.push(cue(if blocked { SFX_ERROR } else { SFX_TAP }, commit + 0.05, -5.0, 0.0));
+            }
+        }
+        // Same seconds as `backlight_off` in `VideoDemoVideo::new`.
+        match beat.kind {
+            Kind::Sleep => cues.push(cue(SFX_SLEEP, start + 2.2, -8.0, 0.0)),
+            Kind::End => cues.push(cue(SFX_WAKE, start + 0.1, -8.0, 0.0)),
+            _ => {}
+        }
+    }
+    cues
+}
+
 impl Touch {
     /// `at` is when the gesture commits and the next screen appears.
     fn new(gesture: Gesture, at: f32) -> Option<Self> {
@@ -650,6 +719,7 @@ pub struct VideoDemoVideo {
     /// Fade of the whole device at the start and end.
     presence: KeyFramesAnimation<f32>,
     touches: Vec<Touch>,
+    cues: Vec<Cue>,
 }
 
 impl VideoDemoVideo {
@@ -712,6 +782,8 @@ impl VideoDemoVideo {
             .filter_map(|(beat, &start)| Touch::new(beat.gesture, start + beat.seconds))
             .collect();
 
+        let cues = cues(&starts, total);
+
         let scenes = BEATS
             .iter()
             .enumerate()
@@ -731,6 +803,7 @@ impl VideoDemoVideo {
                 kf(total - 3.2, total - 0.3, 1.0, 0.0, &EASE_IN_OUT),
             ]),
             touches,
+            cues,
         }
     }
 
@@ -813,9 +886,11 @@ impl Video for VideoDemoVideo {
     }
 
     fn audio(&self) -> AudioMap<'_> {
-        // Silent: no music or voice-over was supplied. Put a file into `media/` and add
-        // an `AudioTrack` here to score it (see the fframes skill, audio.md).
-        AudioMap::none()
+        // Sound effects only: no music or voice-over was supplied.
+        self.cues
+            .iter()
+            .map(|cue| AudioTrack::new(cue.file, Second(cue.at)..Eof).gain_db(cue.gain_db).pan(cue.pan))
+            .collect()
     }
 
     fn define_scenes(&self) -> Scenes<'_> {
@@ -841,10 +916,6 @@ impl Video for VideoDemoVideo {
         fframes::svgr!(
             <svg xmlns="http://www.w3.org/2000/svg" width={WIDTH} height={HEIGHT} viewBox="0 0 1920 1080">
                 <defs>
-                    <radialGradient id="glow" cx="960" cy="425" r="1000" gradientUnits="userSpaceOnUse">
-                        <stop offset="0" stop-color={GLOW} />
-                        <stop offset="1" stop-color={STAGE} />
-                    </radialGradient>
                     // The device fades out above the captions instead of running into them.
                     <linearGradient id="stage-fade" x1="0" y1="812" x2="0" y2="858" gradientUnits="userSpaceOnUse">
                         <stop offset="0" stop-color="#ffffff" />
@@ -856,15 +927,12 @@ impl Video for VideoDemoVideo {
                     <clipPath id="panel">
                         <rect width="800" height="480" />
                     </clipPath>
-                    <filter id="device-shadow" x="-20%" y="-20%" width="140%" height="160%">
-                        <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.6" />
-                    </filter>
                 </defs>
-                <rect width="1920" height="1080" fill="url(#glow)" />
+                <rect width="1920" height="1080" fill={STAGE} />
                 <g mask="url(#stage)" opacity={frame.animate(&self.presence)}>
                     <g transform={camera}>
                         <rect x="-16" y="-16" width="832" height="512" rx="22" fill="#07090c"
-                            stroke="#2b333e" stroke-width="1" filter="url(#device-shadow)" />
+                            stroke="#2b333e" stroke-width="1" />
                         <rect x="-1" y="-1" width="802" height="482" fill="#000000" />
                         <g clip-path="url(#panel)">
                             {self.screens(&frame, ctx)}
