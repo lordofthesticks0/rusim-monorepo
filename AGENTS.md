@@ -43,6 +43,9 @@ The following rules are mandatory for all agents.
 - Use Bun for package management, scripts, development, and testing. Do not substitute npm, yarn, or pnpm.
 - Consult the relevant database documentation in `docs/` before making database-related changes.
 - Never read or modify `.env` files. Use `.env.example` when configuration details are needed.
+- Production deploys go through a Netlify build hook: `curl -X POST -d {} https://api.netlify.com/build_hooks/6b08f9e7b12d00b05d3b37bd`.
+  - Netlify builds from the GitHub repository, not the local working tree, so changes must be committed and pushed before triggering it.
+  - Ask the user for explicit approval before triggering a production deploy.
 
 ### Legacy Work
 - Scope legacy-related work to `legacy/`.
@@ -64,6 +67,7 @@ The following rules are mandatory for all agents.
 - Read documentation only when relevant to the subsystem being worked on.
 - Do not read unrelated documentation merely to learn its formatting. Keep documentation factual, descriptive, and educational.
 - Use minimal wording without unnecessary metaphors, embellishments, or vague expressions. Keep it simple for the user.
+- If there is information you cannot find without reading code, put it in the documentation after you have discovered it. 
 
 #### Documentation Format
 

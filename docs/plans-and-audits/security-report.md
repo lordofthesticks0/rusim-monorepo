@@ -64,7 +64,7 @@ Fix: issue only high-entropy random tokens (≥128 bits, e.g. `openssl rand -hex
 
 ### 5. Low — functional / ops
 
-- `fetchReadings` requests `.limit(5000)` (`src/data.ts:141`) but local `config.toml:18` sets `max_rows = 1000` (remote PostgREST cap may similarly truncate). Page or raise the cap deliberately.
+- `fetchReadings` requests `.limit(5000)` (`src/data.ts:141`) but local `config.toml:18` sets `max_rows = 1000` (remote PostgREST cap may similarly truncate). Page or raise the cap deliberately. **Resolved:** reads were moved to 1000-row pages, and on 2026-11-27 `fetchReadings` was removed. Every read now pages by keyset in 1000-row pages, bounded by a 24 h window and a 69,120-row ceiling (`dashboard.md` §5.3).
 - `DATABASE_URL` in local config allows `0.0.0.0/0`; ensure prod uses a least-privilege role and `dev-db.ts` never runs against prod (it `DELETE`s per experiment).
 - One token per device, no rotation UI; rotation is manual SQL/`dev-db --only token`. Document rotation runbook; use a separate prod Supabase project and never reuse the device-0 dev token.
 
@@ -108,4 +108,4 @@ select (select count(*) from device_data.devices) as devices,
 > Note: This report has been acted upon.
 
 ---
-Updated at 2026-11-17-23:47.
+Updated at 2026-11-27-10:47.

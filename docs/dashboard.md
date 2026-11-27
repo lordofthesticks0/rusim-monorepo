@@ -23,17 +23,21 @@ There is no UI framework, no state library, and no chart library. The chart is h
 | `public/favicon.svg` | 7 | Browser-tab icon: the `BrandMark` glyph on an off-white tile, served at `/favicon.svg` |
 | `public/favicon-32.png` | — | 32×32 raster fallback of the same mark for browsers without SVG favicon support |
 | `public/unpad-mono.svg` | 3 | One-colour Universitas Padjadjaran emblem for the login screen, black ink (§5.11) |
-| `src/App.tsx` | 1468 | Everything visible: login screen (§5.11), all three views, all components, all chart math |
-| `src/data.ts` | 278 | Every Supabase read, the auth RPCs, and the non-numbering domain logic |
+| `src/App.tsx` | 1736 | Everything visible: login screen (§5.11), all three views, all components, all chart math, the transition stage (§5.12) |
+| `src/brandTransition.ts` | 347 | The logout and sign-in transitions: phase choreography with the Web Animations API, plus pure geometry helpers (§5.12) |
+| `src/chartInteraction.ts` | 86 | Pure chart-interaction helpers: nearest sample from pointer x, keyboard stepping, nearest series, when to draw sample dots (§6.3) |
+| `src/data.ts` | 410 | Every Supabase read (latest row, experiment rows, experiment list), the auth RPCs, and the non-numbering domain logic |
+| `src/readingCache.ts` | 145 | Pure reading-cache helpers: merge, dedupe and 24 h window trim, truncation flag, incremental-poll start time, folding the newest row into the experiment list (§5.3) |
+| `src/useReadingCache.ts` | 90 | `useReadingCache` hook: the in-memory per-experiment store shared by all three views, plus per-experiment load progress (§5.3, §5.7) |
 | `src/chambers.ts` | 58 | Maps stored 0-based bottle ids to displayed chamber numbers and splits current presence |
 | `src/history.ts` | 132 | Pure history helpers: reading sort, experiment/chamber selection, per-point details, chamber grouping, selection toggle |
-| `src/monitoring.ts` | 79 | Pure monitoring helpers: poll eligibility, active-experiment selection, monitoring-row selection, synthetic preview data |
-| `src/compare.ts` | 86 | Pure compare helpers: selection cap, duplicate check, add/remove, series labels and colours |
-| `src/auth.ts` | 110 | Session lifecycle: localStorage persistence, expiry timer, retry backoff |
+| `src/monitoring.ts` | 62 | Pure monitoring helpers: poll eligibility and synthetic preview data |
+| `src/compare.ts` | 165 | Pure compare helpers: selection cap, duplicate check, new-row defaults, in-place row edits, add/remove, series labels and colours |
+| `src/auth.ts` | 115 | Session lifecycle: localStorage persistence, expiry timer, retry backoff |
 | `src/supabase.ts` | 72 | Client construction, schema pinning, session header injection |
 | `src/csv.ts` | 95 | RFC 4180 CSV serialisation and download |
-| `src/styles.css` | 523 | All styling: design tokens, login screen, shell, presence strip, KPI strip, charts, tables, states, and the motion layer (§5.10) |
-| `src/motion.ts` | 95 | Motion helpers: the sliding tab and nav indicator (`useIndicator`) and the once-per-visit entrance flag (`useEntranceOnce`) |
+| `src/styles.css` | 555 | All styling: design tokens, login screen, shell, presence strip, KPI strip, charts, tables, states, the transition stage (§5.12), and the motion layer (§5.10) |
+| `src/motion.ts` | 98 | Motion helpers: the sliding tab and nav indicator (`useIndicator`) and the once-per-visit entrance flag (`useEntranceOnce`, which can replay, §5.12) |
 | `scripts/dev-db.ts` | 697 | Dev-only database seeding and token provisioning |
 | `supabase/migrations/*.sql` | 17 files | Schema, authentication, lockdown |
 | `netlify.toml` | 23 | Build config and security headers |
@@ -78,6 +82,8 @@ bun run dev-db       # prepare the development database
 
 `netlify.toml` builds with `bun run build`, publishes `dist`, and rewrites `/*` to `/index.html` with status 200 for client-side routing. There is no router in the app, so this is defensive only.
 
+**Deploying.** Production deploys are started by a Netlify build hook: a `POST` to a private URL, which is kept in `AGENTS.md` rather than in the docs. The hook makes Netlify fetch the site's configured GitHub branch and build it on Netlify's servers with the site's own environment variables, so only committed and pushed code is deployed. The deployed site is a development build: it keeps `DEV_FORCE_LIVE_EXPERIMENT` at `1` (§5.5), so its Monitoring view shows Preview data whenever no experiment is live. Make sure the site defines `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Vite inlines both at build time; a build without them succeeds but fails on its first Supabase call.
+
 ---
 
 ### 2.3 Timing records (`?metrics`)
@@ -87,7 +93,7 @@ everyone else `metricsEnabled` is false and every call returns at once. When
 on, it prints `[metrics] {...}` to the browser console and keeps the records
 in `window.__rusimMetrics`: `page_load` (navigation timing, transfer size,
 viewport), `fetch` (duration, rows and age of the newest sample for
-`fetchReadings` and `fetchExperimentReadings`) and `render` (data handed to
+`loadLatestExperiment`, `fetchExperimentReadings` and `fetchExperimentList`) and `render` (data handed to
 React -> two animation frames later, i.e. after the browser painted it).
 Chrome adds `heap_bytes`. `copy(window.__rusimMetricsCsv())` in the console
 copies all records as CSV. Every record is also POSTed (`fetch`, `no-cors`,
@@ -261,6 +267,8 @@ The column-level grant on `devices` is the mechanism that keeps `token_hash` unr
 
 `data.ts:signOut()` wraps the call in a try/catch that swallows the error, and the comment gives the reason: *"A failure here must not trap the operator in the dashboard, since the session expires on its own within a day."* The localStorage clear in `auth.ts` is unconditional regardless.
 
+`auth.ts:signOut(holdUntil?)` takes an optional promise. It revokes the session and clears localStorage straight away, then waits for `holdUntil` before setting the session to `null`. The logout animation passes its own promise here (§5.12), so the dashboard stays on screen while the animation plays, and the server revoke runs at the same time instead of after it.
+
 ### 4.5 Client-side rate limiting
 
 There is **no server-side throttle**, by design. The lockdown migration explains why a database counter cannot work: a failed `authenticate` raises, which rolls back its own transaction, so any counter written inside the function would never accumulate.
@@ -288,29 +296,34 @@ Security therefore rests entirely on token entropy. The stated guidance is to is
 
 ### 5.3 First data load
 
-`Dashboard` mounts and `loadData()` runs once, from a `useEffect` keyed on the `useCallback`-memoised `loadData` (memoised on `sessionToken`).
+`Dashboard` mounts and `loadData()` runs once, from a `useEffect` keyed on the `useCallback`-memoised `loadData` (memoised on `sessionToken`). The `Dashboard` element is keyed by the session token, so a new sign-in remounts it with an empty cache.
 
-`fetchReadings` pages through PostgREST:
+The load has two steps:
 
-```js
-for (let offset = 0; offset < MAX_READING_ROWS; offset += PAGE_SIZE) {
-  .from("readings")
-  .select("device_id, bottle_id, experiment_id, timestamp, ph, pressure, temp, co2, ch4")
-  .order("timestamp", { ascending: false })
-  .range(offset, Math.min(offset + PAGE_SIZE - 1, MAX_READING_ROWS - 1))
-  if (data.length < PAGE_SIZE) break;
-}
-```
+1. **Latest row.** `fetchLatestReading` asks for one row, ordered by `timestamp` then `bottle_id`, both descending (`LIMIT 1`). Its `experiment_id` names the most recent experiment. Its `timestamp` decides whether that experiment is live (§5.6).
+2. **That experiment's last day.** `fetchExperimentReadings(id)` reads the experiment's rows from 24 h before its newest sample, with keyset paging (§5.7), and stores them in the reading cache.
 
 | Constant | Value | Reasoning in the source |
 |---|---|---|
 | `PAGE_SIZE` | 1000 | *"Must stay at or below the server's `max_rows` setting, otherwise every page returns a truncated response and the paging loop misreads the last one as the end of the data."* |
-| `MAX_READING_ROWS` | 5000 | Client-side ceiling for `fetchReadings` (newest first). Callers hitting it receive a partial result, so anything presenting itself as complete must check and say so. |
-| `MAX_EXPERIMENT_ROWS` | 50,000 | Ceiling for `fetchExperimentReadings` (oldest first). Sized for a 99 h run at one round per 30 s: about 47,500 rows for four bottles. |
+| `EXPERIMENT_WINDOW_MS` | 86,400,000 (24 h) | How much of each experiment is loaded, measured back from its newest sample. It is a time window, not a row count, because the sample interval is per experiment (`experiments.sample_interval_s`, 30 s when unset; see `network-master.md`) and the number of reporting chambers varies. Every experiment read (Monitoring, History, Compare) uses it. Reads are newest first, so what falls outside the window is the **start** of the experiment. |
+| `MAX_CHAMBERS` | 24 | Largest number of chambers a device reports. |
+| `MAX_EXPERIMENT_ROWS` | 69,120 | Safety ceiling: one window for 24 chambers at the default 30 s interval (24 × 2,880). The window normally ends a read long before this. It only binds for a run with a shorter interval (the firmware allows down to 5 s), which then loads less than a day. |
+
+With today's hardware (the Mega reports 4 bottles) at 30 s, one day is 11,520 rows, read in 12 requests.
 
 `config.toml` sets `max_rows = 1000`, matching `PAGE_SIZE` exactly.
 
 There is **no device filter in the query**. `fetchExperimentReadings` documents that RLS already restricts to the session's own device, so adding `.eq("device_id", ...)` would be redundant.
+
+**The reading cache.** `useReadingCache` (`useReadingCache.ts`) holds one entry per experiment for the whole session: `{ readings, truncated }`, with readings oldest first and unique per `(bottle_id, timestamp)`. Monitoring, History and Compare all read from it, so each experiment is fetched once per session. Moving between experiments, or between views, re-reads nothing. `load(id)` returns the cached entry at once when there is one. Concurrent calls for the same experiment share one request (an in-flight map), so a double click or a poll that overlaps a History click sends one query. Memory is bounded by the window: a day of a 4-chamber run at 30 s is about 2 MB (roughly 150 bytes a row), and the 69,120-row ceiling is about 10 MB.
+
+The merge and bookkeeping are pure functions in `readingCache.ts`, tested in `readingCache.test.ts`:
+
+- `mergeReadings` dedupes by `(bottle_id, instant)`; the incoming copy wins. It sorts oldest first, drops rows more than 24 h older than the newest row, then keeps at most the ceiling. It reports whether it dropped anything. Polls need this: as new rows arrive, the oldest leave the window.
+- `nextCacheEntry` sets `truncated` when the read left older rows out or the merge dropped any; it stays set.
+- `incrementalSince` gives the start time of an incremental poll (§5.4).
+- `withLatestReading` and `withConcludedState` keep the experiment list current (§5.7).
 
 ### 5.4 Polling
 
@@ -323,6 +336,8 @@ useEffect(() => {
 ```
 
 `POLL_INTERVAL_MS` is 5 minutes 30 seconds — deliberately longer than the 10-minute staleness threshold, so each tick re-decides from fresh data rather than assuming continuity. `isMonitoringPollingEligible()` (`monitoring.ts`) only requires the Monitoring view and an unsuspended feed, so a newly started experiment is discovered without a page reload.
+
+Each tick repeats the two-step load of §5.3, but step 2 is **incremental** when the experiment is already cached: `fetchExperimentReadings(id, { since })` reads only rows at or after `since`, which is the newest cached timestamp minus `INCREMENTAL_OVERLAP_MS` (10 minutes). The overlap catches a buffered round the device pushes late, with a timestamp older than rows already stored. `mergeReadings` drops the duplicates. A poll therefore costs one `LIMIT 1` query plus about two rounds of rows, instead of a full re-read. When a new experiment starts, the latest row points at it and it is read in full. The previous experiment stays cached for History.
 
 Polling stops when the view is not Monitoring or a fetch has failed. `pollSuspended` is set on any error and cleared only on the next success, so a transient failure halts the live feed until the operator clicks "Refresh data". The inline comment frames this as intent: *"A failed fetch is treated as the end of the live feed, so polling stops until the operator refreshes by hand."*
 
@@ -340,7 +355,7 @@ The default view, reached by the "Monitoring" nav tab.
 
 **Empty state** — when no experiment looks live, the body is replaced by a panel headed `No live experiment` pointing at Experiment history. The poll keeps running, so starting an experiment repopulates the view.
 
-**Preview flag** — `DEV_FORCE_LIVE_EXPERIMENT` in `monitoring.ts` is temporarily `1` so Monitoring can be reviewed without a device. When no real experiment is live, the view shows synthetic fresh data for experiment 999 (`generateSyntheticLiveReadings`: 12 samples per chamber at 5-minute intervals, latest 2 minutes ago, chambers 7 and 19 disconnected, one null sensor) with a `Preview` notice. History always shows real data. Set the flag to `0` before deploying.
+**Preview flag** — `DEV_FORCE_LIVE_EXPERIMENT` in `monitoring.ts` is `1` while the project is in development, including on the deployed site, so Monitoring can be reviewed without a device. When no real experiment is live, the view shows synthetic fresh data for experiment 999 (`generateSyntheticLiveReadings`: 12 samples per chamber at 5-minute intervals, latest 2 minutes ago, chambers 7 and 19 disconnected, one null sensor) with a `Preview` notice. History always shows real data. Setting the flag to `0` turns the preview off; Monitoring then shows `No live experiment` when nothing is live.
 
 **Chamber presence strip** — one cell per configured chamber (`bottleCount` cells, 24 on the dev device), each labelled with its two-digit display number and a small status dot. Connected cells are white with a green dot; disconnected cells (absent from the newest sample) take a striped amber tint with an amber dot. The selected chamber is filled black. Clicking a cell selects that chamber. The strip has 24 columns on a desktop, 12 below 1100px and 6 below 480px. This is the product's signature element: it shows the whole device at the latest sample at a glance.
 
@@ -350,7 +365,7 @@ The default view, reached by the "Monitoring" nav tab.
 
 **Status line** — chamber, connection state (`Disconnected` / `Concluded` / `Live` / `No data`), sample count, and latest sample time, in one 12px line under the KPI strip.
 
-**One chart** — plotting the selected chamber's rows for the **active experiment only**, headed `Chamber {n} · {parameter}` with the record count. The line is 2px in blue (`--chart-1`) over a soft area fill, with round y ticks and gridlines; a `null` breaks both the line and the fill. Each sample is a focusable point; hovering, focusing or clicking shows a dashed vertical guide and a tooltip with value and timestamp. Fewer than two rows renders "Not enough data for chart."
+**One chart** — plotting the selected chamber's rows for the **active experiment only**, headed `Chamber {n} · {parameter}` with the record count. The line is 2px in blue (`--chart-1`) over a soft area fill, with round y ticks and gridlines; a `null` breaks both the line and the fill. Hovering the plot, clicking it, or focusing the chart and using the arrow keys selects the nearest sample, and shows a dashed vertical guide and a tooltip with value and timestamp (§6.3). Fewer than two rows renders "Not enough data for chart."
 
 ### 5.6 Live vs concluded is inferred, never stored
 
@@ -365,29 +380,46 @@ export function isConcluded(timestamp, now = Date.now()) {
 }
 ```
 
-`summarizeExperiments` groups rows by `experiment_id` and flips `concluded` back to false if *any* sample in the group is fresh. So an experiment is live while any part of it is still reporting.
+Monitoring treats the latest row's experiment as live when `isConcluded(latest.timestamp)` is false. In the experiment list, `withConcludedState` recomputes `concluded` from each experiment's last sample on every render, so the pills follow the clock.
 
-Summaries are sorted by `experiment_id` **descending**, which puts the testing experiment (0) last.
+The list is sorted by `experiment_id` **descending**, which puts the testing experiment (0) last.
 
 ### 5.7 The Experiment History view
 
 Reached by the "Experiment History" nav tab. Two-stage drill-down.
 
-**Stage 1 — the list.** Built from the *same* in-memory `readings` array as the Monitoring view, not a separate query. Each row shows the formatted experiment id, its reading count, a `Testing experiment` marker when the id is 0, a Live/Concluded pill, and the last sample time. The list is capped at six rows with a `Show all N` toggle. The selected row takes the active fill.
+**Stage 1 — the list.** A separate query, `fetchExperimentList`, run the first time History or Compare opens and again on `Refresh data` while either view is open. PostgREST offers this client no `SELECT DISTINCT` or `GROUP BY`, so the list is built with a **skip scan** (`fetchExperimentIds`):
+
+```
+select experiment_id order by experiment_id desc limit 1                      -> 5
+select experiment_id where experiment_id < 5 order by experiment_id desc limit 1 -> 2
+select experiment_id where experiment_id < 2 order by experiment_id desc limit 1 -> 0
+select experiment_id where experiment_id < 0 ...                              -> no row, done
+```
+
+Each step is one `LIMIT 1` query on the `(experiment_id, timestamp DESC)` index, so the cost grows with the number of experiments, not the number of rows. For each id found, two more `LIMIT 1` queries read its first and last sample time (`fetchExperimentBounds`). These start as soon as the id is found, so they overlap the rest of the scan. In total that is `3N + 1` requests for `N` experiments. There is no row count per experiment, because counting needs an aggregate.
+
+Between list fetches, `withLatestReading` folds each poll's latest row into the list. The latest experiment's last sample moves forward, and an experiment that started after the fetch is added at the top.
+
+Each row shows the formatted experiment id, `Started {first sample}`, `{n} readings loaded` once the experiment is in the cache, a `Testing experiment` marker when the id is 0, a Live/Concluded pill, and the last sample time. The list is capped at six rows with a `Show all N` toggle. The selected row takes the active fill.
 
 Selection starts empty; clicking the selected item clears it (`toggleExperimentSelection()`), and choosing another replaces it. A notice asks the operator to select an experiment until one is chosen.
 
-**Stage 2 — the detail.** A `useEffect` keyed on `activeExperimentId` fires `fetchExperimentReadings`. It filters with `.eq("experiment_id", id)` and uses **keyset paging** instead of offsets: rows are ordered by `timestamp` ascending then `bottle_id` ascending, and each page after the first adds a filter for rows after the last one seen:
+**Stage 2 — the detail.** Selecting an experiment calls `cache.load(id)`. A cached experiment renders at once with no request. Otherwise `fetchExperimentReadings` runs. Loading is derived (selected, not cached, no error) rather than stored. A load the operator navigates away from still finishes into the cache. The read filters with `.eq("experiment_id", id)` and uses **keyset paging** instead of offsets. Rows are ordered by `timestamp` descending, then `bottle_id` descending. Each page after the first adds a filter for rows older than the last one seen:
 
 ```
-or=(timestamp.gt."T", and(timestamp.eq."T", bottle_id.gt.B))
+or=(timestamp.lt."T", and(timestamp.eq."T", bottle_id.lt.B))
 ```
 
-`bottle_id` is the tiebreak because all bottles in one round share a timestamp, so a page boundary can fall inside a round. Compared with offsets, this cannot skip or repeat rows while new rows arrive during a run. Because every bottle is sampled at the same instants, reaching `MAX_EXPERIMENT_ROWS` cuts the experiment off at one point in time for all bottles; it no longer drops whole bottles. Before 2026-11-21 the read ordered by `bottle_id` first and capped at 5,000 rows, so any experiment over about 10 h lost its later bottles. A `cancelled` closure flag prevents state updates from a superseded request or an unmounted component.
+The pages are reversed before returning, so callers always get rows oldest first. `bottle_id` is the tiebreak because all bottles in one round share a timestamp, so a page boundary can fall inside a round. An offset would shift as new rows land at the front during a run, and could skip or repeat rows; "older than this row" cannot. Every bottle is sampled at the same instants, so the window (or the row ceiling) cuts the experiment off at one point in time for all bottles; it never drops whole bottles.
 
-That ordering is load-bearing, and the comment says so: it keeps a multi-page read contiguous, so each chamber's samples stay together.
+The window start (24 h before the newest sample) is only known once the first page arrives, so it is applied in the client. Each page is filtered to rows inside the window, and paging stops at the first page that reaches past it. That row older than the window is also the exact signal that the start is missing, so `truncated` needs no extra query. At most one page of older rows is read and discarded. Before 2026-11-27 the read was oldest first with a 50,000-row cap, and earlier that day briefly newest first with a 6,912-row cap. Before 2026-11-21 it ordered by `bottle_id` first and capped at 5,000 rows, so any experiment over about 10 h lost its later bottles.
 
-**"Chamber Readings" sub-panel** — a chamber selector, and five per-parameter charts stacked in one column. The charts are interactive: each sample is a focusable circle, and hovering, focusing or clicking it shows a tooltip above the point with timestamp and value (`getHistoryPointDetails()`).
+The ordering is load-bearing: it keeps a multi-page read contiguous, so each chamber's samples stay together.
+
+**"Chamber Readings" sub-panel** — a chamber selector, and five per-parameter charts stacked in one column. The charts are interactive: hovering or clicking the plot, or focusing a chart and using the arrow keys, selects the nearest sample and shows a tooltip above it with timestamp and value (`getHistoryPointDetails()`, §6.3).
+
+**Loading feedback.** While an experiment is read in full, `useReadingCache` exposes the rows received so far in `cache.loading` (keyed by experiment id, updated after each 1,000-row page through `fetchExperimentReadings`' `onProgress`). The clicked list row shows `Loading… {n} readings` in the accent colour and is `aria-busy`. The detail area shows a dashed `.loading-block` with the sliding line and `Loading Experiment {id}… {n} readings so far` (`role="status"`). A day of 4 chambers at 30 s is 12 requests, so the count visibly climbs. Incremental poll reads are not listed, because they are one short request for an experiment already on screen.
 
 **"Results" sub-panel** — one table with a row per chamber (`groupReadingsByChamber`): chamber, sample count, and for each parameter the mean with min – max as a 12px subline in the same right-aligned cell. A dash means no bottle reported that sensor.
 
@@ -395,7 +427,7 @@ That ordering is load-bearing, and the comment says so: it keeps a multi-page re
 
 ### 5.8 Truncation is surfaced, not hidden
 
-`isTruncated(readings.length)` compares against `MAX_EXPERIMENT_ROWS`. When a read hit the cap, the detail pane shows: *"Only the first 50,000 readings were loaded, so the end of this experiment is missing on screen and any CSV export is truncated too."*
+The cache entry's `truncated` flag is set when the experiment has rows older than the loaded day: the read saw one, a poll pushed rows out of the window, or the read stopped at `MAX_EXPERIMENT_ROWS`. The detail pane then shows: *"Only the experiment's most recent day is loaded, from {first loaded sample} onward. Earlier samples are missing on screen, in Results, and in any CSV export."* The date comes from the first loaded row, so the message stays accurate when the ceiling cuts the load to less than a day. An experiment of 24 h or less is never flagged.
 
 The export is deliberately of what is on screen rather than a fresh query, and the comment explains the tradeoff: *"This exports what is already on screen rather than re-querying, so the file and the charts always describe the same rows. A truncated read therefore produces a truncated file, which is why the limit is called out on screen next to the button."*
 
@@ -403,11 +435,17 @@ The export is deliberately of what is on screen rather than a fresh query, and t
 
 Reached by the "Compare" nav tab. Overlays up to four chamber series on one chart; chambers may come from different experiments.
 
-**Selection** — a panel headed `Chambers to compare` with an Experiment select, a Chamber select (all configured chambers), an `Add chamber` button, and `Clear all`. Each added series becomes a chip with a colour dot, its label (`Experiment 3 · Chamber 5`), and a remove button. The header shows `n of 4`. The rules live in `compare.ts`: `MAX_COMPARE_SERIES` is 4, the same experiment and chamber cannot be added twice, but the same chamber in different experiments can. `Add chamber` is disabled at the cap or on a duplicate. Colours are assigned by position in the selection list (`--chart-1` blue, `--chart-2` green, `--chart-3` amber, `--chart-4` violet), so removing a middle chip shifts later colours.
+**Selection** — a panel headed `Chambers to compare`. Each series is its own filters row (`.filters.compare-row`): a colour dot, an Experiment select, a Chamber select (all configured chambers), and a × remove button. Changing either select edits that series in place, and the chart follows at once. Below the rows sit `Add chamber`, which appends a row, and `Clear all`. The header shows `n of 4`.
 
-**Data** — each distinct experiment in the selection is fetched once via `fetchExperimentReadings` and cached in `readingsByExperiment`; the chart filters each cache entry with `selectChamberReadings`. Compare uses real data only (the synthetic preview experiment 999 never appears in the experiment list) and does not poll.
+- **First row.** When the experiment list arrives, the view starts with one row: the newest experiment and its first chamber. This happens once; after `Clear all` the view stays empty (with a short hint) until a row is added.
+- **New rows** (`nextSelection`) copy the last row's experiment and take its next free chamber, wrapping past the last chamber. `Add chamber` is disabled at `MAX_COMPARE_SERIES` (4) or when that experiment has no free chamber.
+- **Distinct rows.** The same experiment and chamber cannot appear twice, but the same chamber in different experiments can. In each row's Chamber select, chambers that another row already uses with the same experiment are disabled. `updateSelection` also refuses such a change. Switching a row's experiment keeps its chamber when free there, and otherwise moves it to the next free one.
+- **Colours** are assigned by row position (`--chart-1` blue, `--chart-2` green, `--chart-3` amber, `--chart-4` violet), so removing a middle row shifts later colours. Rows are keyed by position for the same reason; every field is controlled, so reusing a row element after a removal is safe.
+- **Layout.** On a desktop a row is one line, with the × at the right edge. Below 860px each row becomes a small grid: dot and × beside the `Experiment` label, each label above its full-width select, and a rule between rows.
 
-**Chart** — `CompareChart` draws all series on one SVG with a shared y-axis (ticks computed from the flattened rows of every series) and x aligned by sample order (first sample to first sample, each series stretched across the plot width). The x labels come from the longest series. Each series is a 2px line in its colour with the same focusable points as the single-series charts; the tooltip above a point shows the series label, timestamp, and value. A legend lists each series with its colour dot and sample count. Fewer than two rows in every series renders "Not enough data for chart."
+**Data** — each distinct experiment in the selection is loaded through the shared reading cache (§5.3). An experiment already opened in Monitoring or History costs no request. The chart filters each cache entry with `selectChamberReadings`. Compare uses real data only (the synthetic preview experiment 999 never appears in the experiment list) and does not poll.
+
+**Chart** — `CompareChart` draws all series on one SVG with a shared y-axis (ticks computed from the flattened rows of every series) and x aligned by sample order (first sample to first sample, each series stretched across the plot width). The x labels come from the longest series. Each series is a 2px line in its colour. The same hit area as the single-series charts selects a sample: the pointer picks the series whose line is closest, and ↑/↓ switch series from the keyboard (§6.3). The tooltip above the point shows the series label, timestamp, and value. A legend lists each series with its colour dot and sample count. Fewer than two rows in every series renders "Not enough data for chart."
 
 ---
 
@@ -430,7 +468,7 @@ The look was redesigned with the `design-taste-frontend` skill. Its scripts deal
 
 Status colours stay semantic: green for live and connected, amber for disconnected, red for errors.
 
-**Motion.** Every motion answers a click, a hover, or new data, and none is driven by scrolling. Only `transform` and `opacity` animate, apart from colour changes and the SVG point radius.
+**Motion.** Every motion answers a click, a hover, or new data, and none is driven by scrolling. Only `transform` and `opacity` animate, apart from colour changes, the SVG point radius, and the wordmark's `clip-path` and `filter: blur()` in the sign-in and logout transitions (§5.12).
 
 | Motion | Trigger | Duration | Where |
 |---|---|---|---|
@@ -438,7 +476,8 @@ Status colours stay semantic: green for live and connected, amber for disconnect
 | Login fermentation curve draws left to right | Login entrance | 1.6 s after 520 ms | `.login-trace-line.draw` |
 | Login bubbles rise through the identity panel | Always, while the login screen is open | 10–19 s loops | `.login-bubbles span` |
 | Login field shakes | A sign-in attempt fails | 360 ms | `shake()` (Web Animations API) |
-| Dashboard fades in over the login screen | A successful sign-in | 420 ms | `.login-handoff` |
+| Login logo glides into a centred lockup, then the dashboard zooms out of the sidebar mark | A successful sign-in | ~1.3 s | `brandTransition.ts` phases "lift" and "arrive" (§5.12) |
+| Camera zooms through the sidebar mark, the wordmark opens under it, then the lockup glides into the login logo | Sign out | ~2.7 s | `brandTransition.ts` phases "outro" and "return" (§5.12) |
 | New view settles in (fade, 6px rise) | Switching view | 260 ms | `.view-swap.is-swapping` |
 | Nav pill slides to the active view | Switching view | 240 ms | `.nav-indicator`, `useIndicator(…, "box")` |
 | Bar slides under the selected KPI cell or tab | Selecting a parameter or a History/Compare tab | 240 ms | `.tab-bar`, `useIndicator(…, "bar")` |
@@ -450,10 +489,10 @@ Status colours stay semantic: green for live and connected, amber for disconnect
 | Refresh icon spins; a thin bar slides while loading | Loading | 1 s / 1.1 s loops | `.is-busy`, `.loading-line` |
 | Buttons step 1px up on hover and press 1px down at 98.5% | Pointer | 150 / 90 ms | `.btn` |
 | Chamber cells lift 1px; rows and table rows tint; row chevrons nudge 3px | Pointer | 150 ms | `.presence-cell`, `.row-button`, `tbody tr` |
-| Tooltip pops in | Point hovered or focused | 140 ms | `.chart-tooltip-inner` |
+| Tooltip pops in | Sample hovered, clicked, or stepped to with the keyboard | 140 ms | `.chart-tooltip-inner` |
 | Phone drawer slides in over a fading backdrop | Menu button | 200 ms | `.sidebar.open`, `.backdrop` |
 
-Hover motion applies only to a fine pointer (`@media (hover: hover) and (pointer: fine)`), so a phone never keeps a stuck hover state. Under `prefers-reduced-motion: reduce` every animation is off and only colour transitions remain, so all content is visible at once.
+Hover motion applies only to a fine pointer (`@media (hover: hover) and (pointer: fine)`), so a phone never keeps a stuck hover state. Under `prefers-reduced-motion: reduce` every animation is off and only colour transitions remain, so all content is visible at once. The CSS rule cannot stop animations started from JavaScript, so the sign-in and logout transitions check `prefersReducedMotion()` themselves and are skipped.
 
 **How the sliding indicator works.** `useIndicator()` receives the container through a callback ref, finds the child marked `aria-selected="true"` or `aria-current="page"`, and writes its offset and size to CSS variables on the one indicator element. Only `transform` animates. A bar uses a 100px element scaled with `scaleX(width / 100)`; the nav pill takes its size directly and only moves. The first placement, and any placement after a resize, jumps without a transition (`.is-jump`), so the indicator travels only when the selection changes. A callback ref is used because the KPI strip unmounts and mounts again when the view or the loading state changes.
 
@@ -486,7 +525,7 @@ The `RusimLogo` glyph is the same `BrandMark` used in the sidebar and the favico
 - On a failed attempt the field border turns red, the error is linked to the input with `aria-describedby`, and the field shakes once. `auth.ts` clears the error to `""` before every attempt, so each failure is a new value and triggers a new shake. The shake uses `element.animate()` instead of a CSS class, so it replays without remounting the input and losing focus. It is skipped under `prefers-reduced-motion`.
 - The enabled sign-in button is accent blue (`--accent`), not the black primary used in the dashboard, so blue is the only strong colour on the screen. Disabled (empty field) it is grey. While verifying, it stays blue, shows "Verifying token" with a spinning icon, and a thin bar runs along its base.
 
-**Hand-off to the dashboard.** `App()` sets `handoff` to `true` just before calling `signIn()`, and back to `false` if the attempt fails. When the session arrives, the dashboard renders inside a wrapper with `.login-handoff`, which fades it in over 420 ms. Setting the flag before the attempt means the dashboard's first frame already has the class, so it never flashes at full opacity. The wrapper `div` is always rendered and only its class changes. Removing the wrapper would remount `Dashboard` and reset its state. A stored session (page reload) opens without the fade.
+**Hand-off to the dashboard.** A successful sign-in plays the "lift" and "arrive" transitions (§5.12). A stored session (page reload) opens the dashboard without them.
 
 **Layout by width.**
 
@@ -494,6 +533,43 @@ The `RusimLogo` glyph is the same `BrandMark` used in the sidebar and the favico
 |---|---|
 | > 860px | Two columns (identity 1.1fr, form 1fr); the form is centred, max 380px |
 | ≤ 860px | One column: the identity pane becomes a compact header without chips and curve; the form sits below it, the input uses 16px text so iOS does not zoom in, and the eye button grows to 44px |
+
+### 5.12 Sign-in and logout transitions
+
+The logout copies the outro of the product video (`video-demo/hyperframes/compositions/walk.html` from 128.8 s, then `endcard.html`; see `docs/video-demo.md`). The camera zooms through the sidebar's RuSim mark until the mark stands alone in the centre of an empty page. The "RuSim / In Vitro Rumen Simulator" wordmark opens under it, and then the login screen comes back. Sign-in plays the same idea in reverse.
+
+**The stage.** Both transitions play on one full-screen layer, `BrandStage` in `App.tsx` (`.brand-stage` in `styles.css`). It holds three things:
+
+| Part | Element | Role |
+|---|---|---|
+| Ground | `.brand-stage-ground` | A `--ground` coloured cover. Fading it in hides the page behind the stage; fading it out reveals the page. |
+| Lockup | `BrandMark`, "RuSim", "In Vitro Rumen Simulator" | The video's end card: mark on top, wordmark and subtitle centred under it. The mark is `clamp(88px, 9vw, 168px)` (168px is its size in the 1920px video) and the text sizes are fractions of it. |
+
+The stage's CSS lays out the **finished** lockup. No animation changes that layout. Each phase measures where a piece must come from or go to, then moves it there with `transform`. The stage is `100vw` wide, which includes the scrollbar, so its centre does not move when the dashboard (which has a scrollbar) is swapped for the login screen (which has none). While the stage is mounted it covers the page and takes all clicks, and `.app` gets `overflow: clip`, so the magnified dashboard cannot add scrollbars. `clip` is used instead of `hidden` because it does not create a scroll container, so the sticky sidebar keeps working.
+
+**The four phases.** `App()` keeps a `phase` state. `playPhase(phase, stage)` in `brandTransition.ts` starts the animations of one phase and returns `{ finished, cancel }`.
+
+| Phase | Shown under the stage | What moves | Length |
+|---|---|---|---|
+| `outro` (logout) | Dashboard | The stage mark starts exactly on the sidebar mark. In 380 ms it travels to the screen centre at 1.5× (ease in-out). In the next 420 ms it zooms to full size (power3.in). The dashboard moves with it like a camera, and the ground fades in over the second half. The mark then slides up into the lockup (expo.out). "RuSim" opens from its centre line (`clip-path`) and the subtitle blurs in. The finished lockup holds for 320 ms. | ~1.9 s |
+| `return` (logout) | Login screen | The three pieces glide into the login logo's mark, "RuSim" and subtitle, 45 ms apart, mark first. The ground fades out, and the login screen plays its first-load entrance again. | ~0.8 s |
+| `lift` (sign-in) | Login screen (busy) | The reverse of `return`: the pieces glide from the login logo into the centred lockup, text first. The ground covers the login screen. | ~0.6 s |
+| `arrive` (sign-in) | Dashboard | The wordmark blurs out. The mark shrinks to 1.5× the sidebar mark about the centre (power3.out), then travels into the sidebar mark. The dashboard zooms out with it, and the ground fades out in the first 40%. | ~0.7 s |
+
+`outro` and `arrive` are the same camera move in opposite directions: the video's two-part zoom (centre the mark first, then zoom about that point), which keeps the mark on a straight path to the centre.
+
+**How the camera works.** Scaling about a point P means: set `transform-origin` to P and apply `translate(...) scale(s)`. The point P stays fixed under the scale, and the translate then carries it to its destination. `cameraShift(from, to, scale)` computes that shift. `from` is the sidebar mark's centre, `to` is the screen centre, and `scale` is the stage mark's size divided by the sidebar mark's size (about 4.6× on a 1440px screen). At the end of the zoom, the magnified sidebar mark and the stage mark are the same square in the same place, so the hand-over cannot be seen. The stage mark rides on top the whole way, so the mark stays sharp while the magnified dashboard under it blurs slightly.
+
+The camera does not transform one shared parent. It gives every direct child of `.app` the same transform about the same screen point, each with its own `transform-origin`. A transform on a parent makes that parent the containing block of its `position: fixed` children. The phone drawer and its backdrop would then be placed relative to the top of the page instead of the screen, and on a scrolled page they would jump out of view.
+
+**How the pieces fly.** `boxOnto(box, target)` lays one box on another: translate the top-left onto the target's top-left, then scale by the height ratio. The mark is measured with `getBoundingClientRect()`. A word is measured with a `Range` over its text, which gives the glyph box and ignores `line-height`. So an 80px "RuSim" and the 17px "RuSim" in the login logo compare by font size alone. When the return ends, each piece lies on its counterpart to within 0–3px of width; the small width difference comes from font hinting at different sizes. Then the stage is removed and the real logo is shown in the same render.
+
+**How the phases are wired** (all in `App()`):
+
+- **Logout.** `signOutWithOutro()` creates a promise, stores its `resolve` in `releaseOutro`, sets `phase = "outro"`, and calls `signOut(promise)` (§4.4). The revoke runs while the outro plays. When the outro's animations finish, `releaseOutro()` lets `signOut()` drop the session. In the render where the session is gone, `App()` changes `"outro"` to `"return"` before React commits. So the login screen mounts already knowing it is coming back: `useEntranceOnce(true)` replays the entrance, and the logo is `visibility: hidden` (`.rusim-logo.is-held`) while the stage's copy flies to it. The logo has no entrance step of its own in that case. The heading's entrance steps sit on the title and subtitle, not on the heading, so nothing moves the spot where the stage lands.
+- **Sign-in.** `signInWithIntro()` sets `holdLogin` before the attempt. The session is set inside `signIn()` before it resolves, and the flag keeps the login screen up during that gap. On success it sets `phase = "lift"`. The login screen stays mounted (still showing "Verifying token") until `lift` finishes, then `phase = "arrive"` mounts the dashboard under the opaque stage. The dashboard's own title entrance has already played once this visit, so only the zoom-out plays.
+- **Running a phase.** A `useLayoutEffect` on `phase` calls `playPhase()` before the browser paints, so the first frame of each phase is already in place. Its cleanup cancels the previous phase's animations in the same commit as the next phase starts, and each phase's first keyframes equal the previous phase's last. A 4 s timer moves on if `finished` never resolves, so the stage cannot trap the user.
+- **Fallbacks.** On a phone the drawer is closed after a sign-in, so there is no sidebar mark on screen to zoom out of. The mark fades instead, and the dashboard settles from 1.04× about the screen centre. If an element is missing, a phase still fades the stage in or out. Under `prefers-reduced-motion` no stage is shown at all: sign-in and sign-out switch screens directly.
 
 ## 6. From a row to a chart point
 
@@ -552,13 +628,19 @@ Inside the SVG, from back to front:
 2. The area fill (`chartAreaPath()`): one closed shape per unbroken run of samples, filled with a vertical gradient of the line colour, so a gap in the data is also a gap in the fill. Single-chamber charts only.
 3. A dashed vertical guide at the active point.
 4. The line (`chartPath()`).
-5. The focusable points.
+5. Dots on each sample, only when samples are at least 6px apart (`showMarkers`, `MIN_MARKER_SPACING` in `chartInteraction.ts`). They are decorative (`aria-hidden`, no pointer events); denser series show only the line.
+6. The active point: one larger dot at the hovered or selected sample.
+7. The hit area (`.chart-hit`): one transparent `<rect>` over the plot that takes all pointer input.
+
+**Interaction.** The chart does not create an element per sample. The pointer's x is converted to viewBox units (`viewBoxX`) and mapped to the nearest sample index (`nearestIndex`). Samples are spread evenly across the plot, so this is one division, not a search. In Compare, each series finds its own nearest index, and the series whose point is closest to the pointer's y wins (`nearestSeries`). A mouse hover is transient and a click pins it; leaving the plot clears an unpinned point. A touch drag pins, because lifting the finger also fires `pointerleave`. The `<svg>` is one Tab stop (`role="group"`, `aria-roledescription="chart"`). ← and → step one sample, Page Up and Page Down a tenth of the series, Home and End jump to the ends (`stepIndex`), and Escape clears. In Compare, ↑ and ↓ move to the neighbouring series at the same relative position. The tooltip has `role="status"`, so screen readers announce each value.
+
+Before 2026-11-27 every sample was its own focusable `<circle>`, with five event handlers and an `aria-label` built with `toLocaleString`. A day at 30 s is 2,880 samples per chamber, and History draws five charts, so selecting a chamber built about 14,400 such elements. Measured in Chromium, the labels alone took 867 ms, and the page froze after the data arrived. With the hit area, changing chamber on a 2,881-sample day renders in about 25 ms, and the five charts hold 148 DOM nodes in total.
 
 `createTimeLabels` picks evenly spaced **indexes** (five, or three on charts under 480px wide) and renders `HH:MM` for each, so the axis reads as a time axis while actually being a sample axis.
 
 ### 6.4 What the chart is not
 
-No zoom and no panning. Both the Monitoring and History charts have focusable points with a tooltip (value and timestamp; Compare also names the series). Values are read from the KPI strip (Monitoring) or the y ticks and tooltips (History).
+No zoom and no panning. The Monitoring, History and Compare charts show a tooltip for the hovered or keyboard-selected sample (value and timestamp; Compare also names the series). Values are read from the KPI strip (Monitoring) or the y ticks and tooltips (History).
 
 ---
 
@@ -717,15 +799,15 @@ So the write path exists end to end but has nothing feeding it: `scripts/dev-db.
 
 ## 12. Findings
 
-### 12.1 The experiment list is bounded by the monitoring fetch's row cap
+### 12.1 The experiment list is bounded by the monitoring fetch's row cap (fixed)
 
-The History list is derived from the same in-memory `readings` array, which is capped at 5,000 rows ordered newest-first. On a device with more than 5,000 readings, the **oldest experiments silently vanish from the list** — including ones that would otherwise be selectable.
+Until 2026-11-27 the History list was derived from the Monitoring fetch (the newest 5,000 rows), so on a busy device the oldest experiments disappeared from the list. The list now comes from its own skip-scan query (§5.7) and includes every experiment with readings.
 
-The truncation notice only appears in the *detail* pane, so a vanished experiment is never explained. Only the Monitoring view has a per-experiment path to the full data, and it is the path that cannot reach the older rows.
+The same change removed `selectActiveExperiment` and `selectMonitoringReadings` from `monitoring.ts`, with their tests. They filtered one mixed array down to the live experiment. The cache now stores each experiment separately, so Monitoring needs no filtering.
 
 ### 12.2 The chart heading says "Across experiments" (fixed)
 
-The Monitoring chart is filtered to the active experiment (`selectMonitoringReadings()`). The heading now reads `Chamber {n} · {parameter}` (for example `Chamber 1 · CH₄ (ppm)`), so it no longer describes the previous behaviour.
+The Monitoring chart shows only the active experiment (its own reading-cache entry, §5.3). The heading now reads `Chamber {n} · {parameter}` (for example `Chamber 1 · CH₄ (ppm)`), so it no longer describes the previous behaviour.
 
 ### 12.3 Dead code
 
@@ -771,7 +853,7 @@ Open items:
 
 ### 12.6 Functional gaps
 
-- **Test coverage is narrow.** `bun test` covers history grouping, monitoring isolation, chamber numbering, and CSV output. Supabase reads and React rendering remain untested.
+- **Test coverage is narrow.** `bun test` covers history grouping, monitoring poll eligibility, chamber numbering, Compare selection and row rules, chart interaction (nearest sample, keyboard stepping), CSV output, the reading-cache helpers, and the Supabase reads in `data.ts` against a fake PostgREST server. React rendering remains untested.
 - **No per-chamber comparison in Monitoring.** Monitoring shows one selected chamber at a time; the History view is the only place to compare chambers.
 - **No realtime**, by design (§5.4), giving up to 5m30s of latency.
 - **No error boundary.** A render-time throw blanks the page; only data-fetch errors are caught.
@@ -799,8 +881,9 @@ Open items:
 |---|---|---|
 | `CONCLUDED_AFTER_MS` | 600,000 (10 min) | `data.ts:61` |
 | `POLL_INTERVAL_MS` | 330,000 (5m30s) | `data.ts:64` |
-| `MAX_READING_ROWS` | 5,000 | `data.ts` |
-| `MAX_EXPERIMENT_ROWS` | 50,000 | `data.ts` |
+| `EXPERIMENT_WINDOW_MS` | 86,400,000 (24 h) | `data.ts` |
+| `MAX_EXPERIMENT_ROWS` | 69,120 (24 chambers × 2,880 rounds of 30 s), safety ceiling | `data.ts` |
+| `INCREMENTAL_OVERLAP_MS` | 600,000 (10 min) | `readingCache.ts` |
 | `MAX_COMPARE_SERIES` | 4 | `compare.ts` |
 | `PAGE_SIZE` | 1,000 | `data.ts:83` |
 | `TESTING_EXPERIMENT_ID` | `0` | `types/domain.ts:52` |
@@ -837,13 +920,13 @@ Open items:
 
 Paste a device token → Postgres SHA-512s it, matches the digest against a stored hash, and returns a 256-bit session token scoped to that one device, valid 12 hours. The browser stores it in localStorage and sends it as `x-device-session` on every request. RLS resolves the header back to a `device_id`, and the query returns that device's rows and nothing else.
 
-The app pulls up to 5,000 rows newest-first, derives an experiment list by grouping on `experiment_id`, infers Live versus Concluded purely from whether the newest sample is under 10 minutes old, selects the first live experiment, works out which configured chambers are missing from its newest sample and calls them disconnected, then renders a chamber presence strip, five KPI cells (which double as the chart parameter tabs), and one hand-built SVG chart for the selected chamber. It re-polls every 5m30s whenever Monitoring is open, and halts permanently on any fetch error until Refresh is pressed.
+The app reads the single newest row, takes its experiment as the most recent one, and loads that experiment's last 24 hours into an in-memory cache. It infers Live versus Concluded purely from whether the newest sample is under 10 minutes old, works out which configured chambers are missing from that sample and calls them disconnected, then renders a chamber presence strip, five KPI cells (which double as the chart parameter tabs), and one hand-built SVG chart for the selected chamber. It re-polls every 5m30s whenever Monitoring is open, reading only rows newer than the cache, and stops polling after any fetch error until Refresh is pressed.
 
-The History tab reuses the same in-memory array to list experiments, then issues a second paged read for the selected one and shows a chamber selector, per-parameter charts, a per-chamber results table (mean with min – max), and a CSV export of exactly the rows on screen.
+The History tab lists every experiment on the device with a skip scan (one `LIMIT 1` query per experiment id, plus its first and last sample time). Selecting one loads its last 24 hours into the same cache, unless they are already there. It shows a chamber selector, per-parameter charts, a per-chamber results table (mean with min – max), and a CSV export of exactly the rows on screen. Compare draws from the same cache.
 
 The Compare tab overlays up to four (experiment, chamber) series on one chart with a shared y-axis, aligned by sample order. Chambers may come from different experiments; each distinct experiment is fetched once and cached. Series colours are blue, green, amber and violet (`--chart-1` to `--chart-4`) by selection order.
 
 The entire design rests on one distinction it never blurs: **a missing row means a chamber went silent; a null field means a single sensor failed.** Charts break the line, statistics exclude the value, and CSV writes an empty cell — never a zero.
 
 ---
-Updated at 2026-11-26-16:47.
+Updated at 2026-11-27-11:31.

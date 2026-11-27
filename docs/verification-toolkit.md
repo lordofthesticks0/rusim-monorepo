@@ -171,6 +171,35 @@ Type-check them with `dashboard/node_modules/.bin/tsc -p verification/tsconfig.j
 | `dashboard-load.ts` | concurrent viewers repeating the dashboard's reads | `dashboard-load.md`, `requests.csv` |
 | `dashboard-log.ts` | local receiver for the dashboard's `?metrics` records | `runs/<stamp>-dashboard/dashboard.jsonl`, `dashboard.csv` |
 
+Touch latency chart: `plot_touch.py` is a Python tool, run with `uv` after
+`analyze.ts`:
+
+`uv run verification/plot_touch.py verification/runs/<run>`
+
+It reads `analysis/touch.csv` and writes two images to `analysis/`. Like
+`analyze.ts`, it keeps only edges with `nf`, `stuck` and `wake` all 0.
+`touch_latency_a.png` shows every sample by interaction label, with `up` and
+`down` counts under each label. `touch_latency_b.png` shows the cumulative
+distribution of all `up` and all `down` samples. The dashed red line is the
+200 ms limit.
+
+Latency budget charts: `plot_latency_budget.py` writes two stacked bar charts to
+`verification/runs/figures/`:
+
+`uv run verification/plot_latency_budget.py`
+
+The input runs are set at the top of the script.
+
+- `latency_local.png`: mean and p95 of the Mega `PING` reply (shown as a separate
+  bar) and of WT32 parse and emit, UART wire and display apply and render. The
+  1000 ms line applies only to the WT32-to-display bar.
+- `latency_cloud.png`: mean and maximum ingest latency (`inserted_at -
+  timestamp`), then the 330 s dashboard polling ceiling, median fetch and median
+  render. Ingest already contains the HTTPS push, so the push is drawn as a part
+  of the ingest bar and is not added to it. "Queue wait and other" is ingest
+  minus the mean push time. The inputs come from separate measurements, so a
+  total is an estimate.
+
 Serial ports: the display's CH340 resets the board when opened by pyserial or a
 plain `pio device monitor`. The tools configure the port with `stty` and open
 it as a file, which does not reset it (`link-serial-protocol.md` §7). Close any
@@ -377,9 +406,23 @@ latency can only be estimated from the WT32 side (`ENQ` -> `ACK`).
   30 s). The 10 min Concluded threshold must stay well above the run's
   `sample_interval_s`.
 - Concurrent viewers: `RUSIM_DEVICE_TOKEN=... bun verification/dashboard-load.ts --viewers 20 --duration 5m --exp 4`.
-- Row caps as built: `fetchReadings` (Monitoring) stops at 5 000 rows;
-  `fetchExperimentReadings` (History and CSV export) stops at 50 000 rows
-  (`MAX_EXPERIMENT_ROWS`).
+  The script still replays the read pattern from before 2026-11-27: the
+  newest 5 000 rows in offset pages, then one experiment oldest first. It no
+  longer matches what the dashboard sends, so treat its results as a
+  measurement of that older pattern.
+- Read limits as built (since 2026-11-27): every experiment read
+  (`fetchExperimentReadings`, used by Monitoring, History, Compare and CSV
+  export) loads the last 24 h before the experiment's newest sample
+  (`EXPERIMENT_WINDOW_MS`), newest first. A safety ceiling of 69 120 rows
+  (`MAX_EXPERIMENT_ROWS` = 24 chambers x 2 880 rounds of 30 s) only binds for
+  intervals under 30 s. At 30 s with 4 bottles a day is 11 520 rows, read in
+  12 requests. Startup and each poll first read one row
+  (`fetchLatestReading`); polls of a cached experiment read only rows from 10
+  min before the newest cached row. The experiment list is a skip scan of
+  `LIMIT 1` queries (`fetchExperimentList`). `dashboard.md` §5.3–5.7.
+- `fetch` metric names (since 2026-11-27): `loadLatestExperiment` (startup and
+  each poll), `fetchExperimentReadings` (History selecting an uncached
+  experiment), `fetchExperimentList` (first History or Compare open).
 
 ## 7. What each number includes
 
@@ -427,8 +470,9 @@ and never used it: rows were always enqueued once per 30 s. Now
 - The display link prints values with `%.4g`. Pressure in Pa has six
   significant digits, so the display shows it rounded to about +-50 Pa
   (`1.011e+05`). The upload path uses `%.6g` and the database stores float32.
-- The dashboard's experiment reads are capped at 50 000 rows, not 5 000;
-  5 000 applies to the Monitoring view's newest-first read.
+- When this toolkit was prepared, the dashboard's experiment reads were capped
+  at 50 000 rows and its Monitoring read at 5 000. Since 2026-11-27 every
+  experiment read loads the experiment's last 24 h, newest first (§6).
 
 ## 9. Related documents
 
@@ -440,4 +484,4 @@ and never used it: rows were always enqueued once per 30 s. Now
 - `dashboard.md` — the app, `dev-db`, row caps.
 
 ---
-Updated at 2026-11-26-12:24.
+Updated at 2026-11-27-10:47.

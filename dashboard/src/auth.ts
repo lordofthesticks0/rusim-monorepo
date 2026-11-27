@@ -51,7 +51,7 @@ export type AuthState = {
   signingIn: boolean;
   error: string;
   signIn: (token: string) => Promise<boolean>;
-  signOut: () => Promise<void>;
+  signOut: (holdUntil?: Promise<unknown>) => Promise<void>;
 };
 
 export function useAuth(): AuthState {
@@ -100,9 +100,13 @@ export function useAuth(): AuthState {
     }
   }, []);
 
-  const signOut = useCallback(async () => {
+  // `holdUntil` is the logout animation. The revoke and the stored-session
+  // clear happen straight away; only the switch to the login screen waits
+  // for it, so the dashboard stays mounted while the animation plays.
+  const signOut = useCallback(async (holdUntil?: Promise<unknown>) => {
     if (session) await revokeSession(session.sessionToken);
     writeStoredSession(null);
+    await holdUntil;
     setSession(null);
     setError("");
   }, [session]);

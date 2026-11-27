@@ -1,12 +1,12 @@
-import type { ExperimentSummary } from "./data";
 import type { Reading } from "./types/domain";
 
 export type DashboardView = "monitoring" | "history" | "compare";
 
 /**
- * Temporary preview flag: when 1, Monitoring shows synthetic live data if no
+ * Development preview flag: when 1, Monitoring shows synthetic live data if no
  * real experiment is live, so the live view can be reviewed without a device.
- * Set to 0 before deploying. History always shows real data.
+ * It stays 1 during development, deployed builds included; set it to 0 to
+ * turn the preview off. History always shows real data.
  */
 export const DEV_FORCE_LIVE_EXPERIMENT = 1;
 
@@ -60,20 +60,4 @@ export function isMonitoringPollingEligible(
   pollSuspended: boolean,
 ): boolean {
   return view === "monitoring" && !pollSuspended;
-}
-
-/** Selects the first live experiment using the existing sorted-summary policy. */
-export function selectActiveExperiment(
-  experiments: ExperimentSummary[],
-): ExperimentSummary | null {
-  return experiments.find((experiment) => !experiment.concluded) ?? null;
-}
-
-/** Returns only rows belonging to the experiment selected for Monitoring. */
-export function selectMonitoringReadings(
-  readings: Reading[],
-  experimentId: number | null,
-): Reading[] {
-  if (experimentId === null) return [];
-  return readings.filter((reading) => reading.experiment_id === experimentId);
 }

@@ -82,9 +82,12 @@ const ENTRANCE_MS = 1400;
  * so the title entrance plays once per visit and never again on a view switch
  * or a re-render. After `ENTRANCE_MS` it turns false, so content that arrives
  * later (for example after a slow fetch) appears without a delayed animation.
+ *
+ * `replay` plays it again on a screen that mounts with it set: the login
+ * screen coming back after a sign-out (brandTransition.ts, phase "return").
  */
-export function useEntranceOnce(): boolean {
-  const [entering, setEntering] = useState(() => !entranceDone);
+export function useEntranceOnce(replay = false): boolean {
+  const [entering, setEntering] = useState(() => !entranceDone || replay);
   entranceDone = true;
   useEffect(() => {
     if (!entering) return;

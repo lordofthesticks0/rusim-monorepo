@@ -1,21 +1,21 @@
 // IMPORTANT: For AI agents, ALWAYS update the documentation in docs/dashboard.md whenever any changes are made.
 
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type Ref } from "react";
+import { nearestIndex, nearestSeries, showMarkers, stepIndex, viewBoxX, viewBoxY } from "./chartInteraction";
 import { useAuth } from "./auth";
+import { playPhase, prefersReducedMotion, type BrandPhase } from "./brandTransition";
 import { useEntranceOnce, useIndicator } from "./motion";
 import { csvFileName, downloadCsv, toCsv } from "./csv";
 import { newestAgeSeconds, startFetchTimer } from "./metrics";
 import { displayChamberNumber, internalChamberIds, FIRST_INTERNAL_CHAMBER_ID } from "./chambers";
 import {
-  fetchReadings,
-  fetchExperimentReadings,
+  fetchExperimentList,
+  fetchLatestReading,
   getParameterValue,
   isConcluded,
-  MAX_EXPERIMENT_ROWS,
   PARAMETER_NAMES,
   PARAMETER_UNITS,
   POLL_INTERVAL_MS,
-  summarizeExperiments,
   splitBottlesByPresence,
   type ExperimentSummary,
   type ParameterName,
@@ -26,9 +26,9 @@ import {
   generateSyntheticLiveReadings,
   isMonitoringPollingEligible,
   isSyntheticExperiment,
-  selectActiveExperiment,
-  selectMonitoringReadings,
 } from "./monitoring";
+import { withConcludedState, withLatestReading } from "./readingCache";
+import { useReadingCache, type ReadingCache } from "./useReadingCache";
 import {
   getHistoryPointDetails,
   getExperimentChambers,
@@ -39,11 +39,13 @@ import {
 } from "./history";
 import {
   addSelection,
-  canAddSelection,
   compareSeriesColor,
   compareSeriesLabel,
   distinctExperimentIds,
+  isDuplicateSelection,
+  nextSelection,
   removeSelection,
+  updateSelection,
   MAX_COMPARE_SERIES,
   type CompareSelection,
 } from "./compare";
@@ -52,6 +54,9 @@ import { formatExperimentId, isTestingExperiment } from "./types/domain";
 
 type DashboardView = "monitoring" | "history" | "compare";
 type HistoryPanel = "readings" | "results";
+
+/** Shared empty result, so memo dependencies stay stable when nothing is loaded. */
+const NO_READINGS: Reading[] = [];
 
 /** Decimal places per parameter, chosen to suit each sensor's useful precision. */
 const PARAMETER_DIGITS: Record<ParameterName, number> = {
@@ -71,40 +76,109 @@ const PARAMETER_DISPLAY: Record<ParameterName, string> = {
   Pressure: "Pressure",
 };
 
+/** A phase that misses its `finished` promise still moves on after this long, so the stage can never trap the operator. */
+const PHASE_SAFETY_MS = 4000;
+
 function App() {
   const { session, signingIn, error: authError, signIn, signOut } = useAuth();
-  // True after a sign-in in this page load, so the dashboard fades in over the
-  // login screen instead of cutting to it. A stored session opens without it.
-  const [handoff, setHandoff] = useState(false);
-  // It is set before the attempt, so the dashboard's very first frame already
-  // carries the class and never flashes at full opacity.
-  const signInWithHandoff = useCallback(async (token: string) => {
-    setHandoff(true);
+  // The logout or sign-in transition playing on the stage (brandTransition.ts), or null.
+  const [phase, setPhase] = useState<BrandPhase | null>(null);
+  // True while a sign-in attempt that will animate is in flight. The session
+  // arrives before signIn() resolves; this keeps the login screen up until the
+  // "lift" phase takes over from it.
+  const [holdLogin, setHoldLogin] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
+  // Resolves the promise signOut() waits on once the outro has played.
+  const releaseOutro = useRef<() => void>(() => {});
+
+  // The outro hands over to the return in the same render that drops the
+  // session, so the login screen mounts already knowing it is coming back.
+  if (phase === "outro" && !session) setPhase("return");
+
+  const signInWithIntro = useCallback(async (token: string) => {
+    const animate = !prefersReducedMotion();
+    setHoldLogin(animate);
     const ok = await signIn(token);
-    if (!ok) setHandoff(false);
+    if (ok && animate) setPhase("lift");
+    setHoldLogin(false);
     return ok;
   }, [signIn]);
 
-  if (!session) {
-    return <LoginScreen signingIn={signingIn} error={authError} onSignIn={signInWithHandoff} />;
-  }
+  const signOutWithOutro = useCallback(async () => {
+    if (phase) return;
+    if (prefersReducedMotion()) return signOut();
+    const outro = new Promise<void>((resolve) => { releaseOutro.current = resolve; });
+    setPhase("outro");
+    await signOut(outro);
+  }, [phase, signOut]);
 
-  // The wrapper always renders, so dropping the class never remounts the dashboard.
-  return <div
-    className={handoff ? "login-handoff" : undefined}
-    onAnimationEnd={(event) => { if (event.target === event.currentTarget) setHandoff(false); }}
-  >
-    <Dashboard session={session} onSignOut={signOut} />
-  </div>;
+  // Each phase starts before paint, from the layout of the commit that set it,
+  // so the stage never shows a frame out of place. The cleanup cancels the
+  // previous phase's animations in the same commit as the next one starts.
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!phase || !stage) return;
+    const run = playPhase(phase, stage);
+    let live = true;
+    const next = () => {
+      if (!live) return;
+      live = false;
+      if (phase === "outro") releaseOutro.current();
+      else setPhase(phase === "lift" ? "arrive" : null);
+    };
+    run.finished.then(next, () => {});
+    const safety = window.setTimeout(next, PHASE_SAFETY_MS);
+    return () => {
+      live = false;
+      window.clearTimeout(safety);
+      run.cancel();
+    };
+  }, [phase]);
+
+  const loginHeld = holdLogin || phase === "lift";
+  return <>
+    {session && !loginHeld
+      // Keyed by session so a new sign-in starts with a fresh reading cache.
+      ? <Dashboard key={session.sessionToken} session={session} onSignOut={signOutWithOutro} />
+      : <LoginScreen
+        signingIn={signingIn || loginHeld}
+        error={authError}
+        onSignIn={signInWithIntro}
+        returning={phase === "return"}
+        logoHeld={phase === "return" || phase === "lift"}
+      />}
+    {/* Second child, so it stays mounted while the first swaps between dashboard and login. */}
+    {phase && <BrandStage ref={stageRef} />}
+  </>;
 }
 
-function BrandMark() {
-  return <svg className="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
+/** Data attributes that let brandTransition.ts find a mark or a piece of the wordmark. */
+type BrandHooks = { "data-brand-anchor"?: "sidebar" | "login"; "data-brand-part"?: "mark" | "word" | "sub" | "ground" };
+
+function BrandMark(props: BrandHooks) {
+  return <svg className="brand-mark" viewBox="0 0 28 28" aria-hidden="true" {...props}>
     <rect x="2" y="2" width="24" height="24" rx="5" fill="none" stroke="currentColor" strokeWidth="1.5" />
     <path d="M9 8v12M14 8v12M19 8v12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     <path d="M6 20h16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     <circle className="brand-dot" cx="19" cy="8" r="2.25" />
   </svg>;
+}
+
+/**
+ * The full-screen layer the logout and sign-in transitions play on
+ * (brandTransition.ts). Its CSS lays out the finished lockup from the video's
+ * end card; every phase starts from or ends on that layout. It covers the page
+ * and takes the clicks while it is up.
+ */
+function BrandStage({ ref }: { ref: Ref<HTMLDivElement> }) {
+  return <div className="brand-stage" ref={ref} aria-hidden="true">
+    <div className="brand-stage-ground" data-brand-part="ground" />
+    <div className="brand-stage-lockup">
+      <BrandMark data-brand-part="mark" />
+      <span className="brand-stage-word" data-brand-part="word">RuSim</span>
+      <span className="brand-stage-sub" data-brand-part="sub">In Vitro Rumen Simulator</span>
+    </div>
+  </div>;
 }
 
 function MonitoringIcon() {
@@ -181,11 +255,16 @@ function LockIcon() {
   </svg>;
 }
 
-/** The RuSim logo: the BrandMark glyph with the product wordmark beside it. */
-function RusimLogo() {
-  return <div className="rusim-logo">
-    <BrandMark />
-    <span className="rusim-logo-name">RuSim<small>In Vitro Rumen Simulator</small></span>
+/**
+ * The RuSim logo: the BrandMark glyph with the product wordmark beside it.
+ * `held` hides it while the stage's copy flies to or from it (brandTransition.ts).
+ * `enter` puts it in the first-load entrance; when the login screen comes back
+ * after a sign-out the stage's copy lands here instead.
+ */
+function RusimLogo({ held, enter }: { held: boolean; enter: boolean }) {
+  return <div className={`rusim-logo${held ? " is-held" : ""}`} data-brand-anchor="login" {...(enter ? enterStep(1) : {})}>
+    <BrandMark data-brand-part="mark" />
+    <span className="rusim-logo-name"><span data-brand-part="word">RuSim</span><small data-brand-part="sub">In Vitro Rumen Simulator</small></span>
   </div>;
 }
 
@@ -218,16 +297,25 @@ function LoginScreen({
   signingIn,
   error,
   onSignIn,
+  returning,
+  logoHeld,
 }: {
   signingIn: boolean;
   error: string;
   onSignIn: (token: string) => Promise<boolean>;
+  /** Mounted by a sign-out: the entrance plays again and the logo is left to the stage. */
+  returning: boolean;
+  /** The stage's copy of the logo is flying to or from it. */
+  logoHeld: boolean;
 }) {
   const [token, setToken] = useState("");
   const [reveal, setReveal] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
   const [field, setField] = useState<HTMLDivElement | null>(null);
-  const entering = useEntranceOnce();
+  const entering = useEntranceOnce(returning);
+  // Fixed at mount: adding the logo's entrance step later, while the entrance
+  // still runs, would restart its fade-up after the stage's copy has landed.
+  const [cameBack] = useState(returning);
   const errorId = useId();
   const year = new Date().getFullYear();
 
@@ -275,10 +363,11 @@ function LoginScreen({
 
     <section className="login-panel" aria-labelledby="login-title">
       <div className="login-form-wrap">
-        <div className="login-heading" {...enterStep(1)}>
-          <RusimLogo />
-          <h2 className="login-title" id="login-title">Sign in</h2>
-          <p className="login-subtitle">Enter the device token issued for your RuSim unit.</p>
+        {/* The steps sit on the children, not the heading, so no entrance ever moves the logo the stage lands on. */}
+        <div className="login-heading">
+          <RusimLogo held={logoHeld} enter={!cameBack} />
+          <h2 className="login-title" id="login-title" {...enterStep(1)}>Sign in</h2>
+          <p className="login-subtitle" {...enterStep(1)}>Enter the device token issued for your RuSim unit.</p>
         </div>
 
         <form className="login-form" onSubmit={(event) => { event.preventDefault(); if (!signingIn) void onSignIn(token); }} {...enterStep(2)}>
@@ -341,7 +430,14 @@ function Dashboard({
   const { device_id: deviceId, bottle_count: bottleCount, owner_name: ownerName, owner_email: ownerEmail } = session.device;
   const sessionToken = session.sessionToken;
   const [view, setView] = useState<DashboardView>("monitoring");
-  const [readings, setReadings] = useState<Reading[]>([]);
+  const readingCache = useReadingCache(sessionToken);
+  const loadExperiment = readingCache.load;
+  // Newest reading on the device; decides which experiment Monitoring shows.
+  const [latest, setLatest] = useState<Reading | null>(null);
+  // Every experiment on the device. Null until History or Compare first opens.
+  const [experimentList, setExperimentList] = useState<ExperimentSummary[] | null>(null);
+  const [listLoading, setListLoading] = useState(false);
+  const [listError, setListError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedBottle, setSelectedBottle] = useState(FIRST_INTERNAL_CHAMBER_ID);
@@ -360,14 +456,27 @@ function Dashboard({
   const nav = useIndicator<HTMLElement>(view, "box");
   const kpiBar = useIndicator<HTMLDivElement>(chartParameter, "bar");
 
+  /**
+   * Startup and every poll: read the newest row, then load its experiment.
+   *
+   * The first call for an experiment reads its last 24 hours (EXPERIMENT_WINDOW_MS);
+   * later polls of the same experiment read only rows since the last load.
+   * When a new experiment starts, the newest row points at it and it is
+   * loaded in full, while the previous one stays cached for History.
+   */
   const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const timer = startFetchTimer("fetchReadings");
-      const rows = await fetchReadings(sessionToken);
-      setReadings(rows);
-      timer({ rows: rows.length, newest_age_s: newestAgeSeconds(rows) });
+      const timer = startFetchTimer("loadLatestExperiment");
+      const newest = await fetchLatestReading(sessionToken);
+      const entry = newest ? await loadExperiment(newest.experiment_id, { refresh: true }) : null;
+      setLatest(newest);
+      timer({
+        rows: entry?.readings.length ?? 0,
+        experiment_id: newest?.experiment_id ?? null,
+        newest_age_s: newest ? newestAgeSeconds([newest]) : null,
+      });
       setLoadedAt(Date.now());
       setPollSuspended(false);
     } catch (err) {
@@ -376,28 +485,66 @@ function Dashboard({
     } finally {
       setLoading(false);
     }
-  }, [sessionToken]);
+  }, [sessionToken, loadExperiment]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
-  // Freshness depends on the current clock, so recalculate on renders caused by
-  // refresh and error state changes instead of memoizing only by the rows array.
-  const experiments = summarizeExperiments(readings);
-  const realLiveExperiment = selectActiveExperiment(experiments);
+  /** Reads every experiment on the device for History and Compare. */
+  const loadExperimentList = useCallback(async () => {
+    setListLoading(true);
+    setListError("");
+    try {
+      const timer = startFetchTimer("fetchExperimentList");
+      const list = await fetchExperimentList(sessionToken);
+      setExperimentList(list);
+      timer({ rows: list.length });
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "Unable to load experiments");
+    } finally {
+      setListLoading(false);
+    }
+  }, [sessionToken]);
+
+  // The list is read only when a view that needs it first opens.
+  const needsExperimentList = view !== "monitoring" && experimentList === null && !listLoading && listError === "";
+  useEffect(() => {
+    if (needsExperimentList) void loadExperimentList();
+  }, [needsExperimentList, loadExperimentList]);
+
+  const listPending = listLoading || (experimentList === null && listError === "");
+
+  const refreshAll = () => {
+    void loadData();
+    if (view !== "monitoring") void loadExperimentList();
+  };
+
+  // Freshness depends on the current clock, so recalculate on every render
+  // rather than memoizing. The newest reading keeps the latest experiment's
+  // entry current between list fetches.
+  const experiments = withConcludedState(withLatestReading(experimentList ?? [], latest), isConcluded);
+  const liveEntry = latest ? readingCache.entries[latest.experiment_id] : undefined;
+  const realLiveExperiment: ExperimentSummary | null = latest && !isConcluded(latest.timestamp)
+    ? {
+        experiment_id: latest.experiment_id,
+        first_timestamp: liveEntry?.readings[0]?.timestamp ?? null,
+        last_timestamp: latest.timestamp,
+        concluded: false,
+      }
+    : null;
   // Preview flag: when no real experiment is live, show synthetic fresh data so
   // Monitoring can be reviewed without a device. History always uses real data.
   const syntheticReadings = useMemo(
     () => (DEV_FORCE_LIVE_EXPERIMENT && !realLiveExperiment
       ? generateSyntheticLiveReadings(deviceId, bottleCount)
       : []),
-    [deviceId, bottleCount, realLiveExperiment, readings],
+    // loadedAt regenerates the preview on each load so it stays "live".
+    [deviceId, bottleCount, realLiveExperiment === null, loadedAt],
   );
   const syntheticExperiment: ExperimentSummary | null = syntheticReadings.length > 0
     ? {
         experiment_id: syntheticReadings[0]!.experiment_id,
-        reading_count: syntheticReadings.length,
         first_timestamp: syntheticReadings.reduce(
           (earliest, reading) => (reading.timestamp < earliest ? reading.timestamp : earliest),
           syntheticReadings[0]!.timestamp,
@@ -411,12 +558,10 @@ function Dashboard({
     : null;
   const liveExperiment = realLiveExperiment ?? syntheticExperiment;
   const isSyntheticPreview = liveExperiment !== null && isSyntheticExperiment(liveExperiment.experiment_id);
-  const monitoringReadings = useMemo(
-    () => (isSyntheticPreview
-      ? syntheticReadings
-      : selectMonitoringReadings(readings, liveExperiment?.experiment_id ?? null)),
-    [readings, liveExperiment?.experiment_id, isSyntheticPreview, syntheticReadings],
-  );
+  // The cache entry holds only this experiment's rows, so no filtering needed.
+  const monitoringReadings = isSyntheticPreview
+    ? syntheticReadings
+    : realLiveExperiment && liveEntry ? liveEntry.readings : NO_READINGS;
 
   // Which bottles reported at the newest sample, and which are missing from it.
   const presence = useMemo(
@@ -453,10 +598,10 @@ function Dashboard({
       ? "Unable to load"
       : isSyntheticPreview
         ? "Preview"
-        : readings.length > 0
+        : latest !== null
           ? "Data loaded"
           : "No readings";
-  const pulseTone = loading ? "pending" : error ? "error" : isSyntheticPreview || readings.length > 0 ? "ok" : "idle";
+  const pulseTone = loading ? "pending" : error ? "error" : isSyntheticPreview || latest !== null ? "ok" : "idle";
   const bottleState = selectedBottleIsDisconnected
     ? "Disconnected"
     : isSyntheticPreview
@@ -492,7 +637,7 @@ function Dashboard({
   return <div className="app">
     <aside className={`sidebar${menuOpen ? " open" : ""}`} aria-label="Primary">
       <div className="brand">
-        <BrandMark />
+        <BrandMark data-brand-anchor="sidebar" />
         <span className="brand-name">RuSim <small>Telemetry</small></span>
       </div>
       <div className="scope">
@@ -536,7 +681,7 @@ function Dashboard({
             : <span className="status-dot" aria-hidden="true" />}
           {view === "monitoring" ? `${connectionStatus} · Updated ${latestReadingAt}` : "Historical data"}
         </span>
-        <button className={`btn primary refresh${loading ? " is-busy" : ""}`} onClick={() => void loadData()} disabled={loading} aria-label="Refresh data">
+        <button className={`btn primary refresh${loading || listLoading ? " is-busy" : ""}`} onClick={refreshAll} disabled={loading || listLoading} aria-label="Refresh data">
           <RefreshIcon /><span className="btn-label">Refresh data</span>
         </button>
       </div>
@@ -559,7 +704,7 @@ function Dashboard({
         {view === "monitoring" ? <div className="stack">
           {isSyntheticPreview && <div className="notice" role="status">
             <span className="notice-label">Preview</span>
-            <p>Synthetic live data (DEV_FORCE_LIVE_EXPERIMENT=1). Set to 0 before deploying.</p>
+            <p>Synthetic live data, shown because no experiment is live (DEV_FORCE_LIVE_EXPERIMENT=1).</p>
           </div>}
           {error && <div className="error-block" role="alert">
             <span>Unable to refresh readings; showing the last loaded data. {error}</span>
@@ -653,7 +798,9 @@ function Dashboard({
 
           <footer className="page-foot">RuSim · Device telemetry · Data source: Supabase</footer>
           </>}
-        </div> : view === "history" ? <ExperimentHistoryView experiments={experiments} loading={loading} error={error} sessionToken={sessionToken} /> : <CompareView experiments={experiments} loading={loading} error={error} sessionToken={sessionToken} bottleCount={bottleCount} />}
+        </div> : view === "history"
+          ? <ExperimentHistoryView experiments={experiments} loading={listPending} error={listError} cache={readingCache} />
+          : <CompareView experiments={experiments} loading={listPending} error={listError} cache={readingCache} bottleCount={bottleCount} />}
         </div>
       </div>
     </main>
@@ -694,50 +841,54 @@ function CompareView({
   experiments,
   loading,
   error,
-  sessionToken,
+  cache,
   bottleCount,
 }: {
   experiments: ExperimentSummary[];
   loading: boolean;
   error: string;
-  sessionToken: string;
+  cache: ReadingCache;
   bottleCount: number;
 }) {
+  // One entry per row; each row is edited in place.
   const [selections, setSelections] = useState<CompareSelection[]>([]);
-  const [draftExperimentId, setDraftExperimentId] = useState<number | null>(null);
-  const [draftChamberId, setDraftChamberId] = useState(FIRST_INTERNAL_CHAMBER_ID);
   const [parameter, setParameter] = useState<ParameterName>("CH4");
-  const [readingsByExperiment, setReadingsByExperiment] = useState<Record<number, Reading[]>>({});
+  const { entries, load: loadExperiment } = cache;
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const tabBar = useIndicator<HTMLDivElement>(parameter, "bar");
+  const rowIdPrefix = useId();
+  const chamberIds = useMemo(() => internalChamberIds(bottleCount), [bottleCount]);
+  const newestExperimentId = experiments[0]?.experiment_id ?? null;
 
+  // Start with one row (the newest experiment, first chamber) once the list
+  // arrives, so the controls are visible. Only once: after "Clear all" the
+  // view stays empty until a row is added.
+  const [seeded, setSeeded] = useState(false);
   useEffect(() => {
-    setDraftExperimentId((current) => (
-      current !== null && experiments.some((experiment) => experiment.experiment_id === current)
-        ? current
-        : experiments[0]?.experiment_id ?? null
-    ));
-  }, [experiments]);
+    if (seeded || newestExperimentId === null) return;
+    setSeeded(true);
+    setSelections((previous) => {
+      const first = nextSelection(previous, newestExperimentId, chamberIds);
+      return previous.length === 0 && first ? [first] : previous;
+    });
+  }, [seeded, newestExperimentId, chamberIds]);
 
+  // Experiments already in the shared cache (from Monitoring, History or an
+  // earlier comparison) load instantly; only the rest cost a request. The
+  // joined id string keeps the effect from re-running on unrelated cache updates.
+  const missingKey = distinctExperimentIds(selections).filter((id) => !(id in entries)).join(",");
   useEffect(() => {
-    const missing = distinctExperimentIds(selections).filter((id) => !(id in readingsByExperiment));
-    if (missing.length === 0) return;
+    if (missingKey === "") {
+      setDetailLoading(false);
+      return;
+    }
+    const missing = missingKey.split(",").map(Number);
 
     let cancelled = false;
     setDetailLoading(true);
     setDetailError("");
-    void Promise.all(missing.map((id) => fetchExperimentReadings(sessionToken, id)))
-      .then((results) => {
-        if (cancelled) return;
-        setReadingsByExperiment((previous) => {
-          const next = { ...previous };
-          missing.forEach((id, index) => {
-            next[id] = results[index] ?? [];
-          });
-          return next;
-        });
-      })
+    void Promise.all(missing.map((id) => loadExperiment(id)))
       .catch((err: unknown) => {
         if (cancelled) return;
         setDetailError(err instanceof Error ? err.message : "Unable to load experiment readings");
@@ -749,21 +900,20 @@ function CompareView({
     return () => {
       cancelled = true;
     };
-  }, [selections, sessionToken, readingsByExperiment]);
+  }, [missingKey, loadExperiment]);
 
   const series = useMemo<CompareSeries[]>(
     () => selections.map((selection, index) => ({
       label: compareSeriesLabel(selection),
       color: compareSeriesColor(index),
-      rows: selectChamberReadings(readingsByExperiment[selection.experimentId] ?? [], selection.experimentId, selection.bottleId),
+      rows: selectChamberReadings(entries[selection.experimentId]?.readings ?? NO_READINGS, selection.experimentId, selection.bottleId),
     })),
-    [selections, readingsByExperiment],
+    [selections, entries],
   );
 
-  const candidate: CompareSelection | null = draftExperimentId === null
-    ? null
-    : { experimentId: draftExperimentId, bottleId: draftChamberId };
-  const canAdd = candidate !== null && canAddSelection(selections, candidate);
+  const candidate = nextSelection(selections, newestExperimentId, chamberIds);
+  const updateRow = (index: number, patch: Partial<CompareSelection>) =>
+    setSelections((previous) => updateSelection(previous, index, patch, chamberIds));
   const totalRecords = series.reduce((sum, item) => sum + item.rows.length, 0);
   const hasChartable = series.some((item) => item.rows.length >= 2);
 
@@ -777,45 +927,64 @@ function CompareView({
       {loading && <div className="loading-line" role="status" aria-label="Loading experiments" />}
       {!loading && experiments.length === 0 && <div className="empty compact">No experiments have readings yet.</div>}
       {!loading && experiments.length > 0 && <>
+        {selections.length === 0
+          ? <p className="panel-text">Chambers can come from different experiments. Up to four series overlay on one chart, aligned by sample order.</p>
+          : <div className="compare-rows">
+            {selections.map((selection, index) => {
+              const label = compareSeriesLabel(selection);
+              const others = selections.filter((_, i) => i !== index);
+              const experimentFieldId = `${rowIdPrefix}-experiment-${index}`;
+              const chamberFieldId = `${rowIdPrefix}-chamber-${index}`;
+              // Rows are keyed by position: colours are positional too, and
+              // every field is controlled, so reuse after a removal is safe.
+              return <div className="filters compare-row" key={index} role="group" aria-label={`Series ${index + 1}: ${label}`}>
+                <span className="compare-dot" style={{ background: compareSeriesColor(index) }} aria-hidden="true" />
+                <label htmlFor={experimentFieldId} className="field-label">Experiment</label>
+                <select
+                  id={experimentFieldId}
+                  className="input"
+                  value={selection.experimentId}
+                  onChange={(event) => updateRow(index, { experimentId: Number(event.target.value) })}
+                >
+                  {experiments.map((experiment) => <option value={experiment.experiment_id} key={experiment.experiment_id}>{formatExperimentId(experiment.experiment_id)}</option>)}
+                </select>
+                <label htmlFor={chamberFieldId} className="field-label">Chamber</label>
+                <select
+                  id={chamberFieldId}
+                  className="input"
+                  value={selection.bottleId}
+                  onChange={(event) => updateRow(index, { bottleId: Number(event.target.value) })}
+                >
+                  {chamberIds.map((internalId) => <option
+                    value={internalId}
+                    key={internalId}
+                    // Already compared in another row for this experiment.
+                    disabled={isDuplicateSelection(others, { experimentId: selection.experimentId, bottleId: internalId })}
+                  >
+                    Chamber {displayChamberNumber(internalId)}
+                  </option>)}
+                </select>
+                <button
+                  className="compare-remove"
+                  aria-label={`Remove ${label}`}
+                  onClick={() => setSelections((previous) => removeSelection(previous, index))}
+                >
+                  ×
+                </button>
+              </div>;
+            })}
+          </div>}
         <div className="filters">
-          <label htmlFor="compare-experiment-select" className="field-label">Experiment</label>
-          <select
-            id="compare-experiment-select"
-            className="input"
-            value={draftExperimentId ?? ""}
-            onChange={(event) => setDraftExperimentId(Number(event.target.value))}
+          <button
+            className="btn"
+            onClick={() => { if (candidate) setSelections((previous) => addSelection(previous, candidate)); }}
+            disabled={candidate === null}
+            title={selections.length >= MAX_COMPARE_SERIES ? `Up to ${MAX_COMPARE_SERIES} chambers can be compared` : undefined}
           >
-            {experiments.map((experiment) => <option value={experiment.experiment_id} key={experiment.experiment_id}>{formatExperimentId(experiment.experiment_id)}</option>)}
-          </select>
-          <label htmlFor="compare-chamber-select" className="field-label">Chamber</label>
-          <select
-            id="compare-chamber-select"
-            className="input"
-            value={draftChamberId}
-            onChange={(event) => setDraftChamberId(Number(event.target.value))}
-          >
-            {internalChamberIds(bottleCount).map((internalId) => <option value={internalId} key={internalId}>Chamber {displayChamberNumber(internalId)}</option>)}
-          </select>
-          <button className="btn" onClick={() => { if (candidate) setSelections((previous) => addSelection(previous, candidate)); }} disabled={!canAdd}>
             Add chamber
           </button>
           {selections.length > 0 && <button className="btn ghost" onClick={() => setSelections([])}>Clear all</button>}
         </div>
-        {selections.length === 0
-          ? <p className="panel-text">Chambers can come from different experiments. Up to four series overlay on one chart, aligned by sample order.</p>
-          : <div className="compare-chips" aria-label="Selected chambers">
-            {selections.map((selection, index) => <span className="compare-chip" key={`${selection.experimentId}-${selection.bottleId}`}>
-              <span className="compare-dot" style={{ background: compareSeriesColor(index) }} aria-hidden="true" />
-              <span>{compareSeriesLabel(selection)}</span>
-              <button
-                className="compare-remove"
-                aria-label={`Remove ${compareSeriesLabel(selection)}`}
-                onClick={() => setSelections((previous) => removeSelection(previous, index))}
-              >
-                ×
-              </button>
-            </span>)}
-          </div>}
       </>}
     </section>
 
@@ -887,8 +1056,57 @@ function CompareChart({ series, parameter }: { series: CompareSeries[]; paramete
     };
   })();
 
+  const midY = (plotTop + plotBottom) / 2;
+  const setFromPointer = (event: ReactMouseEvent<SVGRectElement>, pinned: boolean) => {
+    const svg = event.currentTarget.ownerSVGElement;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const x = viewBoxX(event.clientX, rect, chartWidth);
+    const y = viewBoxY(event.clientY, rect, chartHeight);
+    const indexes = series.map((item) => nearestIndex(x, item.rows.length, plotLeft, plotRight));
+    const ys = indexes.map((index, seriesIndex) => {
+      const point = index === null ? undefined : points[seriesIndex]?.[index];
+      return point === undefined ? null : point.y === null ? midY : toY(point.value);
+    });
+    const seriesIndex = nearestSeries(y, ys);
+    const index = seriesIndex === null ? null : indexes[seriesIndex];
+    if (seriesIndex !== null && index !== null && index !== undefined) setActivePoint({ seriesIndex, index, pinned });
+  };
+  // ← → step within the active series; ↑ ↓ move to the neighbouring series at
+  // the same relative position, skipping empty ones.
+  const onKeyDown = (event: KeyboardEvent<SVGSVGElement>) => {
+    if (event.key === "Escape") { setActivePoint(null); return; }
+    const filled = series.map((item, seriesIndex) => (item.rows.length > 0 ? seriesIndex : -1)).filter((seriesIndex) => seriesIndex >= 0);
+    if (filled.length === 0) return;
+    const currentSeries = activePoint?.seriesIndex ?? filled[0]!;
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      const position = filled.indexOf(currentSeries);
+      const nextSeries = filled[Math.min(filled.length - 1, Math.max(0, position + (event.key === "ArrowDown" ? 1 : -1)))]!;
+      const fromCount = series[currentSeries]?.rows.length ?? 1;
+      const toCount = series[nextSeries]?.rows.length ?? 1;
+      const fraction = activePoint && fromCount > 1 ? activePoint.index / (fromCount - 1) : 1;
+      event.preventDefault();
+      setActivePoint({ seriesIndex: nextSeries, index: Math.round(fraction * (toCount - 1)), pinned: true });
+      return;
+    }
+    const index = stepIndex(event.key, activePoint?.index ?? null, series[currentSeries]?.rows.length ?? 0);
+    if (index === null) return;
+    event.preventDefault();
+    setActivePoint({ seriesIndex: currentSeries, index, pinned: true });
+  };
+
   return <>
-    <svg ref={svgRef} viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label={`${parameterLabel(parameter)} comparison chart`}>
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+      className="chart-interactive"
+      role="group"
+      aria-roledescription="chart"
+      aria-label={`${parameterLabel(parameter)} comparison chart, ${series.length} series. Arrow keys step through samples; up and down switch series.`}
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      onBlur={() => setActivePoint(null)}
+    >
       {yTicks.map((tick) => <g key={tick}>
         <line x1={plotLeft} x2={plotRight} y1={toY(tick)} y2={toY(tick)} stroke="var(--grid)" strokeWidth="1" />
         <text x={plotLeft - 8} y={toY(tick) + 4} textAnchor="end" fontSize="11" fill="var(--axis-ink)">{formatTick(tick, parameter)}</text>
@@ -903,31 +1121,41 @@ function CompareChart({ series, parameter }: { series: CompareSeries[]; paramete
         d={chartPath((points[seriesIndex] ?? []).map((point, index) => ({ x: toX(index, item.rows.length), y: point.y === null ? null : toY(point.value) })))}
         stroke={item.color}
       />)}
-      <g className="chart-points draw" key={`points-${parameter}-${series.length}`}>
-      {series.map((item, seriesIndex) => (points[seriesIndex] ?? []).map((point, index) => {
-        const reading = item.rows[index];
-        if (reading === undefined) return null;
-        const selected = activePoint?.seriesIndex === seriesIndex && activePoint?.index === index;
-        return <circle
-          key={`${item.label}-${reading.timestamp}-${index}`}
-          className={`chart-point${selected ? " is-active" : ""}`}
-          cx={toX(index, item.rows.length)}
-          cy={point.y === null ? (plotTop + plotBottom) / 2 : toY(point.value)}
-          r={3}
-          fill={point.y === null ? "var(--chart-muted)" : item.color}
-          stroke="var(--surface)"
-          strokeWidth="1.5"
-          tabIndex={0}
-          role="button"
-          aria-label={`${item.label} · ${parameterLabel(parameter)} at ${formatDateTime(reading.timestamp)}`}
-          onMouseEnter={() => setActivePoint({ seriesIndex, index, pinned: false })}
-          onMouseLeave={() => setActivePoint((current) => current?.pinned ? current : null)}
-          onFocus={() => setActivePoint({ seriesIndex, index, pinned: false })}
-          onBlur={() => setActivePoint((current) => current?.pinned ? current : null)}
-          onClick={() => setActivePoint({ seriesIndex, index, pinned: true })}
-        />;
-      }))}
+      {/* Decorative dots, per series, only where its samples are far enough apart. */}
+      <g className="chart-points draw" key={`points-${parameter}-${series.length}`} aria-hidden="true">
+      {series.map((item, seriesIndex) => showMarkers(item.rows.length, plotWidth) && (points[seriesIndex] ?? []).map((point, index) => <circle
+        key={`${seriesIndex}-${index}`}
+        className="chart-point"
+        cx={toX(index, item.rows.length)}
+        cy={point.y === null ? midY : toY(point.value)}
+        r={3}
+        fill={point.y === null ? "var(--chart-muted)" : item.color}
+        stroke="var(--surface)"
+        strokeWidth="1.5"
+      />))}
       </g>
+      {activePoint && activePointCoords && <circle
+        className="chart-point is-active"
+        cx={activePointCoords.x}
+        cy={activePointCoords.y}
+        r={3}
+        fill={points[activePoint.seriesIndex]?.[activePoint.index]?.y === null ? "var(--chart-muted)" : series[activePoint.seriesIndex]?.color}
+        stroke="var(--surface)"
+        strokeWidth="1.5"
+        aria-hidden="true"
+      />}
+      {/* One hit area: the pointer picks the series whose line is closest at that x. */}
+      <rect
+        className="chart-hit"
+        x={plotLeft}
+        y={plotTop}
+        width={Math.max(0, plotWidth)}
+        height={Math.max(0, plotHeight)}
+        // A mouse hover is transient (a click pins it); a touch drag pins.
+        onPointerMove={(event) => setFromPointer(event, event.pointerType !== "mouse")}
+        onPointerLeave={() => setActivePoint((current) => current?.pinned ? current : null)}
+        onClick={(event) => setFromPointer(event, true)}
+      />
       {labels.map((label, index) => {
         const x = labels.length <= 1 ? (plotLeft + plotRight) / 2 : plotLeft + (index / (labels.length - 1 || 1)) * plotWidth;
         const anchor = index === 0 ? "start" : index === labels.length - 1 ? "end" : "middle";
@@ -956,61 +1184,50 @@ function ExperimentHistoryView({
   experiments,
   loading,
   error,
-  sessionToken,
+  cache,
 }: {
   experiments: ExperimentSummary[];
   loading: boolean;
   error: string;
-  sessionToken: string;
+  cache: ReadingCache;
 }) {
   const [selectedExperimentId, setSelectedExperimentId] = useState<number | null>(null);
   const [historyPanel, setHistoryPanel] = useState<HistoryPanel>("readings");
-  const [readings, setReadings] = useState<Reading[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [showAll, setShowAll] = useState(false);
   const tabBar = useIndicator<HTMLDivElement>(historyPanel, "bar");
 
   const activeExperimentId = selectedExperimentId;
+  const activeEntry = activeExperimentId === null ? undefined : cache.entries[activeExperimentId];
+  const isCached = activeEntry !== undefined;
+  // Loading is derived rather than stored: selected, not cached, not failed.
+  const detailLoading = activeExperimentId !== null && !isCached && detailError === "";
+  const loadExperiment = cache.load;
 
+  // Only an experiment that is not cached yet costs a request; revisiting one
+  // reads it straight from memory.
   useEffect(() => {
-    if (activeExperimentId === null) {
-      setReadings([]);
-      return;
-    }
+    setDetailError("");
+    if (activeExperimentId === null || isCached) return;
 
     let cancelled = false;
-    setReadings([]);
-    setDetailLoading(true);
-    setDetailError("");
     const timer = startFetchTimer("fetchExperimentReadings");
-    void fetchExperimentReadings(sessionToken, activeExperimentId)
-      .then((result) => {
-        if (cancelled) return;
-        setReadings(result);
-        timer({ rows: result.length, experiment_id: activeExperimentId, newest_age_s: newestAgeSeconds(result) });
+    // A load the user navigates away from still finishes into the cache.
+    loadExperiment(activeExperimentId)
+      .then((entry) => {
+        timer({ rows: entry.readings.length, experiment_id: activeExperimentId, newest_age_s: newestAgeSeconds(entry.readings) });
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
-        setReadings([]);
-        setDetailError(err instanceof Error ? err.message : "Unable to load experiment readings");
-      })
-      .finally(() => {
-        if (!cancelled) setDetailLoading(false);
+        if (!cancelled) setDetailError(err instanceof Error ? err.message : "Unable to load experiment readings");
       });
 
     return () => {
       cancelled = true;
     };
-  }, [activeExperimentId, sessionToken]);
+  }, [activeExperimentId, isCached, loadExperiment]);
 
   const selectedExperiment = experiments.find((experiment) => experiment.experiment_id === activeExperimentId);
-  const experimentReadings = useMemo(
-    () => activeExperimentId === null
-      ? []
-      : readings.filter((reading) => reading.experiment_id === activeExperimentId),
-    [readings, activeExperimentId],
-  );
+  const experimentReadings = activeEntry?.readings ?? NO_READINGS;
   const availableChambers = useMemo(
     () => getExperimentChambers(experimentReadings, activeExperimentId),
     [experimentReadings, activeExperimentId],
@@ -1044,22 +1261,33 @@ function ExperimentHistoryView({
       {loading && <div className="loading-line" role="status" aria-label="Loading experiments" />}
       {!loading && experiments.length === 0 && <div className="empty compact">No experiments have readings yet.</div>}
       {!loading && experiments.length > 0 && <div className="rows">
-        {visibleExperiments.map((experiment) => <button
-          className="row-button"
-          key={experiment.experiment_id}
-          aria-selected={experiment.experiment_id === activeExperimentId}
-          onClick={() => setSelectedExperimentId((current) => toggleExperimentSelection(current, experiment.experiment_id))}
-        >
-          <span className="row-main">
-            <span className="row-title">{formatExperimentId(experiment.experiment_id)}</span>
-            <span className="row-sub">{experiment.reading_count} chamber readings{isTestingExperiment(experiment.experiment_id) ? " · Testing experiment" : ""}</span>
-          </span>
-          <span className="row-meta">
-            <span className={`pill ${experiment.concluded ? "" : "pos"}`}>{experiment.concluded ? "Concluded" : "Live"}</span>
-            <span className="row-date">Last sample {formatDate(experiment.last_timestamp)}</span>
-          </span>
-          <ChevronIcon />
-        </button>)}
+        {visibleExperiments.map((experiment) => {
+          const rowsSoFar = cache.loading[experiment.experiment_id];
+          const cached = cache.entries[experiment.experiment_id];
+          return <button
+            className="row-button"
+            key={experiment.experiment_id}
+            aria-selected={experiment.experiment_id === activeExperimentId}
+            aria-busy={rowsSoFar !== undefined}
+            onClick={() => setSelectedExperimentId((current) => toggleExperimentSelection(current, experiment.experiment_id))}
+          >
+            <span className="row-main">
+              <span className="row-title">{formatExperimentId(experiment.experiment_id)}</span>
+              <span className="row-sub">
+                Started {formatDate(experiment.first_timestamp)}
+                {rowsSoFar !== undefined
+                  ? <span className="row-loading"> · Loading… {rowsSoFar.toLocaleString()} readings</span>
+                  : cached ? ` · ${cached.readings.length.toLocaleString()} readings loaded` : ""}
+                {isTestingExperiment(experiment.experiment_id) ? " · Testing experiment" : ""}
+              </span>
+            </span>
+            <span className="row-meta">
+              <span className={`pill ${experiment.concluded ? "" : "pos"}`}>{experiment.concluded ? "Concluded" : "Live"}</span>
+              <span className="row-date">Last sample {formatDate(experiment.last_timestamp)}</span>
+            </span>
+            <ChevronIcon />
+          </button>;
+        })}
       </div>}
       {experiments.length > 6 && <div className="more-row">
         <button className="btn ghost" onClick={() => setShowAll((value) => !value)}>{showAll ? `Show fewer` : `Show all ${experiments.length}`}</button>
@@ -1081,7 +1309,7 @@ function ExperimentHistoryView({
             Download CSV
           </button>
         </header>
-        <p className="panel-text">{selectedExperiment.reading_count} chamber readings, sampled between {formatDate(selectedExperiment.first_timestamp)} and {formatDate(selectedExperiment.last_timestamp)}.</p>
+        <p className="panel-text">Sampled between {formatDate(selectedExperiment.first_timestamp)} and {formatDate(selectedExperiment.last_timestamp)}{activeEntry ? `; ${experimentReadings.length.toLocaleString()} chamber readings loaded` : ""}.</p>
         <p className="panel-text">{selectedExperiment.concluded ? "No recent samples, so this experiment is treated as concluded." : "Recent samples are present, so this experiment is treated as live."}</p>
       </section>
 
@@ -1092,10 +1320,15 @@ function ExperimentHistoryView({
       </div>
 
       {detailError && <div className="error-block" role="alert"><span>Unable to load experiment readings. {detailError}</span></div>}
-      {detailLoading && !detailError && <div className="loading-line" role="status" aria-label="Loading experiment readings" />}
+      {detailLoading && !detailError && <div className="loading-block" role="status">
+        <div className="loading-line" aria-hidden="true" />
+        <span>
+          Loading {formatExperimentId(selectedExperiment.experiment_id)}… {(cache.loading[selectedExperiment.experiment_id] ?? 0).toLocaleString()} readings so far
+        </span>
+      </div>}
       {!detailLoading && !detailError && experimentReadings.length === 0 && <div className="empty compact">No readings are available for this experiment.</div>}
-      {isTruncated(experimentReadings.length) && <div className="notice warn">
-        Only the first {MAX_EXPERIMENT_ROWS.toLocaleString()} readings were loaded, so the end of this experiment is missing on screen and any CSV export is truncated too.
+      {activeEntry?.truncated && <div className="notice warn">
+        Only the experiment's most recent day is loaded{experimentReadings[0] ? `, from ${formatDate(experimentReadings[0].timestamp)} onward` : ""}. Earlier samples are missing on screen, in Results, and in any CSV export.
       </div>}
 
       {experimentReadings.length > 0 && historyPanel === "readings" && <>
@@ -1185,11 +1418,6 @@ function csvDisabledReason(rowCount: number, loading: boolean, error: string): s
   return "Download this experiment's readings as CSV";
 }
 
-/** Whether a read hit the row limit and therefore holds only part of the data. */
-function isTruncated(rowCount: number): boolean {
-  return rowCount >= MAX_EXPERIMENT_ROWS;
-}
-
 type ChartInteraction = { index: number; pinned: boolean };
 
 function Chart({ rows, parameter, bottleId, interactive = false }: { rows: Reading[]; parameter: ParameterName; bottleId?: number | null; interactive?: boolean }) {
@@ -1230,8 +1458,35 @@ function Chart({ rows, parameter, bottleId, interactive = false }: { rows: Readi
     };
   })();
 
+  const midY = (plotTop + plotBottom) / 2;
+  const setFromPointer = (event: ReactMouseEvent<SVGRectElement>, pinned: boolean) => {
+    const svg = event.currentTarget.ownerSVGElement;
+    if (!svg) return;
+    const index = nearestIndex(viewBoxX(event.clientX, svg.getBoundingClientRect(), chartWidth), rows.length, plotLeft, plotRight);
+    if (index !== null) setActivePoint({ index, pinned });
+  };
+  const onKeyDown = (event: KeyboardEvent<SVGSVGElement>) => {
+    if (event.key === "Escape") { setActivePoint(null); return; }
+    const index = stepIndex(event.key, activePoint?.index ?? null, rows.length);
+    if (index === null) return;
+    event.preventDefault();
+    setActivePoint({ index, pinned: true });
+  };
+
   return <>
-    <svg ref={svgRef} viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label={`${parameterLabel(parameter)} reading chart`}>
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+      className={interactive ? "chart-interactive" : undefined}
+      role={interactive ? "group" : "img"}
+      aria-roledescription={interactive ? "chart" : undefined}
+      aria-label={interactive
+        ? `${parameterLabel(parameter)} chart, ${rows.length} samples. Arrow keys, Home and End step through samples.`
+        : `${parameterLabel(parameter)} reading chart`}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={interactive ? onKeyDown : undefined}
+      onBlur={interactive ? () => setActivePoint(null) : undefined}
+    >
       {yTicks.map((tick) => <g key={tick}>
         <line x1={plotLeft} x2={plotRight} y1={toY(tick)} y2={toY(tick)} stroke="var(--grid)" strokeWidth="1" />
         <text x={plotLeft - 8} y={toY(tick) + 4} textAnchor="end" fontSize="11" fill="var(--axis-ink)">{formatTick(tick, parameter)}</text>
@@ -1246,29 +1501,42 @@ function Chart({ rows, parameter, bottleId, interactive = false }: { rows: Readi
       <path key={`area-${drawKey}`} className="chart-area draw" d={chartAreaPath(plotted, plotBottom)} fill={`url(#${gradientId})`} />
       {activePointCoords && <line className="chart-guide" x1={activePointCoords.x} x2={activePointCoords.x} y1={plotTop} y2={plotBottom} />}
       <path key={`line-${drawKey}`} className="chart-line draw" pathLength={1} d={chartPath(plotted)} stroke="var(--chart-1)" />
-      {interactive && <g className="chart-points draw" key={`points-${drawKey}`}>{points.map((point, index) => {
-        const reading = rows[index];
-        if (reading === undefined) return null;
-        const selected = activePoint?.index === index;
-        return <circle
-          key={`${reading.timestamp}-${index}`}
-          className={`chart-point${selected ? " is-active" : ""}`}
-          cx={toX(index)}
-          cy={point.y === null ? (plotTop + plotBottom) / 2 : toY(point.value)}
+      {/* Decorative dots, only where samples are far enough apart to read. */}
+      {interactive && showMarkers(rows.length, plotWidth) && <g className="chart-points draw" key={`points-${drawKey}`} aria-hidden="true">
+        {plotted.map((point, index) => <circle
+          key={index}
+          className="chart-point"
+          cx={point.x}
+          cy={point.y ?? midY}
           r={3}
           fill={point.y === null ? "var(--chart-muted)" : "var(--chart-1)"}
           stroke="var(--surface)"
           strokeWidth="1.5"
-          tabIndex={0}
-          role="button"
-          aria-label={`${parameterLabel(parameter)} at ${formatDateTime(reading.timestamp)}`}
-          onMouseEnter={() => setActivePoint({ index, pinned: false })}
-          onMouseLeave={() => setActivePoint((current) => current?.pinned ? current : null)}
-          onFocus={() => setActivePoint({ index, pinned: false })}
-          onBlur={() => setActivePoint((current) => current?.pinned ? current : null)}
-          onClick={() => setActivePoint({ index, pinned: true })}
-        />;
-      })}</g>}
+        />)}
+      </g>}
+      {interactive && activePoint && activePointCoords && <circle
+        className="chart-point is-active"
+        cx={activePointCoords.x}
+        cy={activePointCoords.y}
+        r={3}
+        fill={points[activePoint.index]?.y === null ? "var(--chart-muted)" : "var(--chart-1)"}
+        stroke="var(--surface)"
+        strokeWidth="1.5"
+        aria-hidden="true"
+      />}
+      {/* One hit area for the whole plot: the pointer picks the nearest sample. */}
+      {interactive && <rect
+        className="chart-hit"
+        x={plotLeft}
+        y={plotTop}
+        width={Math.max(0, plotWidth)}
+        height={Math.max(0, plotHeight)}
+        // A mouse hover is transient (a click pins it); a touch drag pins,
+        // since lifting the finger also fires pointerleave.
+        onPointerMove={(event) => setFromPointer(event, event.pointerType !== "mouse")}
+        onPointerLeave={() => setActivePoint((current) => current?.pinned ? current : null)}
+        onClick={(event) => setFromPointer(event, true)}
+      />}
       {labels.map((label, index) => {
         const x = rows.length <= 1 ? (plotLeft + plotRight) / 2 : plotLeft + (index / (labels.length - 1 || 1)) * plotWidth;
         const anchor = index === 0 ? "start" : index === labels.length - 1 ? "end" : "middle";

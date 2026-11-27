@@ -197,10 +197,12 @@ a { color: inherit; text-decoration: none; }
 .chart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chart-area { stroke: none; }
 .chart-guide { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
-.chart-point { cursor: pointer; transition: r var(--m-out) var(--ease); }
+/* Dots are decorative; one transparent .chart-hit rect takes the pointer. */
+.chart-point { pointer-events: none; }
 .chart-point.is-active { r: 5.5px; }
-.chart-point:focus { outline: none; }
-.chart-point:focus-visible { stroke: var(--accent); stroke-width: 2.5; }
+.chart-hit { fill: transparent; cursor: crosshair; touch-action: pan-y; }
+.chart-interactive:focus { outline: none; }
+.chart-interactive:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .chart-tooltip { position: absolute; z-index: 3; pointer-events: none; }
 .chart-tooltip-inner { display: grid; gap: 3px; min-width: 150px; max-width: 220px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: var(--fs-small); line-height: 1.4; font-variant-numeric: tabular-nums; box-shadow: 0 8px 24px rgb(0 0 0 / 0.08); }
 .chart-tooltip-inner .tip-label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
@@ -208,8 +210,10 @@ a { color: inherit; text-decoration: none; }
 .chart-tooltip-inner .tip-time { color: var(--muted); }
 
 /* ---------- compare ---------- */
-.compare-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.compare-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 4px 4px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: var(--fs-small); }
+/* one editable filters row per compared series, stacked */
+.compare-rows { display: grid; gap: 8px; margin-bottom: var(--gap); }
+.compare-row { margin-bottom: 0; }
+.compare-row .compare-remove { margin-left: auto; }
 .compare-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .compare-remove { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0; transition: background-color var(--m-out) var(--ease), color var(--m-out) var(--ease), transform var(--m-press) var(--ease); }
 .compare-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 10px; color: var(--muted); font-size: var(--fs-small); }
@@ -284,6 +288,9 @@ select.input { height: var(--control-height); padding-right: 28px; }
 .loading-line { position: relative; height: 2px; overflow: hidden; border-radius: 2px; background: var(--rule); }
 .loading-line::after { content: ""; position: absolute; inset: 0; width: 40%; background: var(--accent); animation: slide 1.1s var(--ease-io) infinite; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+/* A load long enough to notice: the sliding line plus a running count. */
+.loading-block { display: grid; gap: 10px; padding: 16px; border: 1px dashed var(--control); border-radius: var(--radius-control); color: var(--muted); font-size: var(--fs-small); }
+.row-loading { color: var(--accent); }
 
 /* ---------- login ----------
    One flat background for the whole screen (--ground), split into two areas
@@ -385,8 +392,27 @@ select.input { height: var(--control-height); padding-right: 28px; }
 .login-hint { display: flex; gap: 10px; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--fs-small); line-height: 1.55; }
 .login-hint svg { flex: none; width: 14px; height: 14px; margin-top: 2px; color: var(--faint); }
 
-/* after a sign-in the dashboard fades in over where the login screen was (opacity only, so the fixed drawer is unaffected) */
-.login-handoff { animation: fade 420ms var(--ease-enter) both; }
+/* hidden while the stage's copy of the logo flies to or from it (brandTransition.ts) */
+.rusim-logo.is-held { visibility: hidden; }
+
+/* ---------- logout and sign-in transitions (brandTransition.ts) ----------
+   The stage covers the screen and takes the clicks while a transition plays.
+   Its resting layout is the finished lockup of the product video's end card:
+   the mark, "RuSim" and "In Vitro Rumen Simulator", centred on the page ground.
+   The animations start from or end on this layout. The mark is 9vw wide within
+   88-168px (168px is the video's size at 1920px), and the text follows it.
+   The width is 100vw, which includes the scrollbar, so the lockup keeps its
+   centre when the dashboard (scrollbar) swaps for the login screen (none). */
+.brand-stage { --stage-mark: clamp(88px, 9vw, 168px); position: fixed; inset: 0 auto 0 0; width: 100vw; z-index: 100; display: grid; place-items: center; }
+.brand-stage-ground { position: absolute; inset: 0; background: var(--ground); }
+.brand-stage-lockup { position: relative; display: flex; flex-direction: column; align-items: center; }
+.brand-stage .brand-mark { width: var(--stage-mark); height: var(--stage-mark); }
+.brand-stage-word { margin-top: calc(var(--stage-mark) * 0.14); font-size: calc(var(--stage-mark) * 0.68); line-height: 1.04; font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; }
+.brand-stage-sub { margin-top: calc(var(--stage-mark) * 0.06); font-size: calc(var(--stage-mark) * 0.19); line-height: 1.25; color: var(--muted); white-space: nowrap; }
+/* The camera magnifies the dashboard past the page edges. Clipping keeps that
+   from adding scrollbars mid-zoom. `clip`, unlike `hidden`, makes no scroll
+   container, so the sticky sidebar still sticks to the page. */
+body:has(.brand-stage) .app { overflow: clip; }
 
 @media (hover: hover) and (pointer: fine) {
   .login-input:hover:not(:focus-within) { border-color: var(--border-strong); }
@@ -441,7 +467,6 @@ select.input { height: var(--control-height); padding-right: 28px; }
   tbody tr:hover td { background: var(--raised); }
   .compare-remove:hover { background: var(--raised); color: var(--text); }
   .compare-remove:active { transform: scale(0.9); }
-  .chart-point:hover { r: 5px; }
   .input:hover:not(:focus) { border-color: var(--border-strong); }
 }
 
@@ -504,6 +529,13 @@ select.input { height: var(--control-height); padding-right: 28px; }
   .filters > label { width: 100%; }
   .filters select.input { flex: 1 1 100%; }
   .filters .btn { flex: 1 1 auto; }
+  /* A compare row becomes a small grid: dot and remove beside the first
+     label, each label above its full-width select, rows split by a rule. */
+  .compare-rows { gap: 12px; }
+  .compare-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) 44px; gap: 6px 10px; align-items: center; padding-bottom: 12px; border-bottom: 1px solid var(--rule); }
+  .compare-row > label, .compare-row select.input { grid-column: 2; width: auto; }
+  .compare-row .compare-dot { grid-column: 1; grid-row: 1; }
+  .compare-row .compare-remove { grid-column: 3; grid-row: 1; margin-left: 0; width: 44px; height: 44px; }
   .tabs button { min-height: 44px; }
   .nav-item { height: 44px; }
   .row-button .row-meta .row-date { display: none; }
